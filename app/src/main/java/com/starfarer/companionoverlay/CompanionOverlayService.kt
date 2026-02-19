@@ -108,7 +108,7 @@ class CompanionOverlayService : Service() {
         // Fall back to default
         return assets.open(defaultAsset).use { stream ->
             BitmapFactory.decodeStream(stream)
-        }
+        } ?: Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
     }
 
     private lateinit var windowManager: WindowManager
@@ -269,9 +269,11 @@ class CompanionOverlayService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        saveConversationHistory()
-        PromptSettings.setAvatarX(this, params.x)
-        PromptSettings.setAvatarPosition(this, if (position == OverlayPosition.Left) "left" else "right")
+        if (::params.isInitialized) {
+            saveConversationHistory()
+            PromptSettings.setAvatarX(this, params.x)
+            PromptSettings.setAvatarPosition(this, if (position == OverlayPosition.Left) "left" else "right")
+        }
         isRunning = false
         instance = null
         notifyStateChanged()
@@ -279,9 +281,9 @@ class CompanionOverlayService : Service() {
         handler.removeCallbacks(animationRunnable)
         longPressHandler.removeCallbacksAndMessages(null)
         hideSpeechBubble()
-        try {
-            windowManager.removeView(overlayView)
-        } catch (e: Exception) { }
+        if (::overlayView.isInitialized) {
+            try { windowManager.removeView(overlayView) } catch (_: Exception) { }
+        }
         idleSpriteSheet?.recycle()
         walkSpriteSheet?.recycle()
     }
