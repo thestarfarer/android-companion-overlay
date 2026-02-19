@@ -1,0 +1,252 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="32dp">
+
+    <!-- Top: status + control buttons -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:gravity="center_horizontal">
+
+        <Button
+            android:id="@+id/screenshotPermButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Enable Accessibility Service"
+            android:textSize="12sp"
+            android:paddingHorizontal="16dp"
+            android:layout_marginBottom="8dp"/>
+
+        <!-- Sprite edit buttons row -->
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="8dp">
+
+            <Button
+                android:id="@+id/editIdleSpriteButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Idle Sprite"
+                android:textSize="11sp"
+                android:paddingHorizontal="12dp"
+                android:layout_marginEnd="8dp"/>
+
+            <Button
+                android:id="@+id/editWalkSpriteButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Walk Sprite"
+                android:textSize="11sp"
+                android:paddingHorizontal="12dp"
+                android:layout_marginEnd="8dp"/>
+
+            <Button
+                android:id="@+id/resetSpritesButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Reset"
+                android:textSize="11sp"
+                android:paddingHorizontal="12dp"/>
+
+        </LinearLayout>
+
+        <!-- Prompt edit buttons row -->
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="8dp">
+
+            <Button
+                android:id="@+id/editSystemPromptButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="System Prompt"
+                android:textSize="11sp"
+                android:paddingHorizontal="12dp"
+                android:layout_marginEnd="8dp"/>
+
+            <Button
+                android:id="@+id/editUserMessageButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="User Message"
+                android:textSize="11sp"
+                android:paddingHorizontal="12dp"/>
+
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="8dp">
+
+            <CheckBox
+                android:id="@+id/autoCopyCheckbox"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Auto-copy reply"
+                android:textSize="12sp"
+                android:layout_marginEnd="16dp"/>
+
+            <CheckBox
+                android:id="@+id/keepDialogueCheckbox"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Keep dialogue"
+                android:textSize="12sp"
+                android:layout_marginEnd="16dp"/>
+
+            <CheckBox
+                android:id="@+id/webSearchCheckbox"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Web search"
+                android:textSize="12sp"/>
+
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="8dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Reply timeout:"
+                android:textSize="12sp"
+                android:layout_marginEnd="8dp"/>
+
+            <Spinner
+                android:id="@+id/timeoutSpinner"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"/>
+
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="8dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="History:"
+                android:textSize="12sp"
+                android:layout_marginEnd="8dp"/>
+
+            <Spinner
+                android:id="@+id/historySpinner"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"/>
+
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="16dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Model:"
+                android:textSize="12sp"
+                android:layout_marginEnd="8dp"/>
+
+            <Spinner
+                android:id="@+id/modelSpinner"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"/>
+
+        </LinearLayout>
+
+        <Button
+            android:id="@+id/toggleButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Wake Her Up"
+            android:paddingHorizontal="32dp"
+            android:layout_marginBottom="8dp"/>
+
+        <TextView
+            android:id="@+id/statusText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Senni is sleeping..."
+            android:textSize="20sp"
+            android:gravity="center"/>
+
+    </LinearLayout>
+
+    <!-- Bottom: auth + debug, pushed to bottom -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:gravity="center_horizontal|bottom">
+
+        <TextView
+            android:id="@+id/authStatusText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Not connected to Claude"
+            android:textSize="14sp"
+            android:textColor="#666666"
+            android:gravity="center"
+            android:layout_marginBottom="12dp"/>
+
+        <Button
+            android:id="@+id/authButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Authenticate"
+            android:paddingHorizontal="24dp"
+            android:layout_marginBottom="16dp"/>
+
+        <Button
+            android:id="@+id/testButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Send Test Message"
+            android:paddingHorizontal="24dp"
+            android:enabled="false"
+            android:layout_marginBottom="16dp"/>
+
+        <TextView
+            android:id="@+id/responseText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Authenticate first to hear me speak~"
+            android:textSize="14sp"
+            android:textColor="#666666"
+            android:gravity="center"
+            android:layout_marginBottom="16dp"/>
+
+        <Button
+            android:id="@+id/copyLogButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Copy Debug Log"
+            android:textSize="12sp"
+            android:paddingHorizontal="16dp"/>
+
+    </LinearLayout>
+
+</LinearLayout>

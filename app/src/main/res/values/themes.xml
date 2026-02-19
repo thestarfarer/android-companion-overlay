@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.CompanionOverlay" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">#FFD700</item>
+        <item name="colorPrimaryVariant">#C7A600</item>
+        <item name="colorOnPrimary">#1a1a1a</item>
+        <item name="colorSecondary">#FFD700</item>
+        <item name="colorSecondaryVariant">#C7A600</item>
+        <item name="colorOnSecondary">#1a1a1a</item>
+        <item name="android:statusBarColor">#1a1a1a</item>
+        <item name="android:navigationBarColor">#1a1a1a</item>
+        <item name="android:windowBackground">#1a1a1a</item>
+    </style>
+</resources>

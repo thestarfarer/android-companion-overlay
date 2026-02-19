@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Companion Overlay</string>
+    <string name="accessibility_service_description">Senni uses this to peek at your screen when you long-press her. No data is collected or stored.</string>
+</resources>
