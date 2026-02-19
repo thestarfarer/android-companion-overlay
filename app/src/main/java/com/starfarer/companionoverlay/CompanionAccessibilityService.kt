@@ -10,6 +10,8 @@ import android.os.Looper
 import android.util.Base64
 import android.view.Display
 import android.view.KeyEvent
+import android.provider.Settings
+import android.widget.Toast
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityWindowInfo
 import java.io.ByteArrayOutputStream
@@ -146,6 +148,11 @@ class CompanionAccessibilityService : AccessibilityService() {
             DebugLog.log(TAG, "Hiding Senni~")
             CompanionOverlayService.dismiss()
         } else {
+            if (!Settings.canDrawOverlays(this)) {
+                DebugLog.log(TAG, "No overlay permission, ignoring toggle")
+                Toast.makeText(this, "Grant overlay permission in the app first~", Toast.LENGTH_SHORT).show()
+                return
+            }
             DebugLog.log(TAG, "Summoning Senni~")
             val intent = Intent(this, CompanionOverlayService::class.java)
             startForegroundService(intent)
