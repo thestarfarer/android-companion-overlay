@@ -107,6 +107,7 @@ class CompanionAccessibilityService : AccessibilityService() {
 
     override fun onKeyEvent(event: KeyEvent): Boolean {
         if (event.keyCode != KeyEvent.KEYCODE_VOLUME_DOWN) return false
+        if (!PromptSettings.getVolumeToggle(this)) return false
 
         // Only care about ACTION_DOWN — consume everything
         if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
@@ -169,6 +170,7 @@ class CompanionAccessibilityService : AccessibilityService() {
         }
 
         DebugLog.log(TAG, "Senni's eyes are open~ (flags: ${serviceInfo.flags})")
+        Toast.makeText(this, "Accessibility enabled~ Reboot if volume button toggle doesn't work", Toast.LENGTH_LONG).show()
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {

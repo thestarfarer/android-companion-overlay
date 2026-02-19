@@ -12,7 +12,7 @@ Android overlay app with an animated sprite character that uses Claude AI to com
 - **OAuth authentication** — PKCE flow via browser, encrypted token storage, automatic refresh
 - **Customizable prompts** — Edit system prompt and user message from the app
 - **Custom sprites** — Replace idle/walk sprite sheets with your own PNGs, configurable frame counts
-- **Volume button toggle** — Double-tap volume down to show/hide the overlay
+- **Volume button toggle** — Double-tap volume down to show/hide the overlay; can be disabled from settings (when enabled, intercepts all volume-down events, preventing long-press volume decrease)
 - **Ghost mode** — Becomes semi-transparent and click-through when keyboard is visible
 - **Auto-copy** — Optionally copy Claude responses to clipboard
 - **Configurable bubble timeout** — Reply bubble auto-dismisses after 15/30/60/120 seconds

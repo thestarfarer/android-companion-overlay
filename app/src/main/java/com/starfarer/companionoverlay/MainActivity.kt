@@ -47,6 +47,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var autoCopyCheckbox: CheckBox
     private lateinit var keepDialogueCheckbox: CheckBox
     private lateinit var webSearchCheckbox: CheckBox
+    private lateinit var volumeToggleCheckbox: CheckBox
     private lateinit var editIdleSpriteButton: Button
     private lateinit var editWalkSpriteButton: Button
     private lateinit var resetSpritesButton: Button
@@ -107,6 +108,12 @@ class MainActivity : AppCompatActivity() {
         webSearchCheckbox.isChecked = PromptSettings.getWebSearch(this)
         webSearchCheckbox.setOnCheckedChangeListener { _, isChecked ->
             PromptSettings.setWebSearch(this, isChecked)
+        }
+
+        volumeToggleCheckbox = findViewById(R.id.volumeToggleCheckbox)
+        volumeToggleCheckbox.isChecked = PromptSettings.getVolumeToggle(this)
+        volumeToggleCheckbox.setOnCheckedChangeListener { _, isChecked ->
+            PromptSettings.setVolumeToggle(this, isChecked)
         }
 
         // Bubble timeout selector

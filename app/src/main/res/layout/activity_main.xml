@@ -86,7 +86,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:layout_marginBottom="8dp">
+            android:layout_marginBottom="4dp">
 
             <CheckBox
                 android:id="@+id/autoCopyCheckbox"
@@ -95,6 +95,21 @@
                 android:text="Auto-copy reply"
                 android:textSize="12sp"
                 android:layout_marginEnd="16dp"/>
+
+            <CheckBox
+                android:id="@+id/volumeToggleCheckbox"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Vol. toggle"
+                android:textSize="12sp"/>
+
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="8dp">
 
             <CheckBox
                 android:id="@+id/keepDialogueCheckbox"

@@ -17,6 +17,7 @@ object PromptSettings {
     private const val KEY_MAX_MESSAGES = "max_messages"
     private const val KEY_KEEP_DIALOGUE = "keep_dialogue"
     private const val KEY_WEB_SEARCH = "web_search_enabled"
+    private const val KEY_VOLUME_TOGGLE = "volume_toggle_enabled"
     private const val KEY_CONVERSATION_HISTORY = "conversation_history"
     private const val KEY_AVATAR_X = "avatar_x"
     private const val KEY_AVATAR_POSITION = "avatar_position"
@@ -182,6 +183,14 @@ Keep responses under 280 characters. No emojis. Occasional ~ is fine. No quotati
 
     fun setWebSearch(context: Context, enabled: Boolean) {
         getPrefs(context).edit().putBoolean(KEY_WEB_SEARCH, enabled).apply()
+    }
+
+    fun getVolumeToggle(context: Context): Boolean {
+        return getPrefs(context).getBoolean(KEY_VOLUME_TOGGLE, true)
+    }
+
+    fun setVolumeToggle(context: Context, enabled: Boolean) {
+        getPrefs(context).edit().putBoolean(KEY_VOLUME_TOGGLE, enabled).apply()
     }
 
     fun getConversationHistory(context: Context): String? {
