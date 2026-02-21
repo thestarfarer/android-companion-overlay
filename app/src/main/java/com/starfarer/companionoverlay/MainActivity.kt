@@ -57,6 +57,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var voiceScreenshotCheckbox: CheckBox
     private lateinit var geminiSttCheckbox: CheckBox
     private lateinit var geminiApiKeyEdit: EditText
+    private lateinit var geminiTtsCheckbox: CheckBox
     private lateinit var ttsVoiceButton: Button
     private lateinit var editIdleSpriteButton: Button
     private lateinit var editWalkSpriteButton: Button
@@ -192,6 +193,13 @@ class MainActivity : AppCompatActivity() {
             if (!hasFocus) {
                 PromptSettings.setGeminiApiKey(this, (v as EditText).text.toString())
             }
+        }
+
+        // Gemini TTS
+        geminiTtsCheckbox = findViewById(R.id.geminiTtsCheckbox)
+        geminiTtsCheckbox.isChecked = PromptSettings.getGeminiTts(this)
+        geminiTtsCheckbox.setOnCheckedChangeListener { _, isChecked ->
+            PromptSettings.setGeminiTts(this, isChecked)
         }
 
         ttsVoiceButton = findViewById(R.id.ttsVoiceButton)

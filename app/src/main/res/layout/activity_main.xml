@@ -204,6 +204,14 @@
                     android:textSize="12sp"
                     android:layout_marginEnd="8dp"/>
 
+                <CheckBox
+                    android:id="@+id/geminiTtsCheckbox"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Gemini TTS"
+                    android:textSize="12sp"
+                    android:layout_marginEnd="8dp"/>
+
                 <EditText
                     android:id="@+id/geminiApiKeyEdit"
                     android:layout_width="0dp"
