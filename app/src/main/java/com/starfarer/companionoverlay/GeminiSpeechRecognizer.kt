@@ -29,7 +29,7 @@ import kotlin.math.sqrt
  * - No Google STT quirks (ghost errors, ignored extras)
  *
  * Audio format: 16kHz mono 16-bit PCM, packaged as WAV for Gemini.
- * Silence detection: amplitude RMS below threshold for SILENCE_DURATION_MS.
+ * Silence detection: amplitude RMS below threshold for silenceDurationMs.
  */
 class GeminiSpeechRecognizer(private val context: Context) {
 
@@ -43,8 +43,8 @@ class GeminiSpeechRecognizer(private val context: Context) {
         /** RMS threshold below which audio is considered silence. */
         private const val SILENCE_THRESHOLD = 500.0
 
-        /** How long silence must persist before we stop recording (ms). */
-        private const val SILENCE_DURATION_MS = 1500L
+        /** Default silence duration — overridden by getSilenceTimeoutMs(). */
+        private const val DEFAULT_silenceDurationMs = 1500L
 
         /** Maximum recording duration to prevent huge payloads (ms). */
         private const val MAX_RECORD_MS = 60_000L
@@ -73,6 +73,9 @@ class GeminiSpeechRecognizer(private val context: Context) {
 
     /** Conversation context to inject into the transcription prompt. */
     var conversationContext: String = ""
+
+    /** Silence duration in ms — set from settings before startListening(). */
+    var silenceDurationMs: Long = DEFAULT_silenceDurationMs
 
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
@@ -132,7 +135,7 @@ class GeminiSpeechRecognizer(private val context: Context) {
 
     /**
      * Recording loop: reads PCM buffers, computes RMS, detects silence.
-     * When silence persists for SILENCE_DURATION_MS, stops and transcribes.
+     * When silence persists for silenceDurationMs, stops and transcribes.
      */
     private fun recordAndDetectSilence(bufferSize: Int) {
         val pcmOutput = ByteArrayOutputStream()
@@ -174,7 +177,7 @@ class GeminiSpeechRecognizer(private val context: Context) {
                 // Below threshold — start or continue silence timer
                 if (silenceStartMs == 0L) {
                     silenceStartMs = now
-                } else if (now - silenceStartMs >= SILENCE_DURATION_MS) {
+                } else if (now - silenceStartMs >= silenceDurationMs) {
                     DebugLog.log(TAG, "Silence detected after speech, stopping")
                     break
                 }

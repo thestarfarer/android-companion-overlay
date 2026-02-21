@@ -17,6 +17,7 @@ import android.view.inputmethod.EditorInfo
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.SeekBar
 import androidx.appcompat.app.AlertDialog
 import android.widget.TextView
 import android.widget.AdapterView
@@ -201,6 +202,26 @@ class MainActivity : AppCompatActivity() {
         geminiTtsCheckbox.setOnCheckedChangeListener { _, isChecked ->
             PromptSettings.setGeminiTts(this, isChecked)
         }
+
+        // Silence timeout slider: 0.5s to 4.5s in 0.1s steps (seekbar 0-40)
+        val silenceSeek = findViewById<SeekBar>(R.id.silenceTimeoutSeek)
+        val silenceLabel = findViewById<TextView>(R.id.silenceTimeoutLabel)
+        val savedMs = PromptSettings.getSilenceTimeout(this)
+        val initialProgress = ((savedMs - 500) / 100).toInt().coerceIn(0, 40)
+        silenceSeek.progress = initialProgress
+        silenceLabel.text = "${"%.1f".format(savedMs / 1000.0)}s"
+
+        silenceSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                val ms = (progress * 100L) + 500L
+                silenceLabel.text = "${"%.1f".format(ms / 1000.0)}s"
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {
+                val ms = ((seekBar?.progress ?: 10) * 100L) + 500L
+                PromptSettings.setSilenceTimeout(this@MainActivity, ms)
+            }
+        })
 
         ttsVoiceButton = findViewById(R.id.ttsVoiceButton)
         ttsVoiceButton.setOnClickListener { showVoicePickerDialog() }
