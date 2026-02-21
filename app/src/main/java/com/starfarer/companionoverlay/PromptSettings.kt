@@ -21,6 +21,11 @@ object PromptSettings {
     private const val KEY_CONVERSATION_HISTORY = "conversation_history"
     private const val KEY_AVATAR_X = "avatar_x"
     private const val KEY_AVATAR_POSITION = "avatar_position"
+    private const val KEY_TTS_VOICE = "tts_voice"
+    private const val KEY_TTS_SPEECH_RATE = "tts_speech_rate"
+    private const val KEY_TTS_PITCH = "tts_pitch"
+    private const val KEY_TTS_ENABLED = "tts_enabled"
+    private const val KEY_VOICE_SCREENSHOT = "voice_screenshot_enabled"
 
     const val DEFAULT_MODEL = "claude-sonnet-4-5-20250929"
 
@@ -209,6 +214,22 @@ Keep responses under 280 characters. No emojis. Occasional ~ is fine. No quotati
     fun setAvatarX(context: Context, x: Int) = getPrefs(context).edit().putInt(KEY_AVATAR_X, x).apply()
     fun getAvatarPosition(context: Context): String? = getPrefs(context).getString(KEY_AVATAR_POSITION, null)
     fun setAvatarPosition(context: Context, pos: String) = getPrefs(context).edit().putString(KEY_AVATAR_POSITION, pos).apply()
+
+
+    // TTS settings
+    fun getTtsVoice(context: Context): String? = getPrefs(context).getString(KEY_TTS_VOICE, null)
+    fun setTtsVoice(context: Context, name: String) = getPrefs(context).edit().putString(KEY_TTS_VOICE, name).apply()
+
+    fun getTtsSpeechRate(context: Context): Float = getPrefs(context).getFloat(KEY_TTS_SPEECH_RATE, 1.0f)
+    fun setTtsSpeechRate(context: Context, rate: Float) = getPrefs(context).edit().putFloat(KEY_TTS_SPEECH_RATE, rate).apply()
+
+    fun getTtsPitch(context: Context): Float = getPrefs(context).getFloat(KEY_TTS_PITCH, 1.0f)
+    fun setTtsPitch(context: Context, pitch: Float) = getPrefs(context).edit().putFloat(KEY_TTS_PITCH, pitch).apply()
+
+    fun getTtsEnabled(context: Context): Boolean = getPrefs(context).getBoolean(KEY_TTS_ENABLED, true)
+    fun setTtsEnabled(context: Context, enabled: Boolean) = getPrefs(context).edit().putBoolean(KEY_TTS_ENABLED, enabled).apply()
+    fun getVoiceScreenshot(context: Context): Boolean = getPrefs(context).getBoolean(KEY_VOICE_SCREENSHOT, false)
+    fun setVoiceScreenshot(context: Context, enabled: Boolean) = getPrefs(context).edit().putBoolean(KEY_VOICE_SCREENSHOT, enabled).apply()
 
     fun resetToDefaults(context: Context) {
         getPrefs(context).edit().clear().apply()

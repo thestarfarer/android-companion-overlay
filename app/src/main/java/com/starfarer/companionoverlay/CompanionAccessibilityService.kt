@@ -106,41 +106,66 @@ class CompanionAccessibilityService : AccessibilityService() {
     private var pendingVolumeDown: Runnable? = null
 
     override fun onKeyEvent(event: KeyEvent): Boolean {
+        // --- Shokz / headset button: toggle voice input ---
+        DebugLog.log(TAG, "KEY: code=${event.keyCode} (${KeyEvent.keyCodeToString(event.keyCode)}) action=${event.action} device=${event.device?.name ?: "none"}")
+        if (event.keyCode == KeyEvent.KEYCODE_HEADSETHOOK) {
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                if (CompanionOverlayService.isRunning) {
+                    DebugLog.log(TAG, "Headset button → toggle voice")
+                    CompanionOverlayService.instance?.voiceController?.toggle()
+                    return true
+                }
+            }
+            return false
+        }
+
+        // --- Volume down: double-tap = toggle overlay, triple-tap = toggle voice ---
         if (event.keyCode != KeyEvent.KEYCODE_VOLUME_DOWN) return false
         if (!PromptSettings.getVolumeToggle(this)) return false
 
-        // Only care about ACTION_DOWN — consume everything
         if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
             tapCount++
 
-            // Cancel any pending single-tap replay
+            // Cancel any pending action from previous taps
             pendingVolumeDown?.let { handler.removeCallbacks(it) }
             pendingVolumeDown = null
 
-            if (tapCount >= 2) {
-                // Double tap — toggle, no volume change at all
-                DebugLog.log(TAG, "Double-tap volume down detected!")
+            if (tapCount >= 3) {
+                // Triple-tap — toggle voice input
+                DebugLog.log(TAG, "Triple-tap volume down → toggle voice")
                 tapCount = 0
-                toggleOverlay()
+                if (CompanionOverlayService.isRunning) {
+                    CompanionOverlayService.instance?.voiceController?.toggle()
+                }
             } else {
-                // First tap — wait to see if second comes
-                val replay = Runnable {
-                    DebugLog.log(TAG, "Single tap — replaying volume down")
-                    val audio = getSystemService(AUDIO_SERVICE) as AudioManager
-                    audio.adjustStreamVolume(
-                        AudioManager.STREAM_MUSIC,
-                        AudioManager.ADJUST_LOWER,
-                        AudioManager.FLAG_SHOW_UI
-                    )
+                // Wait to see if more taps are coming
+                val currentCount = tapCount
+                val resolve = Runnable {
+                    when (currentCount) {
+                        1 -> {
+                            // Single tap — replay volume down
+                            DebugLog.log(TAG, "Single tap — replaying volume down")
+                            val audio = getSystemService(AUDIO_SERVICE) as AudioManager
+                            audio.adjustStreamVolume(
+                                AudioManager.STREAM_MUSIC,
+                                AudioManager.ADJUST_LOWER,
+                                AudioManager.FLAG_SHOW_UI
+                            )
+                        }
+                        2 -> {
+                            // Double-tap — toggle overlay
+                            DebugLog.log(TAG, "Double-tap volume down → toggle overlay")
+                            toggleOverlay()
+                        }
+                    }
                     tapCount = 0
                     pendingVolumeDown = null
                 }
-                pendingVolumeDown = replay
-                handler.postDelayed(replay, DOUBLE_TAP_WINDOW_MS)
+                pendingVolumeDown = resolve
+                handler.postDelayed(resolve, DOUBLE_TAP_WINDOW_MS)
             }
         }
 
-        // Consume ALL volume-down events — system never sees them
         return true
     }
 
