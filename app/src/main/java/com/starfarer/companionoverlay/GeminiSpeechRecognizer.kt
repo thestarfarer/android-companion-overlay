@@ -51,7 +51,7 @@ class GeminiSpeechRecognizer(private val context: Context) {
 
         /** Gemini API endpoint. */
         private const val GEMINI_URL =
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent"
     }
 
     // Callbacks — same shape as SpeechRecognitionManager for drop-in swap
