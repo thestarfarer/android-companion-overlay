@@ -42,7 +42,7 @@ class VoiceInputController(private val service: CompanionOverlayService) {
             State.PROCESSING -> {
                 // User wants to interrupt — stop TTS, cancel everything, start fresh
                 DebugLog.log(TAG, "Interrupting processing → start listening")
-                service.ttsManager.stop()
+                service.activeTtsStop()
                 speechManager?.cancel()
                 state = State.IDLE
                 service.hideVoiceBubble()
@@ -85,7 +85,7 @@ class VoiceInputController(private val service: CompanionOverlayService) {
         safetyTimeoutRunnable = Runnable {
             if (state != State.IDLE) {
                 DebugLog.log(TAG, "Safety timeout! Stuck in $state, forcing IDLE")
-                service.ttsManager.stop()
+                service.activeTtsStop()
                 speechManager?.cancel()
                 state = State.IDLE
                 service.hideVoiceBubble()
@@ -104,7 +104,7 @@ class VoiceInputController(private val service: CompanionOverlayService) {
 
     private fun startListening() {
         state = State.LISTENING
-        service.ttsManager.stop()
+        service.activeTtsStop()
         service.showVoiceBubble("Starting...")
 
         if (useGemini) {

@@ -169,6 +169,7 @@ class CompanionOverlayService : Service() {
     lateinit var voiceController: VoiceInputController
         private set
     lateinit var ttsManager: TtsManager
+    lateinit var geminiTtsManager: GeminiTtsManager
         private set
     
     // Dialogue history - reset every app launch
@@ -222,6 +223,7 @@ class CompanionOverlayService : Service() {
         screenshotManager = ScreenshotManager(this)
         voiceController = VoiceInputController(this)
         ttsManager = TtsManager(this)
+        geminiTtsManager = GeminiTtsManager(this)
 
         
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
@@ -278,6 +280,7 @@ class CompanionOverlayService : Service() {
         super.onDestroy()
         voiceController.destroy()
         ttsManager.release()
+        geminiTtsManager.release()
         if (::params.isInitialized) {
             saveConversationHistory()
             PromptSettings.setAvatarX(this, params.x)
@@ -524,12 +527,12 @@ class CompanionOverlayService : Service() {
                 if (ttsEnabled || wasVoice) {
                     pendingBubbleDismiss?.let { handler.removeCallbacks(it) }
                     hideSpeechBubble()
-                    ttsManager.onSpeechDone = {
+                    setActiveTtsOnDone {
                         if (wasVoice) {
                             handler.post { voiceController.onVoiceResponseComplete() }
                         }
                     }
-                    ttsManager.speak(response.text)
+                    activeTtsSpeak(response.text)
                 } else {
                     showLongToast(response.text)
                     voiceController.onVoiceResponseComplete()
@@ -592,7 +595,7 @@ class CompanionOverlayService : Service() {
             speechBubble = bubble
             speechParams = bubbleParams
 
-            bubble.setOnClickListener { ttsManager.stop(); hideSpeechBubble() }
+            bubble.setOnClickListener { activeTtsStop(); hideSpeechBubble() }
             val dismiss = Runnable { hideSpeechBubble() }
             pendingBubbleDismiss = dismiss
             handler.postDelayed(dismiss, durationMs)
@@ -749,7 +752,7 @@ class CompanionOverlayService : Service() {
             }
 
             // Tap response text to dismiss
-            responseText.setOnClickListener { ttsManager.stop(); hideSpeechBubble() }
+            responseText.setOnClickListener { activeTtsStop(); hideSpeechBubble() }
 
             // When EditText is touched, make the overlay focusable so keyboard appears
             replyInput.setOnTouchListener { _, event ->
@@ -852,12 +855,12 @@ class CompanionOverlayService : Service() {
                     hideSpeechBubble()
                     val wasVoice = pendingVoiceReply
                     pendingVoiceReply = false
-                    ttsManager.onSpeechDone = {
+                    setActiveTtsOnDone {
                         if (wasVoice) {
                             handler.post { voiceController.onVoiceResponseComplete() }
                         }
                     }
-                    ttsManager.speak(response.text)
+                    activeTtsSpeak(response.text)
                 } else {
                     // TTS off and typed input — show response bubble
                     pendingVoiceReply = false
@@ -879,6 +882,38 @@ class CompanionOverlayService : Service() {
     private var voiceBubbleParams: WindowManager.LayoutParams? = null
 
     /** Public entry point for voice-transcribed text. Same flow as typed reply. */
+    /** Whether to use Gemini TTS instead of on-device. */
+    private val useGeminiTts: Boolean
+        get() = PromptSettings.getGeminiTts(this) && !PromptSettings.getGeminiApiKey(this).isNullOrBlank()
+
+    /** Speak text through the active TTS engine. */
+    fun activeTtsSpeak(text: String) {
+        if (useGeminiTts) {
+            geminiTtsManager.speak(text)
+        } else {
+            ttsManager.speak(text)
+        }
+    }
+
+    /** Stop the active TTS engine. */
+    fun activeTtsStop() {
+        ttsManager.stop()
+        geminiTtsManager.stop()
+    }
+
+    /** Set onSpeechDone on the active TTS engine. */
+    fun setActiveTtsOnDone(callback: (() -> Unit)?) {
+        if (useGeminiTts) {
+            geminiTtsManager.onSpeechDone = callback
+        } else {
+            ttsManager.onSpeechDone = callback
+        }
+    }
+
+    /** Check if either TTS engine is speaking. */
+    val isActiveTtsSpeaking: Boolean
+        get() = ttsManager.isSpeaking || geminiTtsManager.isSpeaking
+
     /**
      * Build a short text summary of recent conversation for Gemini STT context.
      * This helps Gemini understand domain terms (PLTR, Senni, Kulikovsky, etc.)

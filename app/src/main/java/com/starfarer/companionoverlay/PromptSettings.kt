@@ -28,6 +28,8 @@ object PromptSettings {
     private const val KEY_VOICE_SCREENSHOT = "voice_screenshot_enabled"
     private const val KEY_GEMINI_STT = "gemini_stt_enabled"
     private const val KEY_GEMINI_API_KEY = "gemini_api_key"
+    private const val KEY_GEMINI_TTS = "gemini_tts_enabled"
+    private const val KEY_GEMINI_TTS_VOICE = "gemini_tts_voice"
 
     const val DEFAULT_MODEL = "claude-sonnet-4-5-20250929"
 
@@ -235,6 +237,12 @@ Keep responses under 280 characters. No emojis. Occasional ~ is fine. No quotati
 
     fun getGeminiStt(context: Context): Boolean = getPrefs(context).getBoolean(KEY_GEMINI_STT, false)
     fun setGeminiStt(context: Context, enabled: Boolean) = getPrefs(context).edit().putBoolean(KEY_GEMINI_STT, enabled).apply()
+
+    fun getGeminiTts(context: Context): Boolean = getPrefs(context).getBoolean(KEY_GEMINI_TTS, false)
+    fun setGeminiTts(context: Context, enabled: Boolean) = getPrefs(context).edit().putBoolean(KEY_GEMINI_TTS, enabled).apply()
+
+    fun getGeminiTtsVoice(context: Context): String? = getPrefs(context).getString(KEY_GEMINI_TTS_VOICE, null)
+    fun setGeminiTtsVoice(context: Context, voice: String) = getPrefs(context).edit().putString(KEY_GEMINI_TTS_VOICE, voice).apply()
 
     fun getGeminiApiKey(context: Context): String? = getPrefs(context).getString(KEY_GEMINI_API_KEY, null)
     fun setGeminiApiKey(context: Context, key: String?) {
