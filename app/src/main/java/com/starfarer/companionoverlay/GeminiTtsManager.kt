@@ -49,8 +49,14 @@ class GeminiTtsManager(private val context: Context) {
 
     var onSpeechDone: (() -> Unit)? = null
 
+    /** Called when synthesis or playback fails. Carries the original text for fallback. */
+    var onSpeechError: ((String) -> Unit)? = null
+
     /** Called with status updates: "Synthesizing...", "Speaking...", etc. */
     var onStatusUpdate: ((String) -> Unit)? = null
+
+    /** The text we're currently trying to speak — kept for error fallback. */
+    private var pendingText: String? = null
 
     var isSpeaking: Boolean = false
         private set
@@ -97,6 +103,7 @@ class GeminiTtsManager(private val context: Context) {
 
         stopped.set(false)
         isSpeaking = true
+        pendingText = cleaned
 
         val voiceName = PromptSettings.getGeminiTtsVoice(context) ?: DEFAULT_VOICE
 
@@ -150,7 +157,7 @@ class GeminiTtsManager(private val context: Context) {
                     "HTTP ${response.code}"
                 }
                 DebugLog.log(TAG, "Gemini TTS error: $errorMsg")
-                finishSpeaking()
+                finishWithError(errorMsg)
                 return
             }
 
@@ -167,7 +174,7 @@ class GeminiTtsManager(private val context: Context) {
             } catch (e: Exception) {
                 DebugLog.log(TAG, "Failed to parse TTS response: ${e.message}")
                 DebugLog.log(TAG, "Raw: ${responseBody?.take(300)}")
-                finishSpeaking()
+                finishWithError("parse error")
                 return
             }
 
@@ -181,7 +188,7 @@ class GeminiTtsManager(private val context: Context) {
 
         } catch (e: Exception) {
             DebugLog.log(TAG, "Network error: ${e.message}")
-            finishSpeaking()
+            finishWithError(e.message ?: "network error")
         }
     }
 
@@ -232,7 +239,7 @@ class GeminiTtsManager(private val context: Context) {
             }
         } catch (e: Exception) {
             DebugLog.log(TAG, "AudioTrack error: ${e.message}")
-            finishSpeaking()
+            finishWithError(e.message ?: "playback error")
         }
     }
 
@@ -257,6 +264,25 @@ class GeminiTtsManager(private val context: Context) {
         } catch (_: Exception) {}
         audioTrack = null
         isSpeaking = false
+        pendingText = null
         handler.post { onSpeechDone?.invoke() }
+    }
+
+    private fun finishWithError(reason: String) {
+        try {
+            audioTrack?.release()
+        } catch (_: Exception) {}
+        audioTrack = null
+        isSpeaking = false
+        val text = pendingText
+        pendingText = null
+        DebugLog.log(TAG, "TTS failed ($reason), offering fallback for ${text?.length ?: 0} chars")
+        handler.post {
+            if (text != null) {
+                onSpeechError?.invoke(text)
+            } else {
+                onSpeechDone?.invoke()
+            }
+        }
     }
 }

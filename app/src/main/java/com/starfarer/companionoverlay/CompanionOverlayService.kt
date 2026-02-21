@@ -236,7 +236,14 @@ class CompanionOverlayService : Service() {
                 hideSpeechBubble() // audio started, clear the bubble
             }
         }
-
+        geminiTtsManager.onSpeechError = { failedText ->
+            log("Gemini TTS failed, falling back to on-device TTS")
+            playBeep(BeepManager.Beep.ERROR)
+            // Transfer the onSpeechDone callback to on-device TTS and speak
+            ttsManager.onSpeechDone = geminiTtsManager.onSpeechDone
+            geminiTtsManager.onSpeechDone = null
+            ttsManager.speak(failedText)
+        }
 
         
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
