@@ -28,6 +28,7 @@ class VoiceInputController(private val service: CompanionOverlayService) {
 
     private val handler = Handler(Looper.getMainLooper())
     private var speechManager: SpeechRecognitionManager? = null
+    private var geminiRecognizer: GeminiSpeechRecognizer? = null
 
     /**
      * Toggle voice input. Called from accessibility service (Shokz button).
@@ -54,6 +55,8 @@ class VoiceInputController(private val service: CompanionOverlayService) {
         cancelSafetyTimeout()
         speechManager?.destroy()
         speechManager = null
+        geminiRecognizer?.destroy()
+        geminiRecognizer = null
         state = State.IDLE
     }
 
@@ -62,6 +65,11 @@ class VoiceInputController(private val service: CompanionOverlayService) {
      * Returns to IDLE. The next recording starts only when the user
      * presses the button again.
      */
+    /** Cancel safety timeout when API response arrives — TTS handles its own completion. */
+    fun cancelSafetyTimeoutPublic() {
+        cancelSafetyTimeout()
+    }
+
     fun onVoiceResponseComplete() {
         cancelSafetyTimeout()
         if (state == State.PROCESSING) {
@@ -83,7 +91,7 @@ class VoiceInputController(private val service: CompanionOverlayService) {
                 service.hideVoiceBubble()
             }
         }
-        handler.postDelayed(safetyTimeoutRunnable!!, 60_000L)
+        handler.postDelayed(safetyTimeoutRunnable!!, 300_000L)
     }
 
     private fun cancelSafetyTimeout() {
@@ -91,65 +99,102 @@ class VoiceInputController(private val service: CompanionOverlayService) {
         safetyTimeoutRunnable = null
     }
 
+    private val useGemini: Boolean
+        get() = PromptSettings.getGeminiStt(service)
+
     private fun startListening() {
-        if (speechManager == null) {
-            speechManager = SpeechRecognitionManager(service).apply {
-                onReadyForSpeech = {
-                    handler.post {
-                        service.showVoiceBubble("Listening...")
-                    }
-                }
-
-                onPartialResult = { partial ->
-                    handler.post {
-                        service.updateVoiceBubble(partial)
-                    }
-                }
-
-                onFinalResult = { text ->
-                    handler.post {
-                        DebugLog.log(TAG, "Got speech: ${text.take(80)}")
-                        state = State.PROCESSING
-                        service.hideVoiceBubble()
-                        startSafetyTimeout()
-                        service.sendVoiceInput(text)
-                    }
-                }
-
-                onError = { error ->
-                    handler.post {
-                        DebugLog.log(TAG, "Recognition error: $error")
-                        state = State.IDLE
-                        service.hideVoiceBubble()
-                        service.clearPendingScreenshot()
-                        service.showBriefBubblePublic("Couldn't hear that~ ($error)")
-                    }
-                }
-
-                onStopped = {
-                    handler.post {
-                        // Silence timeout or no match — just go quiet
-                        if (state == State.LISTENING) {
-                            DebugLog.log(TAG, "No speech detected → IDLE")
-                            state = State.IDLE
-                            service.hideVoiceBubble()
-                            service.clearPendingScreenshot()
-                        }
-                    }
-                }
-            }
-        }
-
         state = State.LISTENING
         service.ttsManager.stop()
         service.showVoiceBubble("Starting...")
+
+        if (useGemini) {
+            startGeminiListening()
+        } else {
+            startOnDeviceListening()
+        }
+        DebugLog.log(TAG, "Listening started (${if (useGemini) "Gemini" else "on-device"})")
+    }
+
+    /** Wires up the standard callbacks shared by both recognizers. */
+    private fun wireCallbacks(
+        setOnReady: (() -> Unit) -> Unit,
+        setOnPartial: ((String) -> Unit) -> Unit,
+        setOnFinal: ((String) -> Unit) -> Unit,
+        setOnError: ((String) -> Unit) -> Unit,
+        setOnStopped: (() -> Unit) -> Unit
+    ) {
+        setOnReady {
+            handler.post { service.showVoiceBubble("Listening...") }
+        }
+        setOnPartial { partial ->
+            handler.post { service.updateVoiceBubble(partial) }
+        }
+        setOnFinal { text ->
+            handler.post {
+                DebugLog.log(TAG, "Got speech: ${text.take(80)}")
+                state = State.PROCESSING
+                service.hideVoiceBubble()
+                startSafetyTimeout()
+                service.sendVoiceInput(text)
+            }
+        }
+        setOnError { error ->
+            handler.post {
+                DebugLog.log(TAG, "Recognition error: $error")
+                state = State.IDLE
+                service.hideVoiceBubble()
+                service.clearPendingScreenshot()
+                service.showBriefBubblePublic("Couldn't hear that~ ($error)")
+            }
+        }
+        setOnStopped {
+            handler.post {
+                if (state == State.LISTENING) {
+                    DebugLog.log(TAG, "No speech detected → IDLE")
+                    state = State.IDLE
+                    service.hideVoiceBubble()
+                    service.clearPendingScreenshot()
+                }
+            }
+        }
+    }
+
+    private fun startOnDeviceListening() {
+        if (speechManager == null) {
+            speechManager = SpeechRecognitionManager(service).also { mgr ->
+                wireCallbacks(
+                    { mgr.onReadyForSpeech = it },
+                    { mgr.onPartialResult = it },
+                    { mgr.onFinalResult = it },
+                    { mgr.onError = it },
+                    { mgr.onStopped = it }
+                )
+            }
+        }
         speechManager?.startListening()
-        DebugLog.log(TAG, "Listening started")
+    }
+
+    private fun startGeminiListening() {
+        if (geminiRecognizer == null) {
+            geminiRecognizer = GeminiSpeechRecognizer(service).also { mgr ->
+                wireCallbacks(
+                    { mgr.onReadyForSpeech = it },
+                    { mgr.onPartialResult = it },
+                    { mgr.onFinalResult = it },
+                    { mgr.onError = it },
+                    { mgr.onStopped = it }
+                )
+            }
+        }
+        // Inject conversation context for better transcription
+        geminiRecognizer?.conversationContext = service.getConversationContextForStt()
+        geminiRecognizer?.startListening()
     }
 
     private fun cancelListening() {
         DebugLog.log(TAG, "Cancelling listening")
         speechManager?.cancel()
+        geminiRecognizer?.cancel()
         state = State.IDLE
         service.hideVoiceBubble()
         service.clearPendingScreenshot()

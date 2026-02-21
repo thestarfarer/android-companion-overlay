@@ -13,6 +13,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import android.provider.Settings
 import android.widget.Button
 import android.widget.CheckBox
+import android.view.inputmethod.EditorInfo
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -54,6 +55,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var voicePermButton: Button
     private lateinit var ttsCheckbox: CheckBox
     private lateinit var voiceScreenshotCheckbox: CheckBox
+    private lateinit var geminiSttCheckbox: CheckBox
+    private lateinit var geminiApiKeyEdit: EditText
     private lateinit var ttsVoiceButton: Button
     private lateinit var editIdleSpriteButton: Button
     private lateinit var editWalkSpriteButton: Button
@@ -162,6 +165,33 @@ class MainActivity : AppCompatActivity() {
         voiceScreenshotCheckbox.isChecked = PromptSettings.getVoiceScreenshot(this)
         voiceScreenshotCheckbox.setOnCheckedChangeListener { _, isChecked ->
             PromptSettings.setVoiceScreenshot(this, isChecked)
+        }
+
+        // Gemini STT
+        geminiSttCheckbox = findViewById(R.id.geminiSttCheckbox)
+        geminiSttCheckbox.isChecked = PromptSettings.getGeminiStt(this)
+        geminiSttCheckbox.setOnCheckedChangeListener { _, isChecked ->
+            PromptSettings.setGeminiStt(this, isChecked)
+            geminiApiKeyEdit.isEnabled = isChecked
+        }
+
+        geminiApiKeyEdit = findViewById(R.id.geminiApiKeyEdit)
+        val savedKey = PromptSettings.getGeminiApiKey(this)
+        if (!savedKey.isNullOrBlank()) {
+            geminiApiKeyEdit.setText(savedKey)
+        }
+        geminiApiKeyEdit.isEnabled = PromptSettings.getGeminiStt(this)
+        geminiApiKeyEdit.setOnEditorActionListener { v, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_DONE) {
+                PromptSettings.setGeminiApiKey(this, v.text.toString())
+                v.clearFocus()
+                true
+            } else false
+        }
+        geminiApiKeyEdit.setOnFocusChangeListener { v, hasFocus ->
+            if (!hasFocus) {
+                PromptSettings.setGeminiApiKey(this, (v as EditText).text.toString())
+            }
         }
 
         ttsVoiceButton = findViewById(R.id.ttsVoiceButton)
