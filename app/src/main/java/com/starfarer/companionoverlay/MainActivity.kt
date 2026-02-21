@@ -22,6 +22,9 @@ import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Spinner
 import android.widget.Toast
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
@@ -48,6 +51,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var keepDialogueCheckbox: CheckBox
     private lateinit var webSearchCheckbox: CheckBox
     private lateinit var volumeToggleCheckbox: CheckBox
+    private lateinit var voicePermButton: Button
+    private lateinit var ttsCheckbox: CheckBox
+    private lateinit var voiceScreenshotCheckbox: CheckBox
+    private lateinit var ttsVoiceButton: Button
     private lateinit var editIdleSpriteButton: Button
     private lateinit var editWalkSpriteButton: Button
     private lateinit var resetSpritesButton: Button
@@ -65,6 +72,18 @@ class MainActivity : AppCompatActivity() {
         ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         uri?.let { handleSpriteSelected(it) }
+    }
+
+    private val voicePermLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        val allGranted = results.all { it.value }
+        if (allGranted) {
+            Toast.makeText(this, "Voice input ready~", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(this, "Voice needs microphone permission", Toast.LENGTH_LONG).show()
+        }
+        updateVoicePermUI()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -116,6 +135,37 @@ class MainActivity : AppCompatActivity() {
             PromptSettings.setVolumeToggle(this, isChecked)
         }
 
+        // Voice input permissions
+        voicePermButton = findViewById(R.id.voicePermButton)
+        updateVoicePermUI()
+        voicePermButton.setOnClickListener {
+            if (hasVoicePermissions()) {
+                Toast.makeText(this, "Already granted~", Toast.LENGTH_SHORT).show()
+            } else {
+                val perms = mutableListOf(Manifest.permission.RECORD_AUDIO)
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                    perms.add(Manifest.permission.BLUETOOTH_CONNECT)
+                }
+                voicePermLauncher.launch(perms.toTypedArray())
+            }
+        }
+
+
+        // TTS controls
+        ttsCheckbox = findViewById(R.id.ttsCheckbox)
+        ttsCheckbox.isChecked = PromptSettings.getTtsEnabled(this)
+        ttsCheckbox.setOnCheckedChangeListener { _, isChecked ->
+            PromptSettings.setTtsEnabled(this, isChecked)
+        }
+
+        voiceScreenshotCheckbox = findViewById(R.id.voiceScreenshotCheckbox)
+        voiceScreenshotCheckbox.isChecked = PromptSettings.getVoiceScreenshot(this)
+        voiceScreenshotCheckbox.setOnCheckedChangeListener { _, isChecked ->
+            PromptSettings.setVoiceScreenshot(this, isChecked)
+        }
+
+        ttsVoiceButton = findViewById(R.id.ttsVoiceButton)
+        ttsVoiceButton.setOnClickListener { showVoicePickerDialog() }
         // Bubble timeout selector
         timeoutSpinner = findViewById(R.id.timeoutSpinner)
         timeoutSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, PromptSettings.BUBBLE_TIMEOUT_LABELS)
@@ -189,6 +239,7 @@ class MainActivity : AppCompatActivity() {
                 claudeAuth.isWaitingForCallback() -> {
                     claudeAuth.cancelAuth()
                     updateAuthUI()
+        updateVoicePermUI()
                     Toast.makeText(this, "Cancelled", Toast.LENGTH_SHORT).show()
                 }
                 claudeAuth.isAuthenticated() && System.currentTimeMillis() > claudeAuth.getExpiresAt() -> {
@@ -198,6 +249,7 @@ class MainActivity : AppCompatActivity() {
                         if (result.isSuccess) {
                             Toast.makeText(this@MainActivity, "Token refreshed~", Toast.LENGTH_SHORT).show()
                             updateAuthUI()
+        updateVoicePermUI()
                         } else {
                             claudeAuth.logout()
                             startAuthentication()
@@ -207,6 +259,7 @@ class MainActivity : AppCompatActivity() {
                 claudeAuth.isAuthenticated() -> {
                     claudeAuth.logout()
                     updateAuthUI()
+        updateVoicePermUI()
                     Toast.makeText(this, "Logged out~", Toast.LENGTH_SHORT).show()
                 }
                 else -> {
@@ -257,6 +310,7 @@ class MainActivity : AppCompatActivity() {
         DebugLog.log("Main", "Checking initial auth state...")
         updateUI()
         updateAuthUI()
+        updateVoicePermUI()
     }
 
     override fun onResume() {
@@ -268,6 +322,7 @@ class MainActivity : AppCompatActivity() {
         
         updateUI()
         updateAuthUI()
+        updateVoicePermUI()
     }
     
     override fun onPause() {
@@ -292,6 +347,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateAuthUI() {
+        updateVoicePermUI()
         val isAuth = claudeAuth.isAuthenticated()
         val isWaiting = claudeAuth.isWaitingForCallback()
         DebugLog.log("Main", "updateAuthUI - isAuth: $isAuth, isWaiting: $isWaiting")
@@ -342,12 +398,14 @@ class MainActivity : AppCompatActivity() {
                     DebugLog.log("Main", "Auth progress: $message")
                     responseText.text = message
                     updateAuthUI()
+        updateVoicePermUI()
                 }
 
                 override fun onAuthSuccess() {
                     DebugLog.log("Main", "Auth SUCCESS callback received")
                     Toast.makeText(this@MainActivity, "Connected! ♡", Toast.LENGTH_SHORT).show()
                     updateAuthUI()
+        updateVoicePermUI()
                 }
 
                 override fun onAuthFailure(error: String) {
@@ -355,6 +413,7 @@ class MainActivity : AppCompatActivity() {
                     Toast.makeText(this@MainActivity, "Failed: $error", Toast.LENGTH_LONG).show()
                     responseText.text = "Auth failed: $error"
                     updateAuthUI()
+        updateVoicePermUI()
                 }
             })
         }
@@ -640,6 +699,140 @@ class MainActivity : AppCompatActivity() {
         }
         
         dialog.show()
+    }
+
+
+
+    private fun showVoicePickerDialog() {
+        val tts = TtsManager(this)
+
+        tts.onReady = {
+            val voices = tts.getAvailableVoices()
+            if (voices.isEmpty()) {
+                Toast.makeText(this, "No voices available on this device", Toast.LENGTH_LONG).show()
+                tts.release()
+            } else {
+                val currentVoice = PromptSettings.getTtsVoice(this)
+                val labels = voices.map { it.first }.toTypedArray()
+                val names = voices.map { it.second.name }
+                val checkedIndex = names.indexOf(currentVoice).coerceAtLeast(0)
+                var selectedIndex = checkedIndex
+
+                AlertDialog.Builder(this)
+                    .setTitle("Voice")
+                    .setSingleChoiceItems(labels, checkedIndex) { _, which ->
+                        selectedIndex = which
+                        tts.setVoice(names[which])
+                        tts.speak("Hello~ I'm Senni, your companion.")
+                    }
+                    .setPositiveButton("Select") { _, _ ->
+                        PromptSettings.setTtsVoice(this, names[selectedIndex])
+                        tts.release()
+                    }
+                    .setNeutralButton("Tune") { _, _ ->
+                        PromptSettings.setTtsVoice(this, names[selectedIndex])
+                        tts.release()
+                        showTuningDialog()
+                    }
+                    .setNegativeButton("Cancel") { _, _ -> tts.release() }
+                    .setOnCancelListener { tts.release() }
+                    .show()
+            }
+        }
+    }
+
+    private fun showTuningDialog() {
+        val d = resources.displayMetrics.density
+        val currentRate = PromptSettings.getTtsSpeechRate(this)
+        val currentPitch = PromptSettings.getTtsPitch(this)
+        val tts = TtsManager(this)
+
+        val rateSeek = android.widget.SeekBar(this).apply {
+            max = 150
+            progress = ((currentRate - 0.5f) * 100).toInt()
+        }
+        val pitchSeek = android.widget.SeekBar(this).apply {
+            max = 150
+            progress = ((currentPitch - 0.5f) * 100).toInt()
+        }
+
+        val rateLabel = TextView(this).apply { text = "Speed: %.1fx".format(currentRate); textSize = 13f }
+        val pitchLabel = TextView(this).apply { text = "Pitch: %.1fx".format(currentPitch); textSize = 13f }
+
+        rateSeek.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(sb: android.widget.SeekBar?, progress: Int, fromUser: Boolean) {
+                rateLabel.text = "Speed: %.1fx".format(0.5f + progress / 100f)
+            }
+            override fun onStartTrackingTouch(sb: android.widget.SeekBar?) {}
+            override fun onStopTrackingTouch(sb: android.widget.SeekBar?) {}
+        })
+        pitchSeek.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(sb: android.widget.SeekBar?, progress: Int, fromUser: Boolean) {
+                pitchLabel.text = "Pitch: %.1fx".format(0.5f + progress / 100f)
+            }
+            override fun onStartTrackingTouch(sb: android.widget.SeekBar?) {}
+            override fun onStopTrackingTouch(sb: android.widget.SeekBar?) {}
+        })
+
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val pad = (24 * d).toInt()
+            setPadding(pad, pad, pad, pad)
+            addView(rateLabel)
+            addView(rateSeek)
+            addView(android.view.View(this@MainActivity).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, (16 * d).toInt()
+                )
+            })
+            addView(pitchLabel)
+            addView(pitchSeek)
+        }
+
+        tts.onReady = {
+            AlertDialog.Builder(this)
+                .setTitle("Voice Tuning")
+                .setView(container)
+                .setPositiveButton("Save") { _, _ ->
+                    val rate = 0.5f + rateSeek.progress / 100f
+                    val pitch = 0.5f + pitchSeek.progress / 100f
+                    PromptSettings.setTtsSpeechRate(this, rate)
+                    PromptSettings.setTtsPitch(this, pitch)
+                    tts.release()
+                }
+                .setNeutralButton("Preview") { dialog, _ ->
+                    val rate = 0.5f + rateSeek.progress / 100f
+                    val pitch = 0.5f + pitchSeek.progress / 100f
+                    tts.setSpeechRate(rate)
+                    tts.setPitch(pitch)
+                    tts.speak("This is how I'll sound with these settings~")
+                }
+                .setNegativeButton("Cancel") { _, _ -> tts.release() }
+                .setOnCancelListener { tts.release() }
+                .show()
+        }
+    }
+
+    private fun hasVoicePermissions(): Boolean {
+        val hasMic = ContextCompat.checkSelfPermission(
+            this, Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
+
+        val hasBt = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            ContextCompat.checkSelfPermission(
+                this, Manifest.permission.BLUETOOTH_CONNECT
+            ) == PackageManager.PERMISSION_GRANTED
+        } else true
+
+        return hasMic && hasBt
+    }
+
+    private fun updateVoicePermUI() {
+        voicePermButton.text = if (hasVoicePermissions()) {
+            "\u2713 Voice Input Ready"
+        } else {
+            "Enable Voice Input"
+        }
     }
 
     private fun createNotificationChannel() {

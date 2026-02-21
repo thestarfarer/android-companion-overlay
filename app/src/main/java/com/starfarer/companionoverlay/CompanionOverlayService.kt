@@ -166,6 +166,10 @@ class CompanionOverlayService : Service() {
     private lateinit var claudeAuth: ClaudeAuth
     private lateinit var claudeApi: ClaudeApi
     private lateinit var screenshotManager: ScreenshotManager
+    lateinit var voiceController: VoiceInputController
+        private set
+    lateinit var ttsManager: TtsManager
+        private set
     
     // Dialogue history - reset every app launch
     private val conversationHistory = mutableListOf<JSONObject>()
@@ -216,6 +220,9 @@ class CompanionOverlayService : Service() {
         claudeApi = ClaudeApi(claudeAuth)
         claudeApi.model = PromptSettings.getModel(this)
         screenshotManager = ScreenshotManager(this)
+        voiceController = VoiceInputController(this)
+        ttsManager = TtsManager(this)
+
         
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         
@@ -269,6 +276,8 @@ class CompanionOverlayService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        voiceController.destroy()
+        ttsManager.release()
         if (::params.isInitialized) {
             saveConversationHistory()
             PromptSettings.setAvatarX(this, params.x)
@@ -280,6 +289,7 @@ class CompanionOverlayService : Service() {
         try { unregisterReceiver(screenReceiver) } catch (_: Exception) {}
         handler.removeCallbacks(animationRunnable)
         longPressHandler.removeCallbacksAndMessages(null)
+        hideVoiceBubble()
         hideSpeechBubble()
         if (::overlayView.isInitialized) {
             try { windowManager.removeView(overlayView) } catch (_: Exception) { }
@@ -414,7 +424,17 @@ class CompanionOverlayService : Service() {
                 log("Screenshot result: ${if (base64 != null) "${base64.length} chars" else "null"}")
                 
                 if (base64 != null) {
-                    commentOnScreen(base64)
+                    if (PromptSettings.getVoiceScreenshot(this@CompanionOverlayService)) {
+                        // Store screenshot and start voice input on main thread
+                        handler.post {
+                            pendingScreenshotBase64 = base64
+                            pendingBubbleDismiss?.let { handler.removeCallbacks(it) }
+                            hideSpeechBubble()
+                            voiceController.toggle()
+                        }
+                    } else {
+                        commentOnScreen(base64)
+                    }
                 } else {
                     showBriefBubble("Couldn't peek at your screen...")
                 }
@@ -433,7 +453,7 @@ class CompanionOverlayService : Service() {
         }
     }
 
-    private fun commentOnScreen(imageBase64: String) {
+    private fun commentOnScreen(imageBase64: String, voiceText: String? = null) {
         log("Sending screenshot to Claude (turn ${(conversationHistory.size / 2) + 1})...")
         claudeApi.model = PromptSettings.getModel(this)
         serviceScope.launch {
@@ -451,7 +471,7 @@ class CompanionOverlayService : Service() {
                     })
                     put(JSONObject().apply {
                         put("type", "text")
-                        put("text", PromptSettings.getUserMessage(this@CompanionOverlayService))
+                        put("text", voiceText ?: PromptSettings.getUserMessage(this@CompanionOverlayService))
                     })
                 })
             }
@@ -496,9 +516,27 @@ class CompanionOverlayService : Service() {
                     clipboard.setPrimaryClip(ClipData.newPlainText("Senni", response.text))
                 }
 
-                showLongToast(response.text)
+                // TTS-aware response: speak if enabled, bubble if not
+                val ttsEnabled = PromptSettings.getTtsEnabled(this@CompanionOverlayService)
+                val wasVoice = pendingVoiceReply
+                pendingVoiceReply = false
+                if (ttsEnabled || wasVoice) {
+                    pendingBubbleDismiss?.let { handler.removeCallbacks(it) }
+                    hideSpeechBubble()
+                    ttsManager.onSpeechDone = {
+                        if (wasVoice) {
+                            handler.post { voiceController.onVoiceResponseComplete() }
+                        }
+                    }
+                    ttsManager.speak(response.text)
+                } else {
+                    showLongToast(response.text)
+                    voiceController.onVoiceResponseComplete()
+                }
             } else {
+                pendingVoiceReply = false
                 showBriefBubble("Hmph! ${response.error}")
+                voiceController.onVoiceResponseComplete()
             }
         }
     }
@@ -553,7 +591,7 @@ class CompanionOverlayService : Service() {
             speechBubble = bubble
             speechParams = bubbleParams
 
-            bubble.setOnClickListener { hideSpeechBubble() }
+            bubble.setOnClickListener { ttsManager.stop(); hideSpeechBubble() }
             val dismiss = Runnable { hideSpeechBubble() }
             pendingBubbleDismiss = dismiss
             handler.postDelayed(dismiss, durationMs)
@@ -710,7 +748,7 @@ class CompanionOverlayService : Service() {
             }
 
             // Tap response text to dismiss
-            responseText.setOnClickListener { hideSpeechBubble() }
+            responseText.setOnClickListener { ttsManager.stop(); hideSpeechBubble() }
 
             // When EditText is touched, make the overlay focusable so keyboard appears
             replyInput.setOnTouchListener { _, event ->
@@ -804,11 +842,142 @@ class CompanionOverlayService : Service() {
                     val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                     clipboard.setPrimaryClip(ClipData.newPlainText("Senni", response.text))
                 }
-                showLongToast(response.text)
+                val ttsEnabled = PromptSettings.getTtsEnabled(this@CompanionOverlayService)
+                // When TTS is enabled (or voice input), speak instead of showing bubble
+                if (ttsEnabled || pendingVoiceReply) {
+                    // Dismiss "Thinking..." bubble without stopping TTS
+                    pendingBubbleDismiss?.let { handler.removeCallbacks(it) }
+                    hideSpeechBubble()
+                    val wasVoice = pendingVoiceReply
+                    pendingVoiceReply = false
+                    ttsManager.onSpeechDone = {
+                        if (wasVoice) {
+                            handler.post { voiceController.onVoiceResponseComplete() }
+                        }
+                    }
+                    ttsManager.speak(response.text)
+                } else {
+                    // TTS off and typed input — show response bubble
+                    pendingVoiceReply = false
+                    showLongToast(response.text)
+                    voiceController.onVoiceResponseComplete()
+                }
             } else {
                 showBriefBubble("Hmph! ${response.error}")
             }
         }
+    }
+
+
+    // === Voice input integration ===
+
+    private var voiceBubble: android.widget.TextView? = null
+    private var pendingVoiceReply = false
+    private var pendingScreenshotBase64: String? = null
+    private var voiceBubbleParams: WindowManager.LayoutParams? = null
+
+    /** Public entry point for voice-transcribed text. Same flow as typed reply. */
+    fun sendVoiceInput(text: String) {
+        log("Voice input: ${text.take(80)}")
+        pendingVoiceReply = true
+        val screenshot = pendingScreenshotBase64
+        if (screenshot != null) {
+            // Voice + Screenshot: send both together
+            pendingScreenshotBase64 = null
+            showBriefBubble("Thinking...", 30000L)
+            commentOnScreen(screenshot, text)
+        } else {
+            sendTextReply(text)
+        }
+    }
+
+    /** Called when voice recognition is cancelled while a screenshot was pending */
+    fun clearPendingScreenshot() {
+        pendingScreenshotBase64 = null
+    }
+
+    /** Wrapper so VoiceInputController can show brief bubbles. */
+    fun showBriefBubblePublic(message: String, durationMs: Long = 3000L) {
+        showBriefBubble(message, durationMs)
+    }
+
+    /** Show a persistent voice-listening indicator bubble. */
+    fun showVoiceBubble(text: String) {
+        hideVoiceBubble()
+        val d = resources.displayMetrics.density
+
+        val bgColor: Int
+        val textColor: Int
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            bgColor = resources.getColor(android.R.color.system_accent1_100, theme)
+            textColor = resources.getColor(android.R.color.system_accent1_900, theme)
+        } else {
+            bgColor = 0xFFF5E6D3.toInt()
+            textColor = 0xFF2D1B0E.toInt()
+        }
+
+        val bgWithAlpha = (bgColor and 0x00FFFFFF) or 0xFA000000.toInt()
+        val bgDrawable = android.graphics.drawable.GradientDrawable().apply {
+            setColor(bgWithAlpha)
+            cornerRadius = 20f * d
+        }
+
+        val bubble = android.widget.TextView(this).apply {
+            this.text = "\uD83C\uDF99 $text"  // 🎙
+            setTextColor(textColor)
+            textSize = 13f
+            background = bgDrawable
+            val pad = (10 * d).toInt()
+            setPadding(pad + 8, pad, pad + 8, pad)
+            gravity = android.view.Gravity.CENTER
+        }
+
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = android.view.Gravity.BOTTOM or android.view.Gravity.CENTER_HORIZONTAL
+            y = (120 * d).toInt()
+        }
+
+        try {
+            bubble.alpha = 0f
+            windowManager.addView(bubble, params)
+            bubble.animate().alpha(1f).setDuration(200).start()
+            voiceBubble = bubble
+            voiceBubbleParams = params
+
+            // Tap to cancel listening
+            bubble.setOnClickListener {
+                voiceController.toggle()
+            }
+        } catch (e: Exception) {
+            log("Failed to show voice bubble: ${e.message}")
+        }
+    }
+
+    /** Update the voice bubble text (for partial transcription). */
+    fun updateVoiceBubble(text: String) {
+        voiceBubble?.text = "\uD83C\uDF99 $text"  // 🎙
+    }
+
+    /** Hide the voice bubble. */
+    fun hideVoiceBubble() {
+        voiceBubble?.let { bubble ->
+            bubble.animate()
+                .alpha(0f)
+                .setDuration(150)
+                .withEndAction {
+                    try { windowManager.removeView(bubble) } catch (_: Exception) {}
+                }
+                .start()
+        }
+        voiceBubble = null
+        voiceBubbleParams = null
     }
 
     private fun hideSpeechBubble(animate: Boolean = true) {
