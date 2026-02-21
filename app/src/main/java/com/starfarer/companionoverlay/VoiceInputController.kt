@@ -172,6 +172,7 @@ class VoiceInputController(private val service: CompanionOverlayService) {
                 )
             }
         }
+        speechManager?.silenceTimeoutMs = PromptSettings.getSilenceTimeout(service)
         speechManager?.startListening()
     }
 
@@ -187,7 +188,7 @@ class VoiceInputController(private val service: CompanionOverlayService) {
                 )
             }
         }
-        // Inject conversation context for better transcription
+        geminiRecognizer?.silenceDurationMs = PromptSettings.getSilenceTimeout(service)
         geminiRecognizer?.conversationContext = service.getConversationContextForStt()
         geminiRecognizer?.startListening()
     }

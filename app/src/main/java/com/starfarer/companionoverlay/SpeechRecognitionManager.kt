@@ -26,7 +26,7 @@ class SpeechRecognitionManager(private val context: Context) {
     companion object {
         private const val TAG = "SpeechRec"
         /** How long to wait after last speech before committing. */
-        private const val SILENCE_TIMEOUT_MS = 1000L
+        private const val DEFAULT_SILENCE_TIMEOUT_MS = 1000L
     }
 
     /** Partial transcription as the user speaks — for UI feedback. */
@@ -62,6 +62,9 @@ class SpeechRecognitionManager(private val context: Context) {
     private var commitRunnable: Runnable? = null
     /** Guard against delivering results after explicit cancel/stop. */
     private var cancelled = false
+
+    /** Silence timeout in ms — set from settings before startListening(). */
+    var silenceTimeoutMs: Long = DEFAULT_SILENCE_TIMEOUT_MS
 
     private val listener = object : RecognitionListener {
         override fun onReadyForSpeech(params: Bundle?) {
@@ -251,7 +254,7 @@ class SpeechRecognitionManager(private val context: Context) {
             commitAccumulated()
         }
         commitRunnable = runnable
-        handler.postDelayed(runnable, SILENCE_TIMEOUT_MS)
+        handler.postDelayed(runnable, silenceTimeoutMs)
     }
 
     private fun cancelCommitTimer() {

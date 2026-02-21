@@ -30,6 +30,7 @@ object PromptSettings {
     private const val KEY_GEMINI_API_KEY = "gemini_api_key"
     private const val KEY_GEMINI_TTS = "gemini_tts_enabled"
     private const val KEY_GEMINI_TTS_VOICE = "gemini_tts_voice"
+    private const val KEY_SILENCE_TIMEOUT = "silence_timeout_ms"
 
     const val DEFAULT_MODEL = "claude-sonnet-4-5-20250929"
 
@@ -237,6 +238,10 @@ Keep responses under 280 characters. No emojis. Occasional ~ is fine. No quotati
 
     fun getGeminiStt(context: Context): Boolean = getPrefs(context).getBoolean(KEY_GEMINI_STT, false)
     fun setGeminiStt(context: Context, enabled: Boolean) = getPrefs(context).edit().putBoolean(KEY_GEMINI_STT, enabled).apply()
+
+    /** Silence timeout in ms. Default 1500 for Gemini, 1000 for on-device. */
+    fun getSilenceTimeout(context: Context): Long = getPrefs(context).getLong(KEY_SILENCE_TIMEOUT, 1500L)
+    fun setSilenceTimeout(context: Context, ms: Long) = getPrefs(context).edit().putLong(KEY_SILENCE_TIMEOUT, ms).apply()
 
     fun getGeminiTts(context: Context): Boolean = getPrefs(context).getBoolean(KEY_GEMINI_TTS, false)
     fun setGeminiTts(context: Context, enabled: Boolean) = getPrefs(context).edit().putBoolean(KEY_GEMINI_TTS, enabled).apply()
