@@ -30,6 +30,10 @@ class VoiceInputController(private val service: CompanionOverlayService) {
     private var speechManager: SpeechRecognitionManager? = null
     private var geminiRecognizer: GeminiSpeechRecognizer? = null
     private val btRouter = BluetoothAudioRouter(service)
+    private val beepManager = BeepManager()
+
+    private val beepsEnabled: Boolean
+        get() = PromptSettings.getBeepsEnabled(service)
 
     /**
      * Toggle voice input. Called from accessibility service (Shokz button).
@@ -133,10 +137,19 @@ class VoiceInputController(private val service: CompanionOverlayService) {
     ) {
         setOnReady {
             val label = if (useGemini) "🎤 Recording..." else "Listening..."
-            handler.post { service.showVoiceBubble(label) }
+            handler.post {
+                service.showVoiceBubble(label)
+                if (beepsEnabled) beepManager.play(BeepManager.Beep.READY)
+            }
         }
         setOnPartial { partial ->
-            handler.post { service.updateVoiceBubble(partial) }
+            handler.post {
+                service.updateVoiceBubble(partial)
+                // Beep when silence detected and transcription begins (Gemini STT)
+                if (partial == "Transcribing..." && beepsEnabled) {
+                    beepManager.play(BeepManager.Beep.STEP)
+                }
+            }
         }
         setOnFinal { text ->
             handler.post {
@@ -144,13 +157,15 @@ class VoiceInputController(private val service: CompanionOverlayService) {
                 state = State.PROCESSING
                 service.hideVoiceBubble()
                 startSafetyTimeout()
-                btRouter.clearRouting()
                 service.sendVoiceInput(text)
+                // Delay BT clear so Thinking beep plays through SCO
+                handler.postDelayed({ btRouter.clearRouting() }, 300)
             }
         }
         setOnError { error ->
             handler.post {
                 DebugLog.log(TAG, "Recognition error: $error")
+                if (beepsEnabled) beepManager.play(BeepManager.Beep.ERROR)
                 state = State.IDLE
                 btRouter.clearRouting()
                 service.hideVoiceBubble()
