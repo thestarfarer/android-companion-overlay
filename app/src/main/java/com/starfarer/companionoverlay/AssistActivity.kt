@@ -11,6 +11,11 @@ import android.os.Bundle
  * long-press home, Shokz button, swipe gesture, whatever the device maps
  * to the assistant trigger. We start the overlay if needed, toggle voice,
  * and finish immediately. No UI of our own.
+ *
+ * Known limitation: launching any Activity steals foreground focus, which
+ * makes YouTube exit fullscreen into PiP. No workaround exists for
+ * ACTION_VOICE_COMMAND on stock Android — the intent requires an Activity
+ * target. Use triple-tap volume down instead when watching fullscreen video.
  */
 class AssistActivity : Activity() {
 
