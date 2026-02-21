@@ -491,6 +491,7 @@ class CompanionOverlayService : Service() {
             log("Claude response: success=${response.success}, text=${response.text.take(50)}, error=${response.error}")
             
             if (response.success) {
+                voiceController.cancelSafetyTimeoutPublic()
                 // Save both user message and companion response to history
                 conversationHistory.add(userMessage)
                 conversationHistory.add(JSONObject().apply {
@@ -826,6 +827,7 @@ class CompanionOverlayService : Service() {
             val response = claudeApi.sendConversation(messagesArray, systemPrompt, webSearch)
 
             if (response.success) {
+                voiceController.cancelSafetyTimeoutPublic()
                 conversationHistory.add(userMessage)
                 conversationHistory.add(JSONObject().apply {
                     put("role", "assistant")
@@ -877,6 +879,29 @@ class CompanionOverlayService : Service() {
     private var voiceBubbleParams: WindowManager.LayoutParams? = null
 
     /** Public entry point for voice-transcribed text. Same flow as typed reply. */
+    /**
+     * Build a short text summary of recent conversation for Gemini STT context.
+     * This helps Gemini understand domain terms (PLTR, Senni, Kulikovsky, etc.)
+     */
+    fun getConversationContextForStt(): String {
+        // Take last 6 messages (3 turns) — enough for context without bloating the request
+        val recent = conversationHistory.takeLast(6)
+        if (recent.isEmpty()) return ""
+
+        return buildString {
+            for (msg in recent) {
+                val role = msg.optString("role", "user")
+                val text = msg.optString("content", "")
+                // For messages with image content (JSONArray), extract just text parts
+                if (text.isNotBlank()) {
+                    val label = if (role == "assistant") "Assistant" else "User"
+                    // Truncate each message to keep context manageable
+                    appendLine("$label: ${text.take(200)}")
+                }
+            }
+        }.trim()
+    }
+
     fun sendVoiceInput(text: String) {
         log("Voice input: ${text.take(80)}")
         pendingVoiceReply = true

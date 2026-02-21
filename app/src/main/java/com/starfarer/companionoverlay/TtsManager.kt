@@ -60,20 +60,24 @@ class TtsManager(private val context: Context) {
             }
 
             override fun onDone(utteranceId: String?) {
-                isSpeaking = false
-                onSpeechDone?.invoke()
+                DebugLog.log(TAG, "Chunk done: $utteranceId")
+                // Only fire completion when the FINAL chunk finishes
+                if (utteranceId == UTTERANCE_ID) {
+                    isSpeaking = false
+                    onSpeechDone?.invoke()
+                }
             }
 
             @Deprecated("Deprecated in API 21")
             override fun onError(utteranceId: String?) {
                 isSpeaking = false
-                DebugLog.log(TAG, "TTS error on utterance")
+                DebugLog.log(TAG, "TTS error on utterance: $utteranceId")
                 onSpeechDone?.invoke()
             }
 
             override fun onError(utteranceId: String?, errorCode: Int) {
                 isSpeaking = false
-                DebugLog.log(TAG, "TTS error: $errorCode")
+                DebugLog.log(TAG, "TTS error: $errorCode on $utteranceId")
                 onSpeechDone?.invoke()
             }
         })
@@ -107,8 +111,42 @@ class TtsManager(private val context: Context) {
             putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f)
         }
 
-        tts?.speak(cleaned, TextToSpeech.QUEUE_FLUSH, params, UTTERANCE_ID)
-        DebugLog.log(TAG, "Speaking: ${cleaned.take(60)}...")
+        val maxLen = TextToSpeech.getMaxSpeechInputLength()
+        DebugLog.log(TAG, "Speaking: ${cleaned.length} chars (max=$maxLen): ${cleaned.take(60)}...")
+
+        if (cleaned.length <= maxLen) {
+            val result = tts?.speak(cleaned, TextToSpeech.QUEUE_FLUSH, params, UTTERANCE_ID)
+            if (result != TextToSpeech.SUCCESS) {
+                DebugLog.log(TAG, "speak() returned error: $result")
+            }
+        } else {
+            // Chunk at sentence boundaries to stay under the limit
+            val chunks = mutableListOf<String>()
+            var remaining = cleaned
+            while (remaining.isNotEmpty()) {
+                if (remaining.length <= maxLen) {
+                    chunks.add(remaining)
+                    break
+                }
+                // Find last sentence break before maxLen
+                val slice = remaining.substring(0, maxLen)
+                val breakIdx = maxOf(
+                    slice.lastIndexOf(". "),
+                    slice.lastIndexOf("! "),
+                    slice.lastIndexOf("? "),
+                    slice.lastIndexOf("\n")
+                )
+                val splitAt = if (breakIdx > maxLen / 2) breakIdx + 1 else maxLen
+                chunks.add(remaining.substring(0, splitAt).trim())
+                remaining = remaining.substring(splitAt).trim()
+            }
+            DebugLog.log(TAG, "Split into ${chunks.size} chunks")
+            chunks.forEachIndexed { i, chunk ->
+                val mode = if (i == 0) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
+                val id = if (i == chunks.size - 1) UTTERANCE_ID else "${UTTERANCE_ID}_$i"
+                tts?.speak(chunk, mode, params, id)
+            }
+        }
     }
 
     /** Stop any current speech immediately. */
