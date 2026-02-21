@@ -81,7 +81,10 @@ class GeminiSpeechRecognizer(private val context: Context) {
         .build()
 
     fun startListening() {
-        if (isListening) return
+        if (isListening) {
+            DebugLog.log(TAG, "Still listening from previous session, force-stopping")
+            cancel()
+        }
         cancelled = false
 
         val bufferSize = maxOf(
@@ -116,7 +119,11 @@ class GeminiSpeechRecognizer(private val context: Context) {
         audioRecord?.startRecording()
 
         DebugLog.log(TAG, "Recording started (16kHz mono PCM)")
-        handler.post { onReadyForSpeech?.invoke() }
+        handler.post {
+            onReadyForSpeech?.invoke()
+            // Immediately show recording state — we ARE recording, not "listening"
+            onPartialResult?.invoke("🎤 Recording...")
+        }
 
         recordingThread = Thread({
             recordAndDetectSilence(bufferSize)

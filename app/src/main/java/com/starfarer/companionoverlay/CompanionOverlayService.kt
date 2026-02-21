@@ -224,6 +224,13 @@ class CompanionOverlayService : Service() {
         voiceController = VoiceInputController(this)
         ttsManager = TtsManager(this)
         geminiTtsManager = GeminiTtsManager(this)
+        geminiTtsManager.onStatusUpdate = { status ->
+            if (status.isNotEmpty()) {
+                showBriefBubble(status, 30000L) // stays until cleared or audio plays
+            } else {
+                hideSpeechBubble() // audio started, clear the bubble
+            }
+        }
 
         
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
