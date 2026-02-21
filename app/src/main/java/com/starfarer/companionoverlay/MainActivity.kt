@@ -56,6 +56,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var voicePermButton: Button
     private lateinit var ttsCheckbox: CheckBox
     private lateinit var voiceScreenshotCheckbox: CheckBox
+    private lateinit var beepsCheckbox: CheckBox
     private lateinit var geminiSttCheckbox: CheckBox
     private lateinit var geminiApiKeyEdit: EditText
     private lateinit var geminiTtsCheckbox: CheckBox
@@ -167,6 +168,12 @@ class MainActivity : AppCompatActivity() {
         voiceScreenshotCheckbox.isChecked = PromptSettings.getVoiceScreenshot(this)
         voiceScreenshotCheckbox.setOnCheckedChangeListener { _, isChecked ->
             PromptSettings.setVoiceScreenshot(this, isChecked)
+        }
+
+        beepsCheckbox = findViewById(R.id.beepsCheckbox)
+        beepsCheckbox.isChecked = PromptSettings.getBeepsEnabled(this)
+        beepsCheckbox.setOnCheckedChangeListener { _, isChecked ->
+            PromptSettings.setBeepsEnabled(this, isChecked)
         }
 
         // Gemini STT

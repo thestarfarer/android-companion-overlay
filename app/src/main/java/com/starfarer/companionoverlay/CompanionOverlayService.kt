@@ -171,6 +171,7 @@ class CompanionOverlayService : Service() {
     lateinit var ttsManager: TtsManager
     lateinit var geminiTtsManager: GeminiTtsManager
         private set
+    private val beepManager = BeepManager()
     
     // Dialogue history - reset every app launch
     private val conversationHistory = mutableListOf<JSONObject>()
@@ -527,6 +528,7 @@ class CompanionOverlayService : Service() {
                     clipboard.setPrimaryClip(ClipData.newPlainText("Senni", response.text))
                 }
 
+                playBeep(BeepManager.Beep.STEP)
                 // TTS-aware response: speak if enabled, bubble if not
                 val ttsEnabled = PromptSettings.getTtsEnabled(this@CompanionOverlayService)
                 val wasVoice = pendingVoiceReply
@@ -535,6 +537,7 @@ class CompanionOverlayService : Service() {
                     pendingBubbleDismiss?.let { handler.removeCallbacks(it) }
                     hideSpeechBubble()
                     setActiveTtsOnDone {
+                        playBeep(BeepManager.Beep.DONE)
                         if (wasVoice) {
                             handler.post { voiceController.onVoiceResponseComplete() }
                         }
@@ -545,6 +548,7 @@ class CompanionOverlayService : Service() {
                     voiceController.onVoiceResponseComplete()
                 }
             } else {
+                playBeep(BeepManager.Beep.ERROR)
                 pendingVoiceReply = false
                 showBriefBubble("Hmph! ${response.error}")
                 voiceController.onVoiceResponseComplete()
@@ -820,6 +824,7 @@ class CompanionOverlayService : Service() {
         val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
         speechBubble?.windowToken?.let { imm.hideSoftInputFromWindow(it, 0) }
         hideSpeechBubble()
+        playBeep(BeepManager.Beep.STEP)
         showBriefBubble("Thinking...", 30000L)
 
         serviceScope.launch {
@@ -854,6 +859,7 @@ class CompanionOverlayService : Service() {
                     val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                     clipboard.setPrimaryClip(ClipData.newPlainText("Senni", response.text))
                 }
+                playBeep(BeepManager.Beep.STEP)
                 val ttsEnabled = PromptSettings.getTtsEnabled(this@CompanionOverlayService)
                 // When TTS is enabled (or voice input), speak instead of showing bubble
                 if (ttsEnabled || pendingVoiceReply) {
@@ -863,6 +869,7 @@ class CompanionOverlayService : Service() {
                     val wasVoice = pendingVoiceReply
                     pendingVoiceReply = false
                     setActiveTtsOnDone {
+                        playBeep(BeepManager.Beep.DONE)
                         if (wasVoice) {
                             handler.post { voiceController.onVoiceResponseComplete() }
                         }
@@ -875,6 +882,7 @@ class CompanionOverlayService : Service() {
                     voiceController.onVoiceResponseComplete()
                 }
             } else {
+                playBeep(BeepManager.Beep.ERROR)
                 showBriefBubble("Hmph! ${response.error}")
             }
         }
@@ -889,6 +897,16 @@ class CompanionOverlayService : Service() {
     private var voiceBubbleParams: WindowManager.LayoutParams? = null
 
     /** Public entry point for voice-transcribed text. Same flow as typed reply. */
+    /** Whether beeps are enabled. */
+    private val beepsEnabled: Boolean
+        get() = PromptSettings.getBeepsEnabled(this)
+
+    /** Play a beep if enabled. */
+    fun playBeep(beep: BeepManager.Beep) {
+        log("playBeep($beep) enabled=$beepsEnabled")
+        if (beepsEnabled) beepManager.play(beep)
+    }
+
     /** Whether to use Gemini TTS instead of on-device. */
     private val useGeminiTts: Boolean
         get() = PromptSettings.getGeminiTts(this) && !PromptSettings.getGeminiApiKey(this).isNullOrBlank()
@@ -965,6 +983,7 @@ class CompanionOverlayService : Service() {
         if (screenshot != null) {
             // Voice + Screenshot: send both together
             pendingScreenshotBase64 = null
+            playBeep(BeepManager.Beep.STEP)
             showBriefBubble("Thinking...", 30000L)
             commentOnScreen(screenshot, text)
         } else {
