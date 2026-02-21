@@ -26,6 +26,7 @@ import org.json.JSONObject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 class CompanionOverlayService : Service() {
@@ -165,6 +166,9 @@ class CompanionOverlayService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private lateinit var claudeAuth: ClaudeAuth
     private lateinit var claudeApi: ClaudeApi
+
+    /** Tracks the in-flight Claude API coroutine so we can cancel it. */
+    private var activeRequestJob: Job? = null
     private lateinit var screenshotManager: ScreenshotManager
     lateinit var voiceController: VoiceInputController
         private set
@@ -232,6 +236,7 @@ class CompanionOverlayService : Service() {
                 hideSpeechBubble() // audio started, clear the bubble
             }
         }
+
 
         
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
@@ -467,7 +472,8 @@ class CompanionOverlayService : Service() {
     private fun commentOnScreen(imageBase64: String, voiceText: String? = null) {
         log("Sending screenshot to Claude (turn ${(conversationHistory.size / 2) + 1})...")
         claudeApi.model = PromptSettings.getModel(this)
-        serviceScope.launch {
+        cancelActiveRequest()
+        activeRequestJob = serviceScope.launch {
             // Build this turn's user message with image
             val userMessage = JSONObject().apply {
                 put("role", "user")
@@ -547,6 +553,13 @@ class CompanionOverlayService : Service() {
                     showLongToast(response.text)
                     voiceController.onVoiceResponseComplete()
                 }
+            } else if (response.error == "Cancelled") {
+                // Request was cancelled by a new one — stay silent
+                log("Request cancelled, suppressing error")
+                pendingVoiceReply = false
+            } else if (response.error == "Cancelled") {
+                log("Request cancelled, suppressing error")
+                pendingVoiceReply = false
             } else {
                 playBeep(BeepManager.Beep.ERROR)
                 pendingVoiceReply = false
@@ -827,7 +840,8 @@ class CompanionOverlayService : Service() {
         playBeep(BeepManager.Beep.STEP)
         showBriefBubble("Thinking...", 30000L)
 
-        serviceScope.launch {
+        cancelActiveRequest()
+        activeRequestJob = serviceScope.launch {
             val userMessage = JSONObject().apply {
                 put("role", "user")
                 put("content", text)
@@ -901,6 +915,18 @@ class CompanionOverlayService : Service() {
     private val beepsEnabled: Boolean
         get() = PromptSettings.getBeepsEnabled(this)
 
+    /** Cancel any in-flight Claude API request (coroutine + HTTP call). */
+    private fun cancelActiveRequest() {
+        activeRequestJob?.let { job ->
+            if (job.isActive) {
+                log("Cancelling active request")
+                job.cancel()
+                claudeApi.cancelPending()
+            }
+        }
+        activeRequestJob = null
+    }
+
     /** Play a beep if enabled. */
     fun playBeep(beep: BeepManager.Beep) {
         log("playBeep($beep) enabled=$beepsEnabled")
@@ -924,6 +950,7 @@ class CompanionOverlayService : Service() {
     fun activeTtsStop() {
         ttsManager.stop()
         geminiTtsManager.stop()
+        cancelActiveRequest()
     }
 
     /** Set onSpeechDone on the active TTS engine. */

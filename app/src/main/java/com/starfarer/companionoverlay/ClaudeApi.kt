@@ -1,9 +1,11 @@
 package com.starfarer.companionoverlay
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
+import okhttp3.Call
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
@@ -68,6 +70,20 @@ class ClaudeApi(private val auth: ClaudeAuth) {
         .readTimeout(300, TimeUnit.SECONDS)
         .writeTimeout(60, TimeUnit.SECONDS)
         .build()
+
+    @Volatile
+    private var activeCall: Call? = null
+
+    /** Cancel any in-flight API request. Safe to call from any thread. */
+    fun cancelPending() {
+        activeCall?.let { call ->
+            if (!call.isCanceled()) {
+                log("Cancelling in-flight request")
+                call.cancel()
+            }
+        }
+        activeCall = null
+    }
 
     data class ApiResponse(
         val success: Boolean,
@@ -142,7 +158,10 @@ class ClaudeApi(private val auth: ClaudeAuth) {
                 .build()
 
             log("Executing request...")
-            val response = httpClient.newCall(request).execute()
+            val call = httpClient.newCall(request)
+            activeCall = call
+            val response = call.execute()
+            activeCall = null
 
             log("Response code: ${response.code}")
 
@@ -168,7 +187,22 @@ class ClaudeApi(private val auth: ClaudeAuth) {
             log("Response text: ${responseText.take(100)}...")
 
             ApiResponse(true, responseText)
+        } catch (e: CancellationException) {
+            log("Request cancelled")
+            activeCall = null
+            throw e  // Re-throw so coroutine machinery handles it
+        } catch (e: java.io.IOException) {
+            activeCall = null
+            if (e.message?.contains("Canceled") == true || e.message?.contains("canceled") == true) {
+                log("Request cancelled (HTTP)")
+                // Return a silent cancellation — not a real error
+                ApiResponse(false, "", "Cancelled")
+            } else {
+                log("API IO exception: ${e.message}")
+                ApiResponse(false, "", e.message ?: "Network error")
+            }
         } catch (e: Exception) {
+            activeCall = null
             log("API exception: ${e::class.simpleName}: ${e.message}")
             ApiResponse(false, "", e.message ?: "Unknown error")
         }
