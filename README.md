@@ -15,7 +15,7 @@ Android overlay companion app — an animated sprite character powered by Claude
 
 ### Voice
 - **Triple-tap voice input** — Triple-tap volume down to start/stop voice recording
-- **Bluetooth headset support** — Registered as device digital assistant; Shokz OpenComm long-press triggers voice input
+- **Bluetooth headset support** — Registered as device digital assistant; Shokz OpenComm long-press triggers voice input. Mic input routed via `setCommunicationDevice` (Android 12+) — records through BT headset mic with wideband 16kHz mSBC codec. Falls back to built-in mic when no headset connected
 - **Dual STT engines:**
   - **On-device** (Google SpeechRecognizer) — Zero latency, offline capable, free. Has profanity filter (mitigated with dictionary decensor + regex fallback). Grabs audio focus (pauses media)
   - **Gemini STT** (gemini-2.5-flash-lite) — Context-aware transcription using conversation history for better name/term recognition. No audio focus grab (YouTube keeps playing). No profanity filter. Requires API key
@@ -25,6 +25,9 @@ Android overlay companion app — an animated sprite character powered by Claude
 - **Segment accumulation** — Custom silence detection with configurable timeout (0.1s–5.0s). On-device recognizer restarts and accumulates segments across silence gaps for natural speech capture
 - **Voice + Screenshot** — Capture screen then speak: screenshot and voice text sent together to Claude
 - **TTS-aware responses** — "Thinking..." bubble during API call, auto-dismissed when speech starts. Long responses chunked at sentence boundaries with proper completion tracking
+- **Pipeline beep feedback** — Synthesized tones at each voice pipeline stage: ready (880Hz), step (660→880Hz ascending), done (triple rise), error (440→330Hz descending). Plays through BT SCO while headset is active. Togglable from UI
+- **Gemini TTS fallback** — On Gemini TTS failure (server error, network, quota), automatically falls back to on-device TTS with the same text. ERROR beep signals the switch
+- **Request cancellation** — New voice input cancels any in-flight Claude API request (coroutine + HTTP socket). Prevents ghost responses from stale requests
 
 ### UI & Controls
 - **Volume button toggle** — Double-tap: show/hide overlay. Triple-tap: voice input
@@ -69,6 +72,8 @@ Free tier limits:
 | `ClaudeAuth` | OAuth 2.0 PKCE, EncryptedSharedPreferences, token refresh |
 | `ClaudeApi` | Anthropic Messages API, multi-turn conversation, web search support |
 | `VoiceInputController` | State machine (IDLE→LISTENING→PROCESSING), dual-engine routing, safety timeouts |
+| `BluetoothAudioRouter` | BT headset mic routing via setCommunicationDevice (API 31+), SCO/BLE discovery |
+| `BeepManager` | Synthesized sine wave feedback tones via AudioTrack MODE_STATIC |
 | `SpeechRecognitionManager` | On-device STT with segment accumulation and silence detection |
 | `GeminiSpeechRecognizer` | AudioRecord → WAV → Gemini flash-lite transcription with conversation context |
 | `TtsManager` | Android TTS with voice selection, text chunking, utterance tracking |
@@ -96,6 +101,8 @@ app/src/main/
 │   ├── VoiceInputController.kt
 │   ├── SpeechRecognitionManager.kt
 │   ├── GeminiSpeechRecognizer.kt
+│   ├── BluetoothAudioRouter.kt
+│   ├── BeepManager.kt
 │   ├── TtsManager.kt
 │   ├── GeminiTtsManager.kt
 │   ├── ScreenshotManager.kt
@@ -123,7 +130,7 @@ app/src/main/
 
 | Setting | Value |
 |---|---|
-| Min SDK | 30 (Android 11) |
+| Min SDK | 31 (Android 12) |
 | Target/Compile SDK | 34 (Android 14) |
 | Kotlin | 1.9.21 |
 
@@ -131,7 +138,10 @@ app/src/main/
 
 - **Headset button + fullscreen video** — Long-pressing Shokz headset button triggers AssistActivity, which steals foreground focus and causes YouTube to enter PiP. This is an Android platform limitation: ACTION_VOICE_COMMAND requires an Activity target. Use triple-tap volume down instead when watching fullscreen video.
 - **Gemini TTS voice drift** — Voice can change mid-utterance on long responses. Server-side Gemini bug, no client workaround.
+- **Gemini TTS silence padding** — Occasionally returns 10+ minutes of mostly-silent audio for short text. Server-side bug.
+- **Gemini TTS internal errors** — Server returns 500 on longer text (~1000+ chars). Handled by automatic fallback to on-device TTS.
 - **Gemini free tier quotas** — STT and TTS share the same API key but have separate rate limits. TTS (10 RPM) is tighter than STT (15 RPM).
+- **BT SCO audio routing** — Beeps after transcription play through BT SCO channel. A 300ms delay before clearing SCO ensures the "Thinking" beep is audible through headset before protocol switches to A2DP.
 - **On-device profanity filter** — Google SpeechRecognizer censors profanity. Mitigated with dictionary decensor but some words may still appear as `[?]`.
 
 ## API Details
