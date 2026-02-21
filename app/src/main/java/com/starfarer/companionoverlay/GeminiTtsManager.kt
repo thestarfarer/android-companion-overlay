@@ -49,6 +49,9 @@ class GeminiTtsManager(private val context: Context) {
 
     var onSpeechDone: (() -> Unit)? = null
 
+    /** Called with status updates: "Synthesizing...", "Speaking...", etc. */
+    var onStatusUpdate: ((String) -> Unit)? = null
+
     var isSpeaking: Boolean = false
         private set
 
@@ -103,6 +106,7 @@ class GeminiTtsManager(private val context: Context) {
     }
 
     private fun synthesizeAndPlay(apiKey: String, text: String, voiceName: String) {
+        handler.post { onStatusUpdate?.invoke("🔊 Generating voice...") }
         DebugLog.log(TAG, "Synthesizing: ${text.length} chars, voice=$voiceName")
 
         // Build request per Gemini TTS API docs
@@ -222,6 +226,7 @@ class GeminiTtsManager(private val context: Context) {
             if (!stopped.get()) {
                 audioTrack?.play()
                 DebugLog.log(TAG, "Playing audio...")
+                handler.post { onStatusUpdate?.invoke("") }  // Clear status — audio is playing
             } else {
                 finishSpeaking()
             }

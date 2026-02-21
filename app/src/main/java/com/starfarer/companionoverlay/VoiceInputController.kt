@@ -124,7 +124,8 @@ class VoiceInputController(private val service: CompanionOverlayService) {
         setOnStopped: (() -> Unit) -> Unit
     ) {
         setOnReady {
-            handler.post { service.showVoiceBubble("Listening...") }
+            val label = if (useGemini) "🎤 Recording..." else "Listening..."
+            handler.post { service.showVoiceBubble(label) }
         }
         setOnPartial { partial ->
             handler.post { service.updateVoiceBubble(partial) }
