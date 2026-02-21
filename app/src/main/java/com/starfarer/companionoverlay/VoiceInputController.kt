@@ -29,6 +29,7 @@ class VoiceInputController(private val service: CompanionOverlayService) {
     private val handler = Handler(Looper.getMainLooper())
     private var speechManager: SpeechRecognitionManager? = null
     private var geminiRecognizer: GeminiSpeechRecognizer? = null
+    private val btRouter = BluetoothAudioRouter(service)
 
     /**
      * Toggle voice input. Called from accessibility service (Shokz button).
@@ -57,6 +58,7 @@ class VoiceInputController(private val service: CompanionOverlayService) {
         speechManager = null
         geminiRecognizer?.destroy()
         geminiRecognizer = null
+        btRouter.clearRouting()
         state = State.IDLE
     }
 
@@ -75,6 +77,7 @@ class VoiceInputController(private val service: CompanionOverlayService) {
         if (state == State.PROCESSING) {
             DebugLog.log(TAG, "Response complete → IDLE")
             state = State.IDLE
+            btRouter.clearRouting()
         }
     }
 
@@ -88,6 +91,7 @@ class VoiceInputController(private val service: CompanionOverlayService) {
                 service.activeTtsStop()
                 speechManager?.cancel()
                 state = State.IDLE
+                btRouter.clearRouting()
                 service.hideVoiceBubble()
             }
         }
@@ -106,6 +110,10 @@ class VoiceInputController(private val service: CompanionOverlayService) {
         state = State.LISTENING
         service.activeTtsStop()
         service.showVoiceBubble("Starting...")
+
+        // Route mic input to BT headset if connected
+        val routed = btRouter.routeToBluetoothHeadset()
+        DebugLog.log(TAG, "BT audio routing: ${if (routed) "active" else "using built-in mic"}")
 
         if (useGemini) {
             startGeminiListening()
@@ -136,6 +144,7 @@ class VoiceInputController(private val service: CompanionOverlayService) {
                 state = State.PROCESSING
                 service.hideVoiceBubble()
                 startSafetyTimeout()
+                btRouter.clearRouting()
                 service.sendVoiceInput(text)
             }
         }
@@ -143,6 +152,7 @@ class VoiceInputController(private val service: CompanionOverlayService) {
             handler.post {
                 DebugLog.log(TAG, "Recognition error: $error")
                 state = State.IDLE
+                btRouter.clearRouting()
                 service.hideVoiceBubble()
                 service.clearPendingScreenshot()
                 service.showBriefBubblePublic("Couldn't hear that~ ($error)")
@@ -153,6 +163,7 @@ class VoiceInputController(private val service: CompanionOverlayService) {
                 if (state == State.LISTENING) {
                     DebugLog.log(TAG, "No speech detected → IDLE")
                     state = State.IDLE
+                    btRouter.clearRouting()
                     service.hideVoiceBubble()
                     service.clearPendingScreenshot()
                 }
@@ -198,6 +209,7 @@ class VoiceInputController(private val service: CompanionOverlayService) {
         speechManager?.cancel()
         geminiRecognizer?.cancel()
         state = State.IDLE
+        btRouter.clearRouting()
         service.hideVoiceBubble()
         service.clearPendingScreenshot()
     }
