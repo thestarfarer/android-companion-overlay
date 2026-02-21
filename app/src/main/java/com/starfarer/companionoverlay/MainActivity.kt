@@ -207,18 +207,18 @@ class MainActivity : AppCompatActivity() {
         val silenceSeek = findViewById<SeekBar>(R.id.silenceTimeoutSeek)
         val silenceLabel = findViewById<TextView>(R.id.silenceTimeoutLabel)
         val savedMs = PromptSettings.getSilenceTimeout(this)
-        val initialProgress = ((savedMs - 500) / 100).toInt().coerceIn(0, 40)
+        val initialProgress = ((savedMs - 100) / 100).toInt().coerceIn(0, 49)
         silenceSeek.progress = initialProgress
         silenceLabel.text = "${"%.1f".format(savedMs / 1000.0)}s"
 
         silenceSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                val ms = (progress * 100L) + 500L
+                val ms = (progress * 100L) + 100L
                 silenceLabel.text = "${"%.1f".format(ms / 1000.0)}s"
             }
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {
-                val ms = ((seekBar?.progress ?: 10) * 100L) + 500L
+                val ms = ((seekBar?.progress ?: 14) * 100L) + 100L
                 PromptSettings.setSilenceTimeout(this@MainActivity, ms)
             }
         })

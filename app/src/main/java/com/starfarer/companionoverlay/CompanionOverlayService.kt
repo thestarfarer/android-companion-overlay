@@ -933,11 +933,25 @@ class CompanionOverlayService : Service() {
         return buildString {
             for (msg in recent) {
                 val role = msg.optString("role", "user")
-                val text = msg.optString("content", "")
-                // For messages with image content (JSONArray), extract just text parts
+                val content = msg.opt("content")
+                val text = when (content) {
+                    is String -> content
+                    is JSONArray -> {
+                        // Image messages: extract only the text part, skip base64 data
+                        var found = ""
+                        for (j in 0 until content.length()) {
+                            val block = content.getJSONObject(j)
+                            if (block.optString("type") == "text") {
+                                found = block.optString("text", "")
+                                break
+                            }
+                        }
+                        found
+                    }
+                    else -> ""
+                }
                 if (text.isNotBlank()) {
                     val label = if (role == "assistant") "Assistant" else "User"
-                    // Truncate each message to keep context manageable
                     appendLine("$label: ${text.take(200)}")
                 }
             }

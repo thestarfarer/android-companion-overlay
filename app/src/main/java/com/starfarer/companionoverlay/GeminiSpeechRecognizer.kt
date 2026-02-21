@@ -289,15 +289,21 @@ class GeminiSpeechRecognizer(private val context: Context) {
         val base64Audio = android.util.Base64.encodeToString(wavData, android.util.Base64.NO_WRAP)
         DebugLog.log(TAG, "WAV size: ${wavData.size} bytes, base64: ${base64Audio.length} chars")
 
-        // Build the prompt with conversation context
-        val contextBlock = if (conversationContext.isNotBlank()) {
-            "\n\nConversation context (for understanding references and domain terms):\n$conversationContext"
-        } else ""
-
-        val prompt = """Transcribe this audio recording verbatim. Return ONLY the transcribed text, nothing else. No timestamps, no speaker labels, no formatting — just the exact words spoken. If the audio is unclear or empty, return an empty string.$contextBlock"""
+        val prompt = "Transcribe this audio. Return ONLY the spoken words, nothing else."
 
         // Build Gemini API request body
         val requestJson = JSONObject().apply {
+            // Move conversation context to systemInstruction so it can't leak into transcription
+            if (conversationContext.isNotBlank()) {
+                put("systemInstruction", JSONObject().apply {
+                    put("parts", JSONArray().put(
+                        JSONObject().put("text",
+                            "You are a speech-to-text transcriber. The user is in an ongoing conversation. " +
+                            "Use the following context ONLY to resolve ambiguous words, names, and terms. " +
+                            "Do NOT include any of this context in your output.\n\n$conversationContext")
+                    ))
+                })
+            }
             put("contents", JSONArray().put(
                 JSONObject().put("parts", JSONArray().apply {
                     put(JSONObject().put("text", prompt))
