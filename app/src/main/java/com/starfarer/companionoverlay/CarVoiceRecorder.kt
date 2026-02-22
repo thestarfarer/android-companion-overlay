@@ -28,10 +28,7 @@ class CarVoiceRecorder(private val carContext: CarContext) {
     companion object {
         private const val TAG = "CarVoice"
         private const val SAMPLE_RATE = 16000 // CarAudioRecord fixed rate
-        // Adaptive silence detection (matches GeminiSpeechRecognizer)
-        private const val NOISE_FLOOR = 150.0
-        private const val SPEECH_ENTRY_RMS = 300.0
-        private const val SILENCE_RATIO = 0.20
+        private const val SILENCE_THRESHOLD = 500.0
         private const val GEMINI_URL =
             "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
     }
@@ -109,8 +106,6 @@ class CarVoiceRecorder(private val carContext: CarContext) {
         val pcmData = ByteArrayOutputStream()
         var silenceStartMs = 0L
         var speechDetected = false
-        var speechRmsAvg = 0.0
-        val alpha = 0.3
 
         while (recording) {
             val bytesRead = try {
@@ -136,22 +131,14 @@ class CarVoiceRecorder(private val carContext: CarContext) {
             val rms = sqrt(sum / samples)
 
             val now = System.currentTimeMillis()
-            val silenceThreshold = if (speechRmsAvg > 0)
-                maxOf(NOISE_FLOOR, speechRmsAvg * SILENCE_RATIO)
-            else
-                SPEECH_ENTRY_RMS
-
-            if (rms > silenceThreshold) {
-                if (rms > NOISE_FLOOR * 2) {
-                    speechRmsAvg = if (speechRmsAvg == 0.0) rms else speechRmsAvg * (1 - alpha) + rms * alpha
-                }
+            if (rms > SILENCE_THRESHOLD) {
                 speechDetected = true
                 silenceStartMs = 0L
             } else {
                 if (silenceStartMs == 0L) {
                     silenceStartMs = now
                 } else if (speechDetected && now - silenceStartMs >= silenceTimeoutMs) {
-                    DebugLog.log(TAG, "Silence detected (speechAvg=${"%.0f".format(speechRmsAvg)}, thr=${"%.0f".format(silenceThreshold)})")
+                    DebugLog.log(TAG, "Silence detected after speech")
                     break
                 }
             }
