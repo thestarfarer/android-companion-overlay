@@ -40,17 +40,8 @@ class GeminiSpeechRecognizer(private val context: Context) {
         private const val CHANNEL = AudioFormat.CHANNEL_IN_MONO
         private const val ENCODING = AudioFormat.ENCODING_PCM_16BIT
 
-        /**
-         * Adaptive silence detection constants.
-         * NOISE_FLOOR: absolute minimum RMS — anything below this is definitely silence.
-         * SPEECH_ENTRY_RMS: minimum RMS to initially detect speech (bootstraps the adaptive threshold).
-         * SILENCE_RATIO: once speech is detected, silence = RMS < speechAvg * SILENCE_RATIO.
-         * CALIBRATION_MS: ignore audio for this long after start (skip beep bleed).
-         */
-        private const val NOISE_FLOOR = 150.0
-        private const val SPEECH_ENTRY_RMS = 300.0
-        private const val SILENCE_RATIO = 0.20
-        private const val CALIBRATION_MS = 400L
+        /** RMS threshold below which audio is considered silence. */
+        private const val SILENCE_THRESHOLD = 500.0
 
         /** Default silence duration — overridden by getSilenceTimeoutMs(). */
         private const val DEFAULT_silenceDurationMs = 1500L
@@ -153,9 +144,6 @@ class GeminiSpeechRecognizer(private val context: Context) {
         var silenceStartMs = 0L
         var speechDetected = false
         val recordStartMs = System.currentTimeMillis()
-        // Adaptive threshold: track speech amplitude with exponential moving average
-        var speechRmsAvg = 0.0
-        val alpha = 0.3 // EMA smoothing — higher = more responsive to recent chunks
 
         while (recording && !cancelled) {
             val shortsRead = audioRecord?.read(readBuffer, 0, readBuffer.size) ?: -1
@@ -180,32 +168,18 @@ class GeminiSpeechRecognizer(private val context: Context) {
             handler.post { onRmsChanged?.invoke(rms.toFloat()) }
 
             val now = System.currentTimeMillis()
-            val elapsed = now - recordStartMs
 
-            // Skip calibration period (beep bleed from Shokz bone conduction)
-            if (elapsed < CALIBRATION_MS) continue
-
-            // Adaptive silence threshold: use ratio of tracked speech level, floored at NOISE_FLOOR
-            val silenceThreshold = if (speechRmsAvg > 0)
-                maxOf(NOISE_FLOOR, speechRmsAvg * SILENCE_RATIO)
-            else
-                SPEECH_ENTRY_RMS
-
-            if (rms > silenceThreshold) {
-                // Update speech level tracker (only count chunks clearly above noise)
-                if (rms > NOISE_FLOOR * 2) {
-                    speechRmsAvg = if (speechRmsAvg == 0.0) rms else speechRmsAvg * (1 - alpha) + rms * alpha
-                }
+            if (rms > SILENCE_THRESHOLD) {
                 speechDetected = true
                 silenceStartMs = 0L
+                // Show a visual indicator that speech is being captured
                 handler.post { onPartialResult?.invoke("🎤 Recording...") }
             } else if (speechDetected) {
-                // Below adaptive threshold — start or continue silence timer
+                // Below threshold — start or continue silence timer
                 if (silenceStartMs == 0L) {
                     silenceStartMs = now
-                    DebugLog.log(TAG, "Silence timer started (rms=${"%.0f".format(rms)} < thr=${"%.0f".format(silenceThreshold)}, speechAvg=${"%.0f".format(speechRmsAvg)})")
                 } else if (now - silenceStartMs >= silenceDurationMs) {
-                    DebugLog.log(TAG, "Silence detected (${now - silenceStartMs}ms, thr=${"%.0f".format(silenceThreshold)}, speechAvg=${"%.0f".format(speechRmsAvg)})")
+                    DebugLog.log(TAG, "Silence detected after speech, stopping")
                     break
                 }
             }
