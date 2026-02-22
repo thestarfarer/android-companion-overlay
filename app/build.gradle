@@ -44,5 +44,9 @@ dependencies {
     
     // OkHttp for proper networking
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+
+    // Android Auto — Car App Library
+    implementation 'androidx.car.app:app:1.7.0'
+    implementation 'androidx.car.app:app-projected:1.7.0'
     
 }
