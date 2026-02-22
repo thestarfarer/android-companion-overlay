@@ -46,6 +46,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var testButton: Button
     private lateinit var responseText: TextView
     private lateinit var copyLogButton: Button
+    private lateinit var clearLogButton: Button
     private lateinit var screenshotPermButton: Button
     private lateinit var editSystemPromptButton: Button
     private lateinit var editUserMessageButton: Button
@@ -109,6 +110,7 @@ class MainActivity : AppCompatActivity() {
         testButton = findViewById(R.id.testButton)
         responseText = findViewById(R.id.responseText)
         copyLogButton = findViewById(R.id.copyLogButton)
+        clearLogButton = findViewById(R.id.clearLogButton)
         screenshotPermButton = findViewById(R.id.screenshotPermButton)
         editSystemPromptButton = findViewById(R.id.editSystemPromptButton)
         editUserMessageButton = findViewById(R.id.editUserMessageButton)
@@ -344,6 +346,11 @@ class MainActivity : AppCompatActivity() {
             val clip = ClipData.newPlainText("Senni Debug Log", log)
             clipboard.setPrimaryClip(clip)
             Toast.makeText(this, "Log copied! (${log.length} chars)", Toast.LENGTH_SHORT).show()
+        }
+
+        clearLogButton.setOnClickListener {
+            DebugLog.clear()
+            Toast.makeText(this, "Log cleared", Toast.LENGTH_SHORT).show()
         }
 
 
