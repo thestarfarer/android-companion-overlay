@@ -10,3 +10,6 @@
 app/src/main/assets/custom_prompt.txt
 app/src/main/assets/custom_idle_sheet.png
 app/src/main/assets/custom_walk_sheet.png
+
+# Release keystore
+senni-release.jks
