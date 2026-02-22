@@ -139,7 +139,8 @@ class GeminiSpeechRecognizer(private val context: Context) {
      */
     private fun recordAndDetectSilence(bufferSize: Int) {
         val pcmOutput = ByteArrayOutputStream()
-        val readBuffer = ShortArray(bufferSize / 2)
+        // Read in ~100ms chunks (1600 samples @ 16kHz) for fine-grained silence detection
+        val readBuffer = ShortArray(SAMPLE_RATE / 10)
         var silenceStartMs = 0L
         var speechDetected = false
         val recordStartMs = System.currentTimeMillis()
