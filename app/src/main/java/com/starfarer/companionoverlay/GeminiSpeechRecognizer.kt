@@ -143,6 +143,7 @@ class GeminiSpeechRecognizer(private val context: Context) {
         var silenceStartMs = 0L
         var speechDetected = false
         val recordStartMs = System.currentTimeMillis()
+        var lastRmsLogMs = 0L
 
         while (recording && !cancelled) {
             val shortsRead = audioRecord?.read(readBuffer, 0, readBuffer.size) ?: -1
@@ -167,6 +168,20 @@ class GeminiSpeechRecognizer(private val context: Context) {
             handler.post { onRmsChanged?.invoke(rms.toFloat()) }
 
             val now = System.currentTimeMillis()
+            val elapsed = now - recordStartMs
+
+            // RMS diagnostic logging every ~100ms
+            if (now - lastRmsLogMs >= 100) {
+                val silenceFor = if (silenceStartMs > 0) now - silenceStartMs else 0L
+                val marker = when {
+                    rms > SILENCE_THRESHOLD * 2 -> "██"
+                    rms > SILENCE_THRESHOLD      -> "▓▓"
+                    rms > SILENCE_THRESHOLD * 0.5 -> "░░"
+                    else                          -> "  "
+                }
+                DebugLog.log(TAG, "RMS @${elapsed}ms: ${"%.0f".format(rms)} $marker | thr=${"%.0f".format(SILENCE_THRESHOLD)} | silFor=${silenceFor}ms | speech=$speechDetected | chunk=$shortsRead")
+                lastRmsLogMs = now
+            }
 
             if (rms > SILENCE_THRESHOLD) {
                 speechDetected = true
@@ -178,7 +193,7 @@ class GeminiSpeechRecognizer(private val context: Context) {
                 if (silenceStartMs == 0L) {
                     silenceStartMs = now
                 } else if (now - silenceStartMs >= silenceDurationMs) {
-                    DebugLog.log(TAG, "Silence detected after speech, stopping")
+                    DebugLog.log(TAG, "Silence detected after speech (${now - silenceStartMs}ms >= ${silenceDurationMs}ms), stopping")
                     break
                 }
             }
