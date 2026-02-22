@@ -101,8 +101,8 @@ class CarVoiceRecorder(private val carContext: CarContext) {
     }
 
     private fun recordAndProcess() {
-        val bufferSize = SAMPLE_RATE // 0.5s at 16-bit mono = 32000 bytes, but read in 16000-byte chunks
-        val buffer = ByteArray(bufferSize)
+        // Read in ~100ms chunks (3200 bytes = 1600 samples @ 16kHz 16-bit mono)
+        val buffer = ByteArray(SAMPLE_RATE * 2 / 10)
         val pcmData = ByteArrayOutputStream()
         var silenceStartMs = 0L
         var speechDetected = false
