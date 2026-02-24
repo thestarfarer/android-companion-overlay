@@ -33,6 +33,7 @@ class TtsManager(
     private var tts: TextToSpeech? = null
     private var availableVoices: List<Voice> = emptyList()
     private val handler = Handler(Looper.getMainLooper())
+    private var pendingText: String? = null
 
     init {
         tts = TextToSpeech(context) { status ->
@@ -68,6 +69,11 @@ class TtsManager(
                 loadVoices()
                 restoreSavedVoice()
                 DebugLog.log(TAG, "TTS ready, ${availableVoices.size} voices available")
+                pendingText?.let { text ->
+                    pendingText = null
+                    DebugLog.log(TAG, "Playing queued text")
+                    handler.post { speak(text) }
+                }
                 onReady?.invoke()
             } else {
                 DebugLog.log(TAG, "TTS init failed: $status")
@@ -77,8 +83,8 @@ class TtsManager(
 
     fun speak(text: String) {
         if (!isReady) {
-            DebugLog.log(TAG, "TTS not ready, skipping speak")
-            onSpeechDone?.invoke()
+            DebugLog.log(TAG, "TTS not ready, queuing text")
+            pendingText = text
             return
         }
 
