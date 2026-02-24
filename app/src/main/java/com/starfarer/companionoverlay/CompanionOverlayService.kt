@@ -118,15 +118,11 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
 
         startForeground(1, createNotification())
 
-        registerReceiver(
-            screenReceiver,
-            IntentFilter().apply {
-                addAction(Intent.ACTION_SCREEN_OFF)
-                addAction(Intent.ACTION_SCREEN_ON)
-                addAction(Intent.ACTION_USER_PRESENT)
-            },
-            Context.RECEIVER_NOT_EXPORTED
-        )
+        registerReceiver(screenReceiver, IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(Intent.ACTION_SCREEN_ON)
+            addAction(Intent.ACTION_USER_PRESENT)
+        })
 
         DebugLog.log("Overlay", "Service created")
     }
@@ -267,16 +263,29 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
     }
 
     // ══════════════════════════════════════════════════════════════════════
-    // Animation loop (vsync-driven via Choreographer)
+    // Animation loop (vsync-driven via Choreographer with Handler watchdog)
     // ══════════════════════════════════════════════════════════════════════
 
     private var animating = false
+    private var lastFrameTimeMs = 0L
 
     private val frameCallback = object : Choreographer.FrameCallback {
         override fun doFrame(frameTimeNanos: Long) {
             if (!animating) return
+            lastFrameTimeMs = SystemClock.elapsedRealtime()
             spriteAnimator.update()
             Choreographer.getInstance().postFrameCallback(this)
+        }
+    }
+
+    private val animWatchdog = object : Runnable {
+        override fun run() {
+            if (!animating) return
+            if (SystemClock.elapsedRealtime() - lastFrameTimeMs > 100) {
+                spriteAnimator.update()
+                Choreographer.getInstance().postFrameCallback(frameCallback)
+            }
+            handler.postDelayed(this, 100)
         }
     }
 
@@ -284,11 +293,13 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
         spriteAnimator.startTime = SystemClock.elapsedRealtime()
         animating = true
         Choreographer.getInstance().postFrameCallback(frameCallback)
+        handler.postDelayed(animWatchdog, 100)
     }
 
     private fun stopAnimation() {
         animating = false
         Choreographer.getInstance().removeFrameCallback(frameCallback)
+        handler.removeCallbacks(animWatchdog)
         longPressHandler.removeCallbacksAndMessages(null)
     }
 
