@@ -45,6 +45,42 @@ class SettingsFragment : PreferenceFragmentCompat() {
     private val claudeApi: ClaudeApi by inject()
     private val settings: SettingsRepository by inject()
 
+    companion object {
+        private val LICENSES_TEXT = """
+            OkHttp
+            Copyright Square, Inc.
+            Apache License 2.0
+
+            ONNX Runtime
+            Copyright Microsoft Corporation
+            MIT License
+
+            Silero VAD
+            Copyright Silero Team
+            MIT License
+
+            Koin
+            Copyright Kotzilla
+            Apache License 2.0
+
+            Kotlinx Coroutines
+            Copyright JetBrains s.r.o.
+            Apache License 2.0
+
+            Kotlinx Serialization
+            Copyright JetBrains s.r.o.
+            Apache License 2.0
+
+            AndroidX Libraries
+            Copyright The Android Open Source Project
+            Apache License 2.0
+
+            Material Components for Android
+            Copyright The Android Open Source Project
+            Apache License 2.0
+        """.trimIndent()
+    }
+
     private var accountTapCount = 0
     private var lastTapTime = 0L
 
@@ -73,6 +109,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
         setupConversationLists()
         setupPermissions()
         setupAccount()
+        setupAbout()
         setupDebug()
     }
 
@@ -474,6 +511,20 @@ class SettingsFragment : PreferenceFragmentCompat() {
                     refreshAccount()
                 }
             })
+        }
+    }
+
+    // ── About ──
+
+    private fun setupAbout() {
+        findPreference<Preference>("open_source_licenses")?.setOnPreferenceClickListener {
+            val ctx = context ?: return@setOnPreferenceClickListener true
+            MaterialAlertDialogBuilder(ctx, R.style.CompanionDialog)
+                .setTitle("Open source licenses")
+                .setMessage(LICENSES_TEXT)
+                .setPositiveButton("Close", null)
+                .show()
+            true
         }
     }
 
