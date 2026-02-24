@@ -14,6 +14,7 @@ import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import com.starfarer.companionoverlay.repository.SettingsRepository
 import java.util.concurrent.TimeUnit
 
 /**
@@ -29,7 +30,11 @@ import java.util.concurrent.TimeUnit
  * Audio format: 16kHz mono 16-bit PCM, packaged as WAV for Gemini.
  * Silence detection: amplitude RMS below threshold for silenceDurationMs.
  */
-class GeminiSpeechRecognizer(private val context: Context) {
+class GeminiSpeechRecognizer(
+    private val context: Context,
+    baseClient: OkHttpClient,
+    private val settings: SettingsRepository
+) {
 
     companion object {
         private const val TAG = "GeminiSTT"
@@ -70,6 +75,7 @@ class GeminiSpeechRecognizer(private val context: Context) {
     private var recordingThread: Thread? = null
     @Volatile private var recording = false
     @Volatile private var cancelled = false
+    @Volatile private var activeHttpCall: Call? = null
 
     /** Conversation context to inject into the transcription prompt. */
     var conversationContext: String = ""
@@ -77,7 +83,7 @@ class GeminiSpeechRecognizer(private val context: Context) {
     /** Silence duration in ms — set from settings before startListening(). */
     var silenceDurationMs: Long = DEFAULT_silenceDurationMs
 
-    private val httpClient = OkHttpClient.Builder()
+    private val httpClient = baseClient.newBuilder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
@@ -245,7 +251,7 @@ class GeminiSpeechRecognizer(private val context: Context) {
 
     /** Send WAV audio to Gemini for transcription with conversation context. */
     private fun transcribeWithGemini(wavData: ByteArray) {
-        val apiKey = PromptSettings.getGeminiApiKey(context)
+        val apiKey = settings.geminiApiKey
         if (apiKey.isNullOrBlank()) {
             DebugLog.log(TAG, "No Gemini API key configured")
             handler.post {
@@ -286,14 +292,23 @@ class GeminiSpeechRecognizer(private val context: Context) {
             ))
         }
 
-        val url = "$GEMINI_URL?key=$apiKey"
         val body = requestJson.toString().toRequestBody("application/json".toMediaType())
-        val request = Request.Builder().url(url).post(body).build()
+        val request = Request.Builder()
+            .url(GEMINI_URL)
+            .post(body)
+            .header("x-goog-api-key", apiKey)
+            .build()
 
         DebugLog.log(TAG, "Sending to Gemini (${requestJson.toString().length} chars request)...")
 
         try {
-            val response = httpClient.newCall(request).execute()
+            val call = httpClient.newCall(request)
+            activeHttpCall = call
+            val response = call.execute()
+            activeHttpCall = null
+
+            if (cancelled) return
+
             val responseBody = response.body?.string()
 
             if (!response.isSuccessful) {
@@ -330,6 +345,8 @@ class GeminiSpeechRecognizer(private val context: Context) {
 
             DebugLog.log(TAG, "Transcription: ${text.take(80)}")
 
+            if (cancelled) return
+
             handler.post {
                 isListening = false
                 if (text.isNotBlank()) {
@@ -340,6 +357,8 @@ class GeminiSpeechRecognizer(private val context: Context) {
             }
 
         } catch (e: Exception) {
+            activeHttpCall = null
+            if (cancelled) return
             DebugLog.log(TAG, "Network error: ${e.message}")
             handler.post {
                 isListening = false
@@ -356,9 +375,8 @@ class GeminiSpeechRecognizer(private val context: Context) {
     fun cancel() {
         cancelled = true
         recording = false
-        try { audioRecord?.stop() } catch (_: Exception) {}
-        try { audioRecord?.release() } catch (_: Exception) {}
-        audioRecord = null
+        activeHttpCall?.cancel()
+        activeHttpCall = null
         isListening = false
     }
 

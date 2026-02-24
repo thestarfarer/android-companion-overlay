@@ -8,6 +8,7 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
+import androidx.core.os.bundleOf
 import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
 import com.starfarer.companionoverlay.R
@@ -15,18 +16,15 @@ import com.starfarer.companionoverlay.R
 /**
  * Bottom sheet for editing text content (system prompts, user messages).
  *
- * BottomSheet naturally handles:
- * - Sizing to content
- * - Expanding up to screen limits
- * - Scroll physics via NestedScrollView in layout
- * - Consistent positioning (anchored to bottom)
+ * Results are delivered via the Fragment Result API ([setFragmentResult]),
+ * which survives configuration changes (rotation). Callers register a
+ * listener via [setFragmentResultListener] with [REQUEST_KEY].
  */
 class TextEditorBottomSheet : BottomSheetDialogFragment() {
 
     private var title: String = ""
     private var currentText: String = ""
     private var defaultText: String = ""
-    private var onSave: ((String) -> Unit)? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -73,7 +71,10 @@ class TextEditorBottomSheet : BottomSheetDialogFragment() {
                 Toast.makeText(requireContext(), "Prompt can't be empty~", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
-            onSave?.invoke(newText)
+            parentFragmentManager.setFragmentResult(
+                REQUEST_KEY,
+                bundleOf(RESULT_TEXT to newText)
+            )
             Toast.makeText(requireContext(), "Saved~", Toast.LENGTH_SHORT).show()
             dismiss()
         }
@@ -81,7 +82,6 @@ class TextEditorBottomSheet : BottomSheetDialogFragment() {
 
     override fun onStart() {
         super.onStart()
-        // Allow expansion up to 85% of screen
         dialog?.let { dialog ->
             val bottomSheet = dialog.findViewById<View>(com.google.android.material.R.id.design_bottom_sheet)
             bottomSheet?.let {
@@ -96,14 +96,13 @@ class TextEditorBottomSheet : BottomSheetDialogFragment() {
         }
     }
 
-    fun setOnSaveListener(listener: (String) -> Unit) {
-        onSave = listener
-    }
-
     companion object {
         private const val ARG_TITLE = "title"
         private const val ARG_CURRENT_TEXT = "currentText"
         private const val ARG_DEFAULT_TEXT = "defaultText"
+
+        const val REQUEST_KEY = "text_editor_result"
+        const val RESULT_TEXT = "result_text"
 
         fun newInstance(
             title: String,

@@ -2,6 +2,7 @@ package com.starfarer.companionoverlay
 
 import android.os.Bundle
 import android.view.View
+import androidx.activity.addCallback
 import androidx.appcompat.app.AppCompatActivity
 
 /**
@@ -19,6 +20,10 @@ class SettingsActivity : AppCompatActivity() {
             finishAfterTransition()
         }
 
+        onBackPressedDispatcher.addCallback(this) {
+            finishAfterTransition()
+        }
+
         if (savedInstanceState == null) {
             supportFragmentManager
                 .beginTransaction()
@@ -27,7 +32,4 @@ class SettingsActivity : AppCompatActivity() {
         }
     }
 
-    override fun onBackPressed() {
-        finishAfterTransition()
-    }
 }

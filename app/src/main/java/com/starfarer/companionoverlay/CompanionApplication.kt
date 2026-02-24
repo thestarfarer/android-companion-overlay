@@ -8,6 +8,8 @@ import com.starfarer.companionoverlay.di.storageModule
 import com.starfarer.companionoverlay.di.viewModelModule
 import org.koin.android.ext.koin.androidContext
 import org.koin.android.ext.koin.androidLogger
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import org.koin.core.context.startKoin
 import org.koin.core.logger.Level
 
@@ -31,6 +33,29 @@ class CompanionApplication : Application() {
             )
         }
         
+        createNotificationChannel()
+
         DebugLog.log("App", "CompanionApplication initialized")
+    }
+
+    /**
+     * Notification channel for the overlay foreground service.
+     * Created once in Application so neither the activity nor the service
+     * need to duplicate this setup.
+     */
+    private fun createNotificationChannel() {
+        val channel = NotificationChannel(
+            NOTIFICATION_CHANNEL_ID,
+            "Companion Overlay",
+            NotificationManager.IMPORTANCE_LOW
+        ).apply {
+            description = "Keeps Senni alive on your screen"
+        }
+        getSystemService(NotificationManager::class.java)
+            .createNotificationChannel(channel)
+    }
+
+    companion object {
+        const val NOTIFICATION_CHANNEL_ID = "companion_overlay_channel"
     }
 }

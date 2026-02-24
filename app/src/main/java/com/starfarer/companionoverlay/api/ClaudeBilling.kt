@@ -11,7 +11,7 @@ import java.security.MessageDigest
 object ClaudeBilling {
     
     private const val BILLING_SALT = "59cf53e54c78"
-    private const val BILLING_VERSION = "2.1.45"
+    const val CLIENT_VERSION = "2.1.45"
     
     /**
      * Compute the billing header based on the first user message content.
@@ -30,9 +30,9 @@ object ClaudeBilling {
         val c20 = if (text.length > 20) text[20] else '0'
         
         val hash = MessageDigest.getInstance("SHA-256")
-            .digest("$BILLING_SALT$c4$c7$c20$BILLING_VERSION".toByteArray())
+            .digest("$BILLING_SALT$c4$c7$c20$CLIENT_VERSION".toByteArray())
             .joinToString("") { "%02x".format(it) }
         
-        return "x-anthropic-billing-header: cc_version=$BILLING_VERSION.${hash.take(3)}; cc_entrypoint=cli; cch=00000;"
+        return "x-anthropic-billing-header: cc_version=$CLIENT_VERSION.${hash.take(3)}; cc_entrypoint=cli; cch=00000;"
     }
 }

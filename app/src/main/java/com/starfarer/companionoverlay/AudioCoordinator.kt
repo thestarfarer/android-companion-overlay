@@ -5,36 +5,22 @@ import android.os.Handler
 import android.os.Looper
 import com.starfarer.companionoverlay.repository.SettingsRepository
 
-/**
- * Coordinates all audio output: TTS (on-device or Gemini) and beeps.
- *
- * Responsibilities:
- * - Routing speech to the appropriate TTS engine
- * - Fallback from Gemini TTS to on-device when synthesis fails
- * - Beep playback
- * - Unified speaking state and completion callbacks
- *
- * Threading: Safe to call from any thread. Callbacks dispatch to main.
- */
 class AudioCoordinator(
     private val context: Context,
     val ttsManager: TtsManager,
     val geminiTtsManager: GeminiTtsManager,
-    private val settings: SettingsRepository
+    private val settings: SettingsRepository,
+    private val beepManager: BeepManager
 ) {
 
     companion object {
         private const val TAG = "Audio"
     }
 
-    /** Callback for speech completion. */
     var onSpeechComplete: (() -> Unit)? = null
-
-    /** Called when Gemini TTS updates status ("Generating voice...", etc). */
     var onStatusUpdate: ((String) -> Unit)? = null
 
     private val handler = Handler(Looper.getMainLooper())
-    private val beepManager = BeepManager()
 
     init {
         geminiTtsManager.onStatusUpdate = { status ->
@@ -56,18 +42,9 @@ class AudioCoordinator(
         }
     }
 
-    // ══════════════════════════════════════════════════════════════════════
-    // Public API
-    // ══════════════════════════════════════════════════════════════════════
-
-    /** Whether either TTS engine is currently speaking. */
     val isSpeaking: Boolean
         get() = ttsManager.isSpeaking || geminiTtsManager.isSpeaking
 
-    /**
-     * Speak text through the appropriate TTS engine.
-     * Uses Gemini if enabled and API key is set, otherwise on-device.
-     */
     fun speak(text: String) {
         val useGemini = settings.geminiTtsEnabled && !settings.geminiApiKey.isNullOrBlank()
 
@@ -86,20 +63,18 @@ class AudioCoordinator(
         }
     }
 
-    /** Stop any current TTS playback immediately. */
     fun stopSpeaking() {
         ttsManager.stop()
         geminiTtsManager.stop()
+        onSpeechComplete = null
     }
 
-    /** Play a beep sound if beeps are enabled in settings. */
     fun playBeep(beep: BeepManager.Beep) {
         if (settings.beepsEnabled) {
             beepManager.play(beep)
         }
     }
 
-    /** Release all audio resources. Call in onDestroy. */
     fun release() {
         ttsManager.release()
         geminiTtsManager.release()

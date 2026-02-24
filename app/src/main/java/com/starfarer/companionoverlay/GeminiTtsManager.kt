@@ -1,6 +1,5 @@
 package com.starfarer.companionoverlay
 
-import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
@@ -13,24 +12,15 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
-/**
- * Text-to-speech via Gemini's TTS model.
- *
- * Sends text to gemini-2.5-flash-preview-tts, gets back raw 24kHz
- * 16-bit mono PCM audio, plays it through AudioTrack.
- *
- * Advantages over on-device TTS:
- * - Multilingual (30 voices, 24 languages, handles code-switching)
- * - No voice pack installs needed
- * - Higher quality HD voices
- * - Handles mixed Russian/English naturally
- *
- * Disadvantages:
- * - Network latency per utterance
- * - Costs tokens (cheap on flash-lite pricing)
- */
-class GeminiTtsManager(private val context: Context) {
+import com.starfarer.companionoverlay.repository.SettingsRepository
+
+class GeminiTtsManager(
+    private val context: android.content.Context,
+    baseClient: OkHttpClient,
+    private val settings: SettingsRepository
+) {
 
     companion object {
         private const val TAG = "GeminiTTS"
@@ -38,55 +28,43 @@ class GeminiTtsManager(private val context: Context) {
         private const val TTS_URL =
             "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent"
 
-        /** Gemini TTS outputs 24kHz 16-bit mono PCM. */
         private const val SAMPLE_RATE = 24000
         private const val CHANNEL_CONFIG = AudioFormat.CHANNEL_OUT_MONO
         private const val AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT
 
-        /** Default voice — Kore is a clear, natural female voice. */
         private const val DEFAULT_VOICE = "Kore"
     }
 
     var onSpeechDone: (() -> Unit)? = null
-
-    /** Called when synthesis or playback fails. Carries the original text for fallback. */
     var onSpeechError: ((String) -> Unit)? = null
-
-    /** Called with status updates: "Synthesizing...", "Speaking...", etc. */
     var onStatusUpdate: ((String) -> Unit)? = null
 
-    /** The text we're currently trying to speak — kept for error fallback. */
     private var pendingText: String? = null
 
     var isSpeaking: Boolean = false
         private set
 
     private val handler = Handler(Looper.getMainLooper())
-    private var audioTrack: AudioTrack? = null
+    private val audioTrackRef = AtomicReference<AudioTrack?>(null)
     private var synthesisThread: Thread? = null
     private val stopped = AtomicBoolean(false)
 
-    private val httpClient = OkHttpClient.Builder()
+    private val httpClient = baseClient.newBuilder()
         .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(120, TimeUnit.SECONDS) // TTS can take a while for long text
+        .readTimeout(120, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
         .build()
 
-    /**
-     * Synthesize and play speech for the given text.
-     * Runs network + playback on a background thread.
-     */
     fun speak(text: String) {
-        stop() // Kill any current playback
+        stop()
 
-        val apiKey = PromptSettings.getGeminiApiKey(context)
+        val apiKey = settings.geminiApiKey
         if (apiKey.isNullOrBlank()) {
             DebugLog.log(TAG, "No Gemini API key, falling back to silence")
             onSpeechDone?.invoke()
             return
         }
 
-        // Strip markdown formatting
         val cleaned = text
             .replace(Regex("\\*+"), "")
             .replace(Regex("~+"), "")
@@ -105,7 +83,7 @@ class GeminiTtsManager(private val context: Context) {
         isSpeaking = true
         pendingText = cleaned
 
-        val voiceName = PromptSettings.getGeminiTtsVoice(context) ?: DEFAULT_VOICE
+        val voiceName = settings.geminiTtsVoice ?: DEFAULT_VOICE
 
         synthesisThread = Thread({
             synthesizeAndPlay(apiKey, cleaned, voiceName)
@@ -113,10 +91,9 @@ class GeminiTtsManager(private val context: Context) {
     }
 
     private fun synthesizeAndPlay(apiKey: String, text: String, voiceName: String) {
-        handler.post { onStatusUpdate?.invoke("🔊 Generating voice...") }
+        handler.post { onStatusUpdate?.invoke("\uD83D\uDD0A Generating voice...") }
         DebugLog.log(TAG, "Synthesizing: ${text.length} chars, voice=$voiceName")
 
-        // Build request per Gemini TTS API docs
         val requestJson = JSONObject().apply {
             put("contents", JSONArray().put(
                 JSONObject().apply {
@@ -138,9 +115,12 @@ class GeminiTtsManager(private val context: Context) {
             })
         }
 
-        val url = "$TTS_URL?key=$apiKey"
         val body = requestJson.toString().toRequestBody("application/json".toMediaType())
-        val request = Request.Builder().url(url).post(body).build()
+        val request = Request.Builder()
+            .url(TTS_URL)
+            .post(body)
+            .header("x-goog-api-key", apiKey)
+            .build()
 
         try {
             val response = httpClient.newCall(request).execute()
@@ -161,7 +141,6 @@ class GeminiTtsManager(private val context: Context) {
                 return
             }
 
-            // Parse response: candidates[0].content.parts[0].inlineData.data
             val base64Audio = try {
                 JSONObject(responseBody ?: "{}")
                     .getJSONArray("candidates")
@@ -180,7 +159,6 @@ class GeminiTtsManager(private val context: Context) {
 
             if (stopped.get()) return
 
-            // Decode base64 → raw PCM bytes
             val pcmData = android.util.Base64.decode(base64Audio, android.util.Base64.DEFAULT)
             DebugLog.log(TAG, "Got ${pcmData.size} bytes PCM (${pcmData.size / (SAMPLE_RATE * 2.0)}s audio)")
 
@@ -192,7 +170,6 @@ class GeminiTtsManager(private val context: Context) {
         }
     }
 
-    /** Play raw PCM audio through AudioTrack. */
     private fun playPcm(pcmData: ByteArray) {
         if (stopped.get()) {
             finishSpeaking()
@@ -201,7 +178,7 @@ class GeminiTtsManager(private val context: Context) {
 
         val bufferSize = AudioTrack.getMinBufferSize(SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT)
 
-        audioTrack = AudioTrack.Builder()
+        val track = AudioTrack.Builder()
             .setAudioAttributes(
                 AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_MEDIA)
@@ -215,41 +192,52 @@ class GeminiTtsManager(private val context: Context) {
                     .setEncoding(AUDIO_FORMAT)
                     .build()
             )
-            .setBufferSizeInBytes(maxOf(bufferSize, pcmData.size))
-            .setTransferMode(AudioTrack.MODE_STATIC)
+            .setBufferSizeInBytes(bufferSize)
+            .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
 
-        try {
-            audioTrack?.write(pcmData, 0, pcmData.size)
-            audioTrack?.setNotificationMarkerPosition(pcmData.size / 2) // frames = bytes / 2 for 16-bit
-            audioTrack?.setPlaybackPositionUpdateListener(object : AudioTrack.OnPlaybackPositionUpdateListener {
-                override fun onMarkerReached(track: AudioTrack?) {
-                    DebugLog.log(TAG, "Playback complete")
-                    finishSpeaking()
-                }
-                override fun onPeriodicNotification(track: AudioTrack?) {}
-            })
+        audioTrackRef.set(track)
 
-            if (!stopped.get()) {
-                audioTrack?.play()
-                DebugLog.log(TAG, "Playing audio...")
-                handler.post { onStatusUpdate?.invoke("") }  // Clear status — audio is playing
-            } else {
-                finishSpeaking()
+        try {
+            if (stopped.get()) {
+                releaseTrack(track)
+                return
+            }
+
+            track.play()
+            DebugLog.log(TAG, "Playing audio (stream mode, ${pcmData.size} bytes)...")
+            handler.post { onStatusUpdate?.invoke("") }
+
+            var offset = 0
+            while (offset < pcmData.size && !stopped.get()) {
+                val toWrite = minOf(bufferSize, pcmData.size - offset)
+                val written = track.write(pcmData, offset, toWrite)
+                if (written < 0) break
+                offset += written
             }
         } catch (e: Exception) {
             DebugLog.log(TAG, "AudioTrack error: ${e.message}")
+            releaseTrack(audioTrackRef.getAndSet(null))
             finishWithError(e.message ?: "playback error")
+            return
         }
+
+        releaseTrack(audioTrackRef.getAndSet(null))
+
+        if (!stopped.get()) {
+            finishSpeaking()
+        }
+    }
+
+    private fun releaseTrack(track: AudioTrack?) {
+        track ?: return
+        try { track.stop() } catch (_: Exception) {}
+        try { track.release() } catch (_: Exception) {}
     }
 
     fun stop() {
         stopped.set(true)
-        try {
-            audioTrack?.stop()
-            audioTrack?.release()
-        } catch (_: Exception) {}
-        audioTrack = null
+        releaseTrack(audioTrackRef.getAndSet(null))
         isSpeaking = false
     }
 
@@ -259,20 +247,12 @@ class GeminiTtsManager(private val context: Context) {
     }
 
     private fun finishSpeaking() {
-        try {
-            audioTrack?.release()
-        } catch (_: Exception) {}
-        audioTrack = null
         isSpeaking = false
         pendingText = null
         handler.post { onSpeechDone?.invoke() }
     }
 
     private fun finishWithError(reason: String) {
-        try {
-            audioTrack?.release()
-        } catch (_: Exception) {}
-        audioTrack = null
         isSpeaking = false
         val text = pendingText
         pendingText = null

@@ -10,7 +10,6 @@ import androidx.car.app.model.*
  */
 class CompanionResponseScreen(
     carContext: CarContext,
-    private val mainScreen: CompanionMainScreen,
     private val responseText: String
 ) : Screen(carContext) {
 

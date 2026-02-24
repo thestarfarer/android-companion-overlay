@@ -11,6 +11,8 @@ import android.graphics.PixelFormat
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.SystemClock
+import android.view.Choreographer
 import android.view.*
 import android.widget.ImageView
 import androidx.core.app.NotificationCompat
@@ -44,8 +46,7 @@ import org.koin.android.ext.android.inject
 class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceInputHost {
 
     companion object {
-        const val CHANNEL_ID = "companion_overlay_channel"
-        private const val TARGET_FPS = 60
+        const val CHANNEL_ID = CompanionApplication.NOTIFICATION_CHANNEL_ID
         private const val LONG_PRESS_TIMEOUT_MS = 500L
     }
 
@@ -59,6 +60,7 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
     private val screenshotManager: ScreenshotManager by inject()
     private val settings: SettingsRepository by inject()
     private val beepManager: BeepManager by inject()
+    private val httpClient: okhttp3.OkHttpClient by inject()
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
@@ -100,6 +102,10 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        return START_STICKY
+    }
+
     override fun onCreate() {
         super.onCreate()
         coordinator.onOverlayServiceStarted()
@@ -110,14 +116,17 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
         subscribeToEvents()
         startAnimation()
 
-        createNotificationChannel()
         startForeground(1, createNotification())
 
-        registerReceiver(screenReceiver, IntentFilter().apply {
-            addAction(Intent.ACTION_SCREEN_OFF)
-            addAction(Intent.ACTION_SCREEN_ON)
-            addAction(Intent.ACTION_USER_PRESENT)
-        })
+        registerReceiver(
+            screenReceiver,
+            IntentFilter().apply {
+                addAction(Intent.ACTION_SCREEN_OFF)
+                addAction(Intent.ACTION_SCREEN_ON)
+                addAction(Intent.ACTION_USER_PRESENT)
+            },
+            Context.RECEIVER_NOT_EXPORTED
+        )
 
         DebugLog.log("Overlay", "Service created")
     }
@@ -128,6 +137,7 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
         stopAnimation()
 
         runCatching { unregisterReceiver(screenReceiver) }
+            .onFailure { DebugLog.log("Overlay", "Failed to unregister receiver: ${it.message}") }
 
         voiceController.destroy()
         audioCoordinator.release()
@@ -138,6 +148,7 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
 
         if (::overlayView.isInitialized) {
             runCatching { windowManager.removeView(overlayView) }
+                .onFailure { DebugLog.log("Overlay", "Failed to remove overlay view: ${it.message}") }
         }
 
         serviceScope.cancel()
@@ -152,17 +163,22 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
 
     private fun initializeScreen() {
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
-        val metrics = resources.displayMetrics
-        screenWidth = metrics.widthPixels
-        screenHeight = metrics.heightPixels
-        density = metrics.density
+        density = resources.displayMetrics.density
+
+        val wm = windowManager.maximumWindowMetrics
+        val insets = wm.windowInsets
+            .getInsetsIgnoringVisibility(android.view.WindowInsets.Type.systemBars())
+        screenWidth = wm.bounds.width()
+        screenHeight = wm.bounds.height() - insets.top - insets.bottom
     }
 
     private fun initializeManagers() {
-        spriteAnimator = SpriteAnimator(this).apply {
-            this.screenWidth = this@CompanionOverlayService.screenWidth
-            this.screenHeight = this@CompanionOverlayService.screenHeight
-            this.density = this@CompanionOverlayService.density
+        val animConfig = SpriteAnimator.Config(
+            screenWidth = screenWidth,
+            screenHeight = screenHeight,
+            density = density
+        )
+        spriteAnimator = SpriteAnimator(this, animConfig, settings).apply {
             loadSprites()
         }
 
@@ -178,7 +194,7 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
             }
         }
 
-        voiceController = VoiceInputController(this, this, settings, beepManager)
+        voiceController = VoiceInputController(this, this, settings, beepManager, httpClient)
     }
 
     private fun subscribeToEvents() {
@@ -216,11 +232,8 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
         restorePosition()
         setupTouchHandling()
 
-        spriteAnimator.overlayView = overlayView
-        spriteAnimator.params = params
-        spriteAnimator.windowManager = windowManager
-        spriteAnimator.walkStartX = params.x
-        spriteAnimator.walkTargetX = params.x
+        // Bind view references to the animator
+        spriteAnimator.attach(overlayView, params, windowManager)
 
         windowManager.addView(overlayView, params)
 
@@ -254,23 +267,28 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
     }
 
     // ══════════════════════════════════════════════════════════════════════
-    // Animation loop
+    // Animation loop (vsync-driven via Choreographer)
     // ══════════════════════════════════════════════════════════════════════
 
-    private val animationRunnable = object : Runnable {
-        override fun run() {
+    private var animating = false
+
+    private val frameCallback = object : Choreographer.FrameCallback {
+        override fun doFrame(frameTimeNanos: Long) {
+            if (!animating) return
             spriteAnimator.update()
-            handler.postDelayed(this, 1000L / TARGET_FPS)
+            Choreographer.getInstance().postFrameCallback(this)
         }
     }
 
     private fun startAnimation() {
-        spriteAnimator.startTime = System.currentTimeMillis()
-        handler.post(animationRunnable)
+        spriteAnimator.startTime = SystemClock.elapsedRealtime()
+        animating = true
+        Choreographer.getInstance().postFrameCallback(frameCallback)
     }
 
     private fun stopAnimation() {
-        handler.removeCallbacks(animationRunnable)
+        animating = false
+        Choreographer.getInstance().removeFrameCallback(frameCallback)
         longPressHandler.removeCallbacksAndMessages(null)
     }
 
@@ -461,7 +479,7 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
             when (intent.action) {
                 Intent.ACTION_SCREEN_OFF -> stopAnimation()
                 Intent.ACTION_SCREEN_ON -> {
-                    spriteAnimator.startTime = System.currentTimeMillis()
+                    spriteAnimator.startTime = SystemClock.elapsedRealtime()
                     overlayView.alpha = 0f
                     spriteAnimator.update()
                     startAnimation()
@@ -488,7 +506,7 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
                 runCatching {
                     windowManager.removeView(overlayView)
                     windowManager.addView(overlayView, params)
-                }
+                }.onFailure { DebugLog.log("Overlay", "Ghost mode view swap failed: ${it.message}") }
                 overlayView.animate().alpha(0.5f).setDuration(200).start()
                 spriteAnimator.setGhostMode(true)
             }
@@ -500,18 +518,6 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
     // ══════════════════════════════════════════════════════════════════════
     // Notification
     // ══════════════════════════════════════════════════════════════════════
-
-    private fun createNotificationChannel() {
-        val channel = android.app.NotificationChannel(
-            CHANNEL_ID,
-            "Companion Overlay",
-            android.app.NotificationManager.IMPORTANCE_LOW
-        ).apply {
-            description = "Keeps Senni alive on your screen"
-        }
-        getSystemService(android.app.NotificationManager::class.java)
-            .createNotificationChannel(channel)
-    }
 
     private fun createNotification(): Notification {
         val intent = Intent(this, MainActivity::class.java)

@@ -15,6 +15,7 @@ import android.widget.Toast
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityWindowInfo
 import com.starfarer.companionoverlay.event.OverlayCoordinator
+import com.starfarer.companionoverlay.repository.SettingsRepository
 import com.starfarer.companionoverlay.event.OverlayEvent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -24,7 +25,6 @@ import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.launch
 import org.koin.android.ext.android.inject
 import java.io.ByteArrayOutputStream
-import java.util.concurrent.Executors
 
 /**
  * Accessibility service for screenshot capture and hardware key interception.
@@ -40,9 +40,11 @@ class CompanionAccessibilityService : AccessibilityService() {
     }
 
     private val coordinator: OverlayCoordinator by inject()
+    private val settings: SettingsRepository by inject()
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     
     private val handler = Handler(Looper.getMainLooper())
+    private val screenshotExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
     private var tapCount = 0
     private var pendingVolumeDown: Runnable? = null
 
@@ -59,7 +61,7 @@ class CompanionAccessibilityService : AccessibilityService() {
         serviceScope.launch {
             coordinator.events
                 .filterIsInstance<OverlayEvent.ScreenshotRequest>()
-                .collect { event ->
+                .collect {
                     takeScreenshotInternal { base64 ->
                         coordinator.onScreenshotComplete(base64)
                     }
@@ -67,11 +69,7 @@ class CompanionAccessibilityService : AccessibilityService() {
         }
 
         DebugLog.log(TAG, "Senni's eyes are open~ (flags: ${serviceInfo.flags})")
-        val prefs = getSharedPreferences("companion_prompts", MODE_PRIVATE)
-        if (!prefs.getBoolean("accessibility_toast_shown", false)) {
-            prefs.edit().putBoolean("accessibility_toast_shown", true).apply()
-            Toast.makeText(this, "Accessibility enabled~ Reboot if volume button toggle doesn't work", Toast.LENGTH_LONG).show()
-        }
+        Toast.makeText(this, "Accessibility enabled~ Reboot if volume button toggle doesn't work", Toast.LENGTH_LONG).show()
     }
 
     override fun onKeyEvent(event: KeyEvent): Boolean {
@@ -91,48 +89,63 @@ class CompanionAccessibilityService : AccessibilityService() {
 
         // --- Volume down: double-tap = toggle overlay, triple-tap = toggle voice ---
         if (event.keyCode != KeyEvent.KEYCODE_VOLUME_DOWN) return false
-        if (!PromptSettings.getVolumeToggle(this)) return false
+        if (!settings.volumeToggleEnabled) return false
 
-        if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
-            tapCount++
+        if (event.action == KeyEvent.ACTION_DOWN) {
+            if (event.repeatCount == 0) {
+                tapCount++
 
-            // Cancel any pending action from previous taps
-            pendingVolumeDown?.let { handler.removeCallbacks(it) }
-            pendingVolumeDown = null
+                // Cancel any pending action from previous taps
+                pendingVolumeDown?.let { handler.removeCallbacks(it) }
+                pendingVolumeDown = null
 
-            if (tapCount >= 3) {
-                // Triple-tap — toggle voice input
-                DebugLog.log(TAG, "Triple-tap volume down → toggle voice")
-                tapCount = 0
-                if (coordinator.overlayRunning.value) {
-                    coordinator.toggleVoice()
+                if (tapCount >= 3) {
+                    // Triple-tap — toggle voice input
+                    DebugLog.log(TAG, "Triple-tap volume down → toggle voice")
+                    tapCount = 0
+                    if (coordinator.overlayRunning.value) {
+                        coordinator.toggleVoice()
+                    }
+                } else {
+                    // Wait to see if more taps are coming
+                    val currentCount = tapCount
+                    val resolve = Runnable {
+                        when (currentCount) {
+                            1 -> {
+                                // Single tap — replay volume down
+                                DebugLog.log(TAG, "Single tap — replaying volume down")
+                                val audio = getSystemService(AUDIO_SERVICE) as AudioManager
+                                audio.adjustStreamVolume(
+                                    AudioManager.STREAM_MUSIC,
+                                    AudioManager.ADJUST_LOWER,
+                                    AudioManager.FLAG_SHOW_UI
+                                )
+                            }
+                            2 -> {
+                                // Double-tap — toggle overlay
+                                DebugLog.log(TAG, "Double-tap volume down → toggle overlay")
+                                toggleOverlay()
+                            }
+                        }
+                        tapCount = 0
+                        pendingVolumeDown = null
+                    }
+                    pendingVolumeDown = resolve
+                    handler.postDelayed(resolve, DOUBLE_TAP_WINDOW_MS)
                 }
             } else {
-                // Wait to see if more taps are coming
-                val currentCount = tapCount
-                val resolve = Runnable {
-                    when (currentCount) {
-                        1 -> {
-                            // Single tap — replay volume down
-                            DebugLog.log(TAG, "Single tap — replaying volume down")
-                            val audio = getSystemService(AUDIO_SERVICE) as AudioManager
-                            audio.adjustStreamVolume(
-                                AudioManager.STREAM_MUSIC,
-                                AudioManager.ADJUST_LOWER,
-                                AudioManager.FLAG_SHOW_UI
-                            )
-                        }
-                        2 -> {
-                            // Double-tap — toggle overlay
-                            DebugLog.log(TAG, "Double-tap volume down → toggle overlay")
-                            toggleOverlay()
-                        }
-                    }
-                    tapCount = 0
+                // Long-press repeat — cancel pending tap detection and replay volume decrease
+                if (tapCount > 0) {
+                    pendingVolumeDown?.let { handler.removeCallbacks(it) }
                     pendingVolumeDown = null
+                    tapCount = 0
                 }
-                pendingVolumeDown = resolve
-                handler.postDelayed(resolve, DOUBLE_TAP_WINDOW_MS)
+                val audio = getSystemService(AUDIO_SERVICE) as AudioManager
+                audio.adjustStreamVolume(
+                    AudioManager.STREAM_MUSIC,
+                    AudioManager.ADJUST_LOWER,
+                    0
+                )
             }
         }
 
@@ -160,7 +173,7 @@ class CompanionAccessibilityService : AccessibilityService() {
 
         takeScreenshot(
             Display.DEFAULT_DISPLAY,
-            Executors.newSingleThreadExecutor(),
+            screenshotExecutor,
             object : TakeScreenshotCallback {
                 override fun onSuccess(result: ScreenshotResult) {
                     try {
@@ -246,6 +259,7 @@ class CompanionAccessibilityService : AccessibilityService() {
     override fun onDestroy() {
         super.onDestroy()
         pendingVolumeDown?.let { handler.removeCallbacks(it) }
+        screenshotExecutor.shutdown()
         serviceScope.cancel()
         coordinator.onAccessibilityServiceDisconnected()
         DebugLog.log(TAG, "Senni's eyes are closed.")

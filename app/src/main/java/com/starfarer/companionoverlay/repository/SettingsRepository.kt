@@ -8,11 +8,15 @@ import com.starfarer.companionoverlay.PromptSettings
  * Repository layer for application settings.
  *
  * Wraps SharedPreferences to provide a testable, injectable interface.
- * All settings access should flow through this class rather than
- * calling PromptSettings directly from business logic.
+ * All runtime settings access flows through this class. Default values
+ * are defined in [PromptSettings], which is now a pure constants object.
  *
  * Security note: Sensitive values (API keys) are stored in [securePrefs],
  * which uses EncryptedSharedPreferences. Non-sensitive settings use [settingsPrefs].
+ *
+ * Conversation history is handled separately by [ConversationStorage] —
+ * it was moved out of SharedPreferences because SP rewrites the entire
+ * file on every apply(), and conversations with screenshots can be large.
  *
  * Injected via Koin as a singleton.
  */
@@ -22,9 +26,6 @@ class SettingsRepository(
     private val presetProvider: () -> CharacterPreset
 ) {
 
-    init {
-        migrateInsecureKeys()
-    }
 
     // ══════════════════════════════════════════════════════════════════════
     // Character Preset (read-only here, mutations go through CharacterPreset)
@@ -65,15 +66,6 @@ class SettingsRepository(
     var keepDialogue: Boolean
         get() = settingsPrefs.getBoolean(KEY_KEEP_DIALOGUE, false)
         set(value) = settingsPrefs.edit().putBoolean(KEY_KEEP_DIALOGUE, value).apply()
-
-    var conversationHistory: String?
-        get() = settingsPrefs.getString(KEY_CONVERSATION_HISTORY, null)
-        set(value) {
-            val editor = settingsPrefs.edit()
-            if (value == null) editor.remove(KEY_CONVERSATION_HISTORY)
-            else editor.putString(KEY_CONVERSATION_HISTORY, value)
-            editor.apply()
-        }
 
     // ══════════════════════════════════════════════════════════════════════
     // On-Device TTS
@@ -165,32 +157,12 @@ class SettingsRepository(
         // Don't clear secure prefs — that would wipe auth tokens too
     }
 
-    // ══════════════════════════════════════════════════════════════════════
-    // Migration
-    // ══════════════════════════════════════════════════════════════════════
-
-    /**
-     * Migrate sensitive keys from plaintext storage to encrypted storage.
-     * Runs once on init; idempotent if already migrated or nothing to migrate.
-     */
-    private fun migrateInsecureKeys() {
-        // Check for Gemini API key in old location
-        val oldKey = settingsPrefs.getString(KEY_GEMINI_API_KEY, null)
-        if (oldKey != null && securePrefs.getString(KEY_GEMINI_API_KEY, null) == null) {
-            // Move to encrypted storage
-            securePrefs.edit().putString(KEY_GEMINI_API_KEY, oldKey).apply()
-            // Wipe from plaintext storage
-            settingsPrefs.edit().remove(KEY_GEMINI_API_KEY).apply()
-        }
-    }
-
     companion object {
         private const val KEY_MODEL = "selected_model"
         private const val KEY_WEB_SEARCH = "web_search_enabled"
         private const val KEY_BUBBLE_TIMEOUT = "bubble_timeout"
         private const val KEY_MAX_MESSAGES = "max_messages"
         private const val KEY_KEEP_DIALOGUE = "keep_dialogue"
-        private const val KEY_CONVERSATION_HISTORY = "conversation_history"
         private const val KEY_TTS_ENABLED = "tts_enabled"
         private const val KEY_TTS_VOICE = "tts_voice"
         private const val KEY_TTS_SPEECH_RATE = "tts_speech_rate"

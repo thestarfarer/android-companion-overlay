@@ -3,17 +3,22 @@ package com.starfarer.companionoverlay
 import androidx.car.app.CarContext
 import androidx.car.app.Screen
 import androidx.car.app.model.*
+import com.starfarer.companionoverlay.repository.SettingsRepository
+import org.koin.core.component.KoinComponent
+import org.koin.core.component.inject
 
 /**
- * Model selector for Android Auto — ListTemplate with radio-style rows.
+ * Model selector for Android Auto: ListTemplate with radio-style rows.
  */
 class CompanionModelScreen(
     carContext: CarContext,
-    private val mainScreen: CompanionMainScreen
-) : Screen(carContext) {
+    private val onModelChanged: () -> Unit
+) : Screen(carContext), KoinComponent {
+
+    private val settings: SettingsRepository by inject()
 
     override fun onGetTemplate(): Template {
-        val currentModel = PromptSettings.getModel(carContext)
+        val currentModel = settings.model
 
         val listBuilder = ItemList.Builder()
         for (i in PromptSettings.MODEL_IDS.indices) {
@@ -26,8 +31,8 @@ class CompanionModelScreen(
                     .setTitle(modelName)
                     .addText(if (isSelected) "● Active" else "")
                     .setOnClickListener {
-                        PromptSettings.setModel(carContext, modelId)
-                        mainScreen.onModelChanged()
+                        settings.model = modelId
+                        onModelChanged()
                         screenManager.pop()
                     }
                     .build()

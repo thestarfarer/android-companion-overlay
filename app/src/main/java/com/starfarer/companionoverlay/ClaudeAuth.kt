@@ -2,13 +2,12 @@ package com.starfarer.companionoverlay
 
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.util.Base64
 import androidx.browser.customtabs.CustomTabsIntent
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.Dns
@@ -36,8 +35,19 @@ import java.util.concurrent.TimeUnit
  * 3. Listen on localhost for callback
  * 4. Exchange code for tokens
  * 5. Store tokens in encrypted preferences
+ *
+ * Dependencies are injected via Koin:
+ * - [baseClient]: shared OkHttpClient (connection pool reused)
+ * - [prefs]: EncryptedSharedPreferences for token storage
+ *
+ * The custom DNS fallback is applied via [OkHttpClient.newBuilder], which
+ * inherits the parent's connection pool and thread pool.
  */
-class ClaudeAuth(private val context: Context) {
+class ClaudeAuth(
+    private val context: Context,
+    baseClient: OkHttpClient,
+    private val prefs: SharedPreferences
+) {
 
     companion object {
         private const val TAG = "Auth"
@@ -58,7 +68,6 @@ class ClaudeAuth(private val context: Context) {
         private const val REDIRECT_URI = "http://localhost:$CALLBACK_PORT/callback"
 
         // Storage keys
-        private const val PREFS_NAME = "companion_auth"
         private const val KEY_ACCESS_TOKEN = "access_token"
         private const val KEY_REFRESH_TOKEN = "refresh_token"
         private const val KEY_EXPIRES_AT = "expires_at"
@@ -82,13 +91,11 @@ class ClaudeAuth(private val context: Context) {
      */
     private val customDns = object : Dns {
         override fun lookup(hostname: String): List<InetAddress> {
-            // Try system DNS first
             return try {
                 val addresses = InetAddress.getAllByName(hostname).toList()
                 log("DNS: $hostname → ${addresses.map { it.hostAddress }}")
                 addresses
             } catch (e: Exception) {
-                // Fall back to hardcoded IPs if available
                 val fallback = FALLBACK_IPS[hostname]
                 if (fallback != null) {
                     log("DNS failed for $hostname, using fallback: $fallback")
@@ -101,39 +108,17 @@ class ClaudeAuth(private val context: Context) {
         }
     }
 
-    private val httpClient = OkHttpClient.Builder()
+    /**
+     * HTTP client derived from the shared app-wide client. Inherits connection
+     * pool and thread pool; adds custom DNS for Anthropic domain resolution
+     * and tighter timeouts appropriate for auth flows.
+     */
+    private val httpClient = baseClient.newBuilder()
         .dns(customDns)
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
         .build()
-
-    private val prefs by lazy {
-        log("Initializing EncryptedSharedPreferences...")
-        try {
-            createEncryptedPrefs()
-        } catch (e: Exception) {
-            log("ERROR creating prefs: ${e.message}, deleting and retrying...")
-            try { context.deleteSharedPreferences(PREFS_NAME) } catch (_: Exception) {}
-            try {
-                createEncryptedPrefs()
-            } catch (e2: Exception) {
-                log("Retry also failed: ${e2.message}, using plain prefs")
-                context.getSharedPreferences(PREFS_NAME + "_fallback", Context.MODE_PRIVATE)
-            }
-        }
-    }
-
-    private fun createEncryptedPrefs(): android.content.SharedPreferences {
-        val masterKey = MasterKey.Builder(context)
-            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-            .build()
-        return EncryptedSharedPreferences.create(
-            context, PREFS_NAME, masterKey,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-        )
-    }
 
     // ══════════════════════════════════════════════════════════════════════
     // Public interface
@@ -181,7 +166,7 @@ class ClaudeAuth(private val context: Context) {
             val codeChallenge = generateCodeChallenge(codeVerifier)
             val state = generateState()
 
-            log("Generated PKCE - verifier: ${codeVerifier.take(10)}..., state: ${state.take(10)}...")
+            log("Generated PKCE params")
 
             val authUrl = Uri.parse(OAUTH_AUTHORIZE_URL).buildUpon()
                 .appendQueryParameter("code", "true")
@@ -249,7 +234,7 @@ class ClaudeAuth(private val context: Context) {
             val returnedState = uri.getQueryParameter("state")
             val error = uri.getQueryParameter("error")
 
-            log("Callback - code: ${code?.take(10)}..., state match: ${returnedState == state}, error: $error")
+            log("Callback received - state match: ${returnedState == state}, error: $error")
 
             val writer = PrintWriter(socket.getOutputStream(), true)
 
@@ -343,49 +328,59 @@ class ClaudeAuth(private val context: Context) {
     }
 
     suspend fun refreshToken(): Result<Unit> = withContext(Dispatchers.IO) {
-        try {
-            val refreshToken = prefs.getString(KEY_REFRESH_TOKEN, null)
-                ?: return@withContext Result.failure(Exception("No refresh token"))
+        val refreshToken = prefs.getString(KEY_REFRESH_TOKEN, null)
+            ?: return@withContext Result.failure(Exception("No refresh token"))
 
-            log("Refreshing token...")
+        log("Refreshing token...")
 
-            val body = JSONObject().apply {
-                put("grant_type", "refresh_token")
-                put("refresh_token", refreshToken)
-                put("client_id", OAUTH_CLIENT_ID)
-                put("scope", OAUTH_REFRESH_SCOPES)
+        var lastError: Exception? = null
+        repeat(3) { attempt ->
+            try {
+                val body = JSONObject().apply {
+                    put("grant_type", "refresh_token")
+                    put("refresh_token", refreshToken)
+                    put("client_id", OAUTH_CLIENT_ID)
+                    put("scope", OAUTH_REFRESH_SCOPES)
+                }
+
+                val request = Request.Builder()
+                    .url(OAUTH_TOKEN_URL)
+                    .post(body.toString().toRequestBody("application/json".toMediaType()))
+                    .build()
+
+                val response = httpClient.newCall(request).execute()
+
+                if (!response.isSuccessful) {
+                    log("Refresh failed: ${response.code}")
+                    return@withContext Result.failure(Exception("Refresh failed"))
+                }
+
+                val json = JSONObject(response.body?.string() ?: "{}")
+                val newAccessToken = json.getString("access_token")
+                val newRefreshToken = json.optString("refresh_token", refreshToken)
+                val expiresIn = json.optLong("expires_in", 3600)
+                val expiresAt = System.currentTimeMillis() + (expiresIn * 1000)
+
+                prefs.edit()
+                    .putString(KEY_ACCESS_TOKEN, newAccessToken)
+                    .putString(KEY_REFRESH_TOKEN, newRefreshToken)
+                    .putLong(KEY_EXPIRES_AT, expiresAt)
+                    .commit()
+
+                log("Token refreshed")
+                return@withContext Result.success(Unit)
+            } catch (e: java.io.IOException) {
+                lastError = e
+                log("Refresh attempt ${attempt + 1} failed: ${e.message}")
+                if (attempt < 2) kotlinx.coroutines.delay(1000L * (attempt + 1))
+            } catch (e: Exception) {
+                log("Refresh exception: ${e.message}")
+                return@withContext Result.failure(e)
             }
-
-            val request = Request.Builder()
-                .url(OAUTH_TOKEN_URL)
-                .post(body.toString().toRequestBody("application/json".toMediaType()))
-                .build()
-
-            val response = httpClient.newCall(request).execute()
-
-            if (!response.isSuccessful) {
-                log("Refresh failed: ${response.code}")
-                return@withContext Result.failure(Exception("Refresh failed"))
-            }
-
-            val json = JSONObject(response.body?.string() ?: "{}")
-            val newAccessToken = json.getString("access_token")
-            val newRefreshToken = json.optString("refresh_token", refreshToken)
-            val expiresIn = json.optLong("expires_in", 3600)
-            val expiresAt = System.currentTimeMillis() + (expiresIn * 1000)
-
-            prefs.edit()
-                .putString(KEY_ACCESS_TOKEN, newAccessToken)
-                .putString(KEY_REFRESH_TOKEN, newRefreshToken)
-                .putLong(KEY_EXPIRES_AT, expiresAt)
-                .commit()
-
-            log("Token refreshed")
-            Result.success(Unit)
-        } catch (e: Exception) {
-            log("Refresh exception: ${e.message}")
-            Result.failure(e)
         }
+
+        log("Token refresh failed after 3 attempts")
+        Result.failure(lastError ?: Exception("Refresh failed"))
     }
 
     suspend fun getValidToken(): String? {
