@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dark theme overrides -->
+    <style name="Theme.CompanionOverlay" parent="Theme.Material3.Dark.NoActionBar">
+        <!-- Primary: gold accent -->
+        <item name="colorPrimary">@color/gold</item>
+        <item name="colorPrimaryContainer">@color/surface_variant</item>
+        <item name="colorOnPrimary">@color/on_gold</item>
+        <item name="colorOnPrimaryContainer">@color/gold</item>
+
+        <!-- Secondary -->
+        <item name="colorSecondary">@color/gold_variant</item>
+        <item name="colorSecondaryContainer">@color/surface_variant</item>
+        <item name="colorOnSecondary">@color/on_gold</item>
+        <item name="colorOnSecondaryContainer">@color/gold_variant</item>
+
+        <!-- Surface -->
+        <item name="colorSurface">@color/surface</item>
+        <item name="colorSurfaceVariant">@color/surface_variant</item>
+        <item name="colorOnSurface">@color/text_primary</item>
+        <item name="colorOnSurfaceVariant">@color/text_secondary</item>
+
+        <!-- Background -->
+        <item name="android:colorBackground">@color/background</item>
+        <item name="colorOnBackground">@color/text_primary</item>
+
+        <!-- System bars - dark icons on dark is wrong, so no light status bar -->
+        <item name="android:statusBarColor">@color/status_bar</item>
+        <item name="android:navigationBarColor">@color/navigation_bar</item>
+        <item name="android:windowBackground">@color/background</item>
+        <item name="android:windowLightStatusBar">false</item>
+
+        <!-- Accent for legacy views -->
+        <item name="colorAccent">@color/gold</item>
+
+        <!-- Preference theming -->
+        <item name="preferenceTheme">@style/CompanionPreferenceTheme</item>
+
+        <!-- Default text colors -->
+        <item name="android:textColor">@color/text_primary</item>
+        <item name="android:textColorPrimary">@color/text_primary</item>
+        <item name="android:textColorSecondary">@color/text_secondary</item>
+
+        <!-- Transitions -->
+        <item name="android:windowActivityTransitions">true</item>
+        <item name="android:windowEnterTransition">@transition/fade_in</item>
+        <item name="android:windowExitTransition">@transition/fade_out</item>
+        <item name="android:windowSharedElementEnterTransition">@transition/shared_element</item>
+        <item name="android:windowSharedElementExitTransition">@transition/shared_element</item>
+    </style>
+</resources>

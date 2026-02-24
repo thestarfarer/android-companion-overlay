@@ -1,80 +1,106 @@
 <?xml version="1.0" encoding="utf-8"?>
-<com.google.android.material.card.MaterialCardView
+<FrameLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
-    style="@style/CompanionCard"
     android:layout_width="match_parent"
-    android:layout_height="wrap_content"
-    android:layout_marginHorizontal="8dp">
+    android:layout_height="match_parent"
+    android:clipChildren="false"
+    android:clipToPadding="false"
+    android:padding="8dp">
 
-    <LinearLayout
+    <com.google.android.material.card.MaterialCardView
+        style="@style/CompanionCard"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:padding="12dp"
-        android:gravity="center_vertical">
+        android:layout_gravity="top"
+        app:cardElevation="4dp">
 
-        <!-- Idle Sprite -->
         <LinearLayout
-            android:id="@+id/idleSpriteCard"
-            android:layout_width="0dp"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:orientation="vertical"
-            android:gravity="center_horizontal"
-            android:background="?attr/selectableItemBackground"
-            android:padding="8dp">
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:baselineAligned="false">
 
-            <ImageView
-                android:id="@+id/idleSpritePreview"
-                android:layout_width="match_parent"
-                android:layout_height="140dp"
-                android:scaleType="fitCenter"
-                android:contentDescription="Idle sprite"/>
+            <!-- Idle Sprite -->
+            <FrameLayout
+                android:id="@+id/idleSpriteCard"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:foreground="?attr/selectableItemBackground"
+                android:clickable="true"
+                android:focusable="true">
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="idle"
-                android:textAppearance="@style/TextAppearance.Companion.LabelSmall"
-                android:layout_marginTop="4dp"/>
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:gravity="center_horizontal"
+                    android:padding="16dp">
+
+                    <ImageView
+                        android:id="@+id/idleSpritePreview"
+                        android:layout_width="match_parent"
+                        android:layout_height="140dp"
+                        android:scaleType="fitCenter"
+                        android:contentDescription="Idle sprite"/>
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="idle"
+                        android:textAppearance="@style/TextAppearance.Companion.LabelSmall"
+                        android:layout_marginTop="4dp"/>
+
+                </LinearLayout>
+
+            </FrameLayout>
+
+            <!-- Divider -->
+            <View
+                android:layout_width="1dp"
+                android:layout_height="match_parent"
+                android:layout_marginVertical="16dp"
+                android:background="@color/sprite_divider"/>
+
+            <!-- Walk Sprite -->
+            <FrameLayout
+                android:id="@+id/walkSpriteCard"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:foreground="?attr/selectableItemBackground"
+                android:clickable="true"
+                android:focusable="true">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:gravity="center_horizontal"
+                    android:padding="16dp">
+
+                    <ImageView
+                        android:id="@+id/walkSpritePreview"
+                        android:layout_width="match_parent"
+                        android:layout_height="140dp"
+                        android:scaleType="fitCenter"
+                        android:contentDescription="Walk sprite"/>
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="walk"
+                        android:textAppearance="@style/TextAppearance.Companion.LabelSmall"
+                        android:layout_marginTop="4dp"/>
+
+                </LinearLayout>
+
+            </FrameLayout>
 
         </LinearLayout>
 
-        <!-- Divider -->
-        <View
-            android:layout_width="1dp"
-            android:layout_height="100dp"
-            android:layout_marginHorizontal="8dp"
-            android:background="#333333"/>
+    </com.google.android.material.card.MaterialCardView>
 
-        <!-- Walk Sprite -->
-        <LinearLayout
-            android:id="@+id/walkSpriteCard"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:orientation="vertical"
-            android:gravity="center_horizontal"
-            android:background="?attr/selectableItemBackground"
-            android:padding="8dp">
-
-            <ImageView
-                android:id="@+id/walkSpritePreview"
-                android:layout_width="match_parent"
-                android:layout_height="140dp"
-                android:scaleType="fitCenter"
-                android:contentDescription="Walk sprite"/>
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="walk"
-                android:textAppearance="@style/TextAppearance.Companion.LabelSmall"
-                android:layout_marginTop="4dp"/>
-
-        </LinearLayout>
-
-    </LinearLayout>
-
-</com.google.android.material.card.MaterialCardView>
+</FrameLayout>
