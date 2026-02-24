@@ -166,6 +166,17 @@
 
     </PreferenceCategory>
 
+    <!-- ════════ ABOUT ════════ -->
+    <PreferenceCategory app:iconSpaceReserved="false" app:title="About">
+
+        <Preference
+            app:iconSpaceReserved="false"
+            app:key="open_source_licenses"
+            app:title="Open source licenses"
+            app:summary="Third-party software used in this app"/>
+
+    </PreferenceCategory>
+
     <!-- ════════ DEBUG ════════ -->
     <PreferenceCategory app:iconSpaceReserved="false" app:title="Debug">
 
