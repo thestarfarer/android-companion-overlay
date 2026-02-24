@@ -39,11 +39,31 @@ class SettingsRepository(
     val walkFrameCount: Int get() = presetProvider().walkFrameCount
 
     // ══════════════════════════════════════════════════════════════════════
-    // Model & API
+    // Connection & API
     // ══════════════════════════════════════════════════════════════════════
 
+    var claudeApiKey: String?
+        get() = securePrefs.getString(KEY_CLAUDE_API_KEY, null)
+        set(value) {
+            val editor = securePrefs.edit()
+            if (value.isNullOrBlank()) editor.remove(KEY_CLAUDE_API_KEY)
+            else editor.putString(KEY_CLAUDE_API_KEY, value.trim())
+            editor.apply()
+        }
+
+    var connectionType: String
+        get() = settingsPrefs.getString(KEY_CONNECTION_TYPE, CONNECTION_API_KEY)
+            ?: CONNECTION_API_KEY
+        set(value) = settingsPrefs.edit().putString(KEY_CONNECTION_TYPE, value).apply()
+
+    val isApiKeyMode: Boolean get() = connectionType == CONNECTION_API_KEY
+
+    var advancedUnlocked: Boolean
+        get() = settingsPrefs.getBoolean(KEY_ADVANCED_UNLOCKED, false)
+        set(value) = settingsPrefs.edit().putBoolean(KEY_ADVANCED_UNLOCKED, value).apply()
+
     var model: String
-        get() = settingsPrefs.getString(KEY_MODEL, PromptSettings.DEFAULT_MODEL) 
+        get() = settingsPrefs.getString(KEY_MODEL, PromptSettings.DEFAULT_MODEL)
             ?: PromptSettings.DEFAULT_MODEL
         set(value) = settingsPrefs.edit().putString(KEY_MODEL, value).apply()
 
@@ -158,6 +178,12 @@ class SettingsRepository(
     }
 
     companion object {
+        const val CONNECTION_API_KEY = "api_key"
+        const val CONNECTION_OAUTH = "oauth"
+
+        private const val KEY_CLAUDE_API_KEY = "claude_api_key"
+        private const val KEY_CONNECTION_TYPE = "claude_connection_type"
+        private const val KEY_ADVANCED_UNLOCKED = "advanced_unlocked"
         private const val KEY_MODEL = "selected_model"
         private const val KEY_WEB_SEARCH = "web_search_enabled"
         private const val KEY_BUBBLE_TIMEOUT = "bubble_timeout"

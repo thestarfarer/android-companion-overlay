@@ -322,6 +322,18 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateAuthUI(state: MainViewModel.UiState) {
         when (val authState = state.authState) {
+            is MainViewModel.AuthState.ApiKeyMode -> {
+                if (authState.hasKey) {
+                    authDot.backgroundTintList = ColorStateList.valueOf(getColor(R.color.status_connected))
+                    authStatusText.text = "API Key configured"
+                    authButton.visibility = View.GONE
+                } else {
+                    authDot.backgroundTintList = ColorStateList.valueOf(getColor(R.color.status_error))
+                    authStatusText.text = "API Key not set"
+                    authButton.visibility = View.VISIBLE
+                    authButton.text = "Open Settings"
+                }
+            }
             is MainViewModel.AuthState.Waiting -> {
                 authDot.backgroundTintList = ColorStateList.valueOf(getColor(R.color.status_warning))
                 authStatusText.text = "Waiting for browser..."
@@ -457,6 +469,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun handleAuthClick() {
         when (viewModel.state.value.authState) {
+            is MainViewModel.AuthState.ApiKeyMode -> {
+                startActivity(Intent(this, SettingsActivity::class.java))
+            }
             is MainViewModel.AuthState.Waiting -> {
                 viewModel.cancelAuth()
                 Toast.makeText(this, "Cancelled", Toast.LENGTH_SHORT).show()

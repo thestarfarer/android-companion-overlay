@@ -14,6 +14,7 @@ val viewModelModule = module {
         MainViewModel(
             application = androidApplication(),
             claudeAuth = get(),
+            settings = get(),
             coordinator = get(),
             presetRepository = get()
         )

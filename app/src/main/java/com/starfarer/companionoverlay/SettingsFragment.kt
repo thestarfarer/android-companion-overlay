@@ -40,6 +40,9 @@ class SettingsFragment : PreferenceFragmentCompat() {
     private val claudeApi: ClaudeApi by inject()
     private val settings: SettingsRepository by inject()
 
+    private var accountTapCount = 0
+    private var lastTapTime = 0L
+
     private val voicePermLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { results ->
@@ -72,6 +75,47 @@ class SettingsFragment : PreferenceFragmentCompat() {
         refreshPermissions()
         refreshAccount()
         refreshDebugTest()
+    }
+
+    // ── Claude API Key ──
+
+    private fun setupClaudeApiKey() {
+        findPreference<EditTextPreference>("claude_api_key")?.apply {
+            isPersistent = false
+            text = settings.claudeApiKey
+            summaryProvider = Preference.SummaryProvider<EditTextPreference> { pref ->
+                if (pref.text.isNullOrBlank()) "Enter your sk-ant-... API key"
+                else "Key set (${pref.text!!.take(10)}...)"
+            }
+            setOnBindEditTextListener { editText ->
+                editText.inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                        android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+                editText.isSingleLine = true
+            }
+            setOnPreferenceChangeListener { _, newValue ->
+                settings.claudeApiKey = newValue as? String
+                true
+            }
+        }
+    }
+
+    // ── Connection Type ──
+
+    private fun setupConnectionType() {
+        findPreference<ListPreference>("claude_connection_type")?.apply {
+            isPersistent = false
+            value = settings.connectionType
+            summary = if (settings.isApiKeyMode) "API Key" else "Claude Code OAuth"
+            setOnPreferenceChangeListener { pref, newValue ->
+                val type = newValue as String
+                settings.connectionType = type
+                pref.summary = if (type == SettingsRepository.CONNECTION_API_KEY) "API Key"
+                    else "Claude Code OAuth"
+                refreshAccountVisibility()
+                refreshDebugTest()
+                true
+            }
+        }
     }
 
     // ── Gemini API ──
@@ -196,16 +240,41 @@ class SettingsFragment : PreferenceFragmentCompat() {
     // ── Account ──
 
     private fun setupAccount() {
+        setupClaudeApiKey()
+        setupConnectionType()
+
         findPreference<Preference>("account_auth")?.setOnPreferenceClickListener {
-            handleAuthClick()
+            if (settings.isApiKeyMode && !settings.advancedUnlocked) {
+                val now = System.currentTimeMillis()
+                if (now - lastTapTime > 2000) accountTapCount = 0
+                lastTapTime = now
+                accountTapCount++
+                val remaining = 10 - accountTapCount
+                if (remaining in 1..3) {
+                    Toast.makeText(requireContext(), "$remaining taps to go...", Toast.LENGTH_SHORT).show()
+                }
+                if (accountTapCount >= 10) {
+                    settings.advancedUnlocked = true
+                    accountTapCount = 0
+                    Toast.makeText(requireContext(), "Advanced mode unlocked", Toast.LENGTH_SHORT).show()
+                    refreshAccountVisibility()
+                }
+            } else if (!settings.isApiKeyMode) {
+                handleAuthClick()
+            }
             true
         }
+
+        refreshAccountVisibility()
     }
 
     private fun refreshAccount() {
         context ?: return
-        val pref = findPreference<Preference>("account_auth") ?: return
+        refreshAccountVisibility()
 
+        if (settings.isApiKeyMode) return
+
+        val pref = findPreference<Preference>("account_auth") ?: return
         val isAuth = claudeAuth.isAuthenticated()
         val isWaiting = claudeAuth.isWaitingForCallback()
         val isExpired = isAuth && System.currentTimeMillis() > claudeAuth.getExpiresAt()
@@ -218,6 +287,26 @@ class SettingsFragment : PreferenceFragmentCompat() {
             }
             isAuth && isExpired -> "Token expired — tap to reconnect"
             else -> "Not connected — tap to log in"
+        }
+    }
+
+    private fun refreshAccountVisibility() {
+        val isApiKey = settings.isApiKeyMode
+        val isAdvanced = settings.advancedUnlocked
+
+        findPreference<EditTextPreference>("claude_api_key")?.isVisible = isApiKey
+        findPreference<ListPreference>("claude_connection_type")?.isVisible = isAdvanced
+
+        findPreference<Preference>("account_auth")?.apply {
+            if (!isAdvanced) {
+                isVisible = true
+                if (isApiKey) {
+                    title = "Claude connection"
+                    summary = "Using API Key"
+                }
+            } else {
+                isVisible = !isApiKey
+            }
         }
     }
 
@@ -305,11 +394,17 @@ class SettingsFragment : PreferenceFragmentCompat() {
     }
 
     private fun refreshDebugTest() {
-        val isAuth = claudeAuth.isAuthenticated() &&
-                System.currentTimeMillis() <= claudeAuth.getExpiresAt()
+        val canTest = if (settings.isApiKeyMode) {
+            !settings.claudeApiKey.isNullOrBlank()
+        } else {
+            claudeAuth.isAuthenticated() && System.currentTimeMillis() <= claudeAuth.getExpiresAt()
+        }
         findPreference<Preference>("debug_test")?.apply {
-            isEnabled = isAuth
-            if (!isAuth) summary = "Connect to Claude first"
+            isEnabled = canTest
+            if (!canTest) {
+                summary = if (settings.isApiKeyMode) "Set Claude API key first"
+                    else "Connect to Claude first"
+            }
         }
     }
 
