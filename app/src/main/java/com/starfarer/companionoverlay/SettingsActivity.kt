@@ -11,6 +11,10 @@ import androidx.appcompat.app.AppCompatActivity
  */
 class SettingsActivity : AppCompatActivity() {
 
+    companion object {
+        const val EXTRA_HIGHLIGHT_KEY = "highlight_key"
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_settings)
@@ -25,9 +29,16 @@ class SettingsActivity : AppCompatActivity() {
         }
 
         if (savedInstanceState == null) {
+            val fragment = SettingsFragment().apply {
+                arguments = Bundle().apply {
+                    intent.getStringExtra(EXTRA_HIGHLIGHT_KEY)?.let {
+                        putString(EXTRA_HIGHLIGHT_KEY, it)
+                    }
+                }
+            }
             supportFragmentManager
                 .beginTransaction()
-                .replace(R.id.settingsContainer, SettingsFragment())
+                .replace(R.id.settingsContainer, fragment)
                 .commit()
         }
     }

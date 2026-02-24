@@ -8,11 +8,16 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.provider.Settings
+import android.view.View
+import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.preference.*
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.material.textfield.TextInputEditText
+import com.google.android.material.textfield.TextInputLayout
 import com.starfarer.companionoverlay.event.OverlayCoordinator
 import com.starfarer.companionoverlay.repository.SettingsRepository
 import kotlinx.coroutines.launch
@@ -70,52 +75,120 @@ class SettingsFragment : PreferenceFragmentCompat() {
         setupDebug()
     }
 
+    private var pendingHighlightKey: String? = null
+
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
+        pendingHighlightKey = arguments?.getString(SettingsActivity.EXTRA_HIGHLIGHT_KEY)
+        arguments?.remove(SettingsActivity.EXTRA_HIGHLIGHT_KEY)
+    }
+
     override fun onResume() {
         super.onResume()
         refreshPermissions()
         refreshAccount()
         refreshDebugTest()
+
+        val key = pendingHighlightKey ?: return
+        pendingHighlightKey = null
+        scrollToPreference(key)
+        listView.post {
+            findPreference<Preference>(key)?.performClick()
+        }
     }
 
     // ── Claude API Key ──
 
     private fun setupClaudeApiKey() {
-        findPreference<EditTextPreference>("claude_api_key")?.apply {
-            isPersistent = false
-            text = settings.claudeApiKey
-            summaryProvider = Preference.SummaryProvider<EditTextPreference> { pref ->
-                if (pref.text.isNullOrBlank()) "Enter your sk-ant-... API key"
-                else "Key set (${pref.text!!.take(10)}...)"
-            }
-            setOnBindEditTextListener { editText ->
-                editText.inputType = android.text.InputType.TYPE_CLASS_TEXT or
-                        android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
-                editText.isSingleLine = true
-            }
-            setOnPreferenceChangeListener { _, newValue ->
-                settings.claudeApiKey = newValue as? String
+        findPreference<Preference>("claude_api_key")?.apply {
+            refreshApiKeySummary(this)
+            setOnPreferenceClickListener {
+                showApiKeyDialog()
                 true
             }
         }
     }
 
+    private fun refreshApiKeySummary(pref: Preference? = findPreference("claude_api_key")) {
+        pref ?: return
+        val key = settings.claudeApiKey
+        pref.summary = if (key.isNullOrBlank()) "Enter your sk-ant-... API key"
+        else "Key set (${key.take(10)}...)"
+    }
+
+    private fun showApiKeyDialog() {
+        val ctx = context ?: return
+        val d = ctx.resources.displayMetrics.density
+        val pad = (20 * d).toInt()
+
+        val r = 12 * d
+        val inputLayout = TextInputLayout(ctx, null, com.google.android.material.R.attr.textInputOutlinedStyle).apply {
+            hint = "sk-ant-..."
+            endIconMode = TextInputLayout.END_ICON_PASSWORD_TOGGLE
+            setBoxCornerRadii(r, r, r, r)
+        }
+        val editText = TextInputEditText(inputLayout.context).apply {
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                    android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            isSingleLine = true
+            setText(settings.claudeApiKey ?: "")
+        }
+        inputLayout.addView(editText)
+
+        val container = FrameLayout(ctx).apply {
+            setPadding(pad, (12 * d).toInt(), pad, 0)
+            addView(inputLayout)
+        }
+
+        MaterialAlertDialogBuilder(ctx, R.style.CompanionDialog)
+            .setTitle("Claude API Key")
+            .setView(container)
+            .setPositiveButton("Save") { _, _ ->
+                settings.claudeApiKey = editText.text?.toString()?.trim()
+                refreshApiKeySummary()
+                refreshDebugTest()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+
+        editText.requestFocus()
+    }
+
     // ── Connection Type ──
 
+    private val connectionLabels = arrayOf("API Key", "Claude Code OAuth")
+    private val connectionValues = arrayOf(SettingsRepository.CONNECTION_API_KEY, SettingsRepository.CONNECTION_OAUTH)
+
     private fun setupConnectionType() {
-        findPreference<ListPreference>("claude_connection_type")?.apply {
-            isPersistent = false
-            value = settings.connectionType
+        findPreference<Preference>("claude_connection_type")?.apply {
             summary = if (settings.isApiKeyMode) "API Key" else "Claude Code OAuth"
-            setOnPreferenceChangeListener { pref, newValue ->
-                val type = newValue as String
-                settings.connectionType = type
-                pref.summary = if (type == SettingsRepository.CONNECTION_API_KEY) "API Key"
-                    else "Claude Code OAuth"
-                refreshAccountVisibility()
-                refreshDebugTest()
+            setOnPreferenceClickListener {
+                showConnectionTypeDialog()
                 true
             }
         }
+    }
+
+    private fun showConnectionTypeDialog() {
+        val ctx = context ?: return
+        val currentIndex = connectionValues.indexOf(settings.connectionType).coerceAtLeast(0)
+        var selectedIndex = currentIndex
+
+        MaterialAlertDialogBuilder(ctx, R.style.CompanionDialog)
+            .setTitle("Connection type")
+            .setSingleChoiceItems(connectionLabels, currentIndex) { _, which ->
+                selectedIndex = which
+            }
+            .setPositiveButton("Save") { _, _ ->
+                val type = connectionValues[selectedIndex]
+                settings.connectionType = type
+                findPreference<Preference>("claude_connection_type")?.summary =
+                    connectionLabels[selectedIndex]
+                refreshAccountVisibility()
+                refreshDebugTest()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     // ── Gemini API ──
@@ -294,8 +367,8 @@ class SettingsFragment : PreferenceFragmentCompat() {
         val isApiKey = settings.isApiKeyMode
         val isAdvanced = settings.advancedUnlocked
 
-        findPreference<EditTextPreference>("claude_api_key")?.isVisible = isApiKey
-        findPreference<ListPreference>("claude_connection_type")?.isVisible = isAdvanced
+        findPreference<Preference>("claude_api_key")?.isVisible = isApiKey
+        findPreference<Preference>("claude_connection_type")?.isVisible = isAdvanced
 
         findPreference<Preference>("account_auth")?.apply {
             if (!isAdvanced) {
