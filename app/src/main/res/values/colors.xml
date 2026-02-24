@@ -1,25 +1,49 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- ════════════════════════════════════════════════════════════════════
+         Light Theme Colors (default)
+         ════════════════════════════════════════════════════════════════════ -->
+
     <!-- Background -->
-    <color name="background_dark">#1a1a1a</color>
-    <color name="surface_dark">#222222</color>
-    <color name="surface_variant">#2a2a2a</color>
+    <color name="background">#FAFAFA</color>
+    <color name="surface">#FFFFFF</color>
+    <color name="surface_variant">#F5F5F5</color>
+    <color name="surface_elevated">#FFFFFF</color>
 
     <!-- Text -->
-    <color name="text_primary">#e0e0e0</color>
-    <color name="text_secondary">#999999</color>
-    <color name="text_hint">#666666</color>
+    <color name="text_primary">#1a1a1a</color>
+    <color name="text_secondary">#666666</color>
+    <color name="text_hint">#999999</color>
 
-    <!-- Accent -->
-    <color name="gold">#FFD700</color>
-    <color name="gold_dim">#C7A600</color>
-    <color name="gold_ripple">#22FFD700</color>
+    <!-- Accent - darker gold for light backgrounds -->
+    <color name="gold">#C7A600</color>
+    <color name="gold_variant">#9A8000</color>
+    <color name="gold_on_surface">#C7A600</color>
+    <color name="gold_ripple">#22C7A600</color>
+    <color name="on_gold">#1a1a1a</color>
 
     <!-- Status -->
     <color name="status_connected">#4CAF50</color>
-    <color name="status_warning">#FF9800</color>
+    <color name="status_warning">#F57C00</color>
     <color name="status_error">#FF5722</color>
 
-    <!-- Dropdown stroke color selector -->
-    <color name="dropdown_stroke">#444444</color>
+    <!-- Specific components -->
+    <color name="card_background">#FFFFFF</color>
+    <color name="card_stroke">#E0E0E0</color>
+    <color name="dialog_background">#FFFFFF</color>
+    <color name="divider">#E0E0E0</color>
+    <color name="dropdown_stroke">#BDBDBD</color>
+    <color name="page_indicator_inactive">#BDBDBD</color>
+
+    <!-- System bars -->
+    <color name="status_bar">#FAFAFA</color>
+    <color name="navigation_bar">#FAFAFA</color>
+
+
+    <!-- Toggle button (swapped between themes) -->
+    <color name="button_toggle_background">#FFD700</color>
+    <color name="button_toggle_text">@color/on_gold</color>
+
+    <!-- Sprite card divider -->
+    <color name="sprite_divider">@color/divider</color>
 </resources>

@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- ════════════════════════════════════════════════════════════════════
+         Dark Theme Colors
+         ════════════════════════════════════════════════════════════════════ -->
+
+    <!-- Background -->
+    <color name="background">#1a1a1a</color>
+    <color name="surface">#222222</color>
+    <color name="surface_variant">#2a2a2a</color>
+    <color name="surface_elevated">#2d2d2d</color>
+
+    <!-- Text -->
+    <color name="text_primary">#e0e0e0</color>
+    <color name="text_secondary">#999999</color>
+    <color name="text_hint">#666666</color>
+
+    <!-- Accent - brighter gold for dark backgrounds -->
+    <color name="gold">#FFD700</color>
+    <color name="gold_variant">#C7A600</color>
+    <color name="gold_on_surface">#FFD700</color>
+    <color name="gold_ripple">#22FFD700</color>
+    <color name="on_gold">#1a1a1a</color>
+
+    <!-- Status -->
+    <color name="status_connected">#2E7D32</color>
+    <color name="status_warning">#FF9800</color>
+    <color name="status_error">#D32F2F</color>
+
+    <!-- Specific components -->
+    <color name="card_background">#222222</color>
+    <color name="card_stroke">#333333</color>
+    <color name="dialog_background">#252525</color>
+    <color name="divider">#333333</color>
+    <color name="dropdown_stroke">#444444</color>
+    <color name="page_indicator_inactive">#444444</color>
+
+    <!-- System bars -->
+    <color name="status_bar">#1a1a1a</color>
+    <color name="navigation_bar">#1a1a1a</color>
+
+    <!-- Toggle button (swapped from light theme) -->
+    <color name="button_toggle_background">#C7A600</color>
+    <color name="button_toggle_text">#1a1a1a</color>
+
+    <!-- Sprite card divider (darker than card for visibility) -->
+    <color name="sprite_divider">@color/background</color>
+</resources>

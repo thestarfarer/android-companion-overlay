@@ -2,39 +2,40 @@
 <resources>
 
     <!-- ════════════════════════════════════════════════════════════════════
-         Base Theme
+         Base Theme (Light)
          ════════════════════════════════════════════════════════════════════ -->
 
-    <style name="Theme.CompanionOverlay" parent="Theme.Material3.Dark.NoActionBar">
+    <style name="Theme.CompanionOverlay" parent="Theme.Material3.DayNight.NoActionBar">
         <!-- Primary: gold accent -->
-        <item name="colorPrimary">#FFD700</item>
-        <item name="colorPrimaryContainer">#3D3000</item>
-        <item name="colorOnPrimary">#1a1a1a</item>
-        <item name="colorOnPrimaryContainer">#FFE566</item>
+        <item name="colorPrimary">@color/gold</item>
+        <item name="colorPrimaryContainer">@color/surface_variant</item>
+        <item name="colorOnPrimary">@color/on_gold</item>
+        <item name="colorOnPrimaryContainer">@color/gold</item>
 
-        <!-- Secondary: muted gold -->
-        <item name="colorSecondary">#C7A600</item>
-        <item name="colorSecondaryContainer">#2D2400</item>
-        <item name="colorOnSecondary">#1a1a1a</item>
-        <item name="colorOnSecondaryContainer">#E8D066</item>
+        <!-- Secondary -->
+        <item name="colorSecondary">@color/gold_variant</item>
+        <item name="colorSecondaryContainer">@color/surface_variant</item>
+        <item name="colorOnSecondary">@color/on_gold</item>
+        <item name="colorOnSecondaryContainer">@color/gold_variant</item>
 
-        <!-- Surface: dark grays -->
-        <item name="colorSurface">#1a1a1a</item>
-        <item name="colorSurfaceVariant">#2a2a2a</item>
-        <item name="colorOnSurface">#e0e0e0</item>
-        <item name="colorOnSurfaceVariant">#999999</item>
+        <!-- Surface -->
+        <item name="colorSurface">@color/surface</item>
+        <item name="colorSurfaceVariant">@color/surface_variant</item>
+        <item name="colorOnSurface">@color/text_primary</item>
+        <item name="colorOnSurfaceVariant">@color/text_secondary</item>
 
         <!-- Background -->
-        <item name="android:colorBackground">#1a1a1a</item>
-        <item name="colorOnBackground">#e0e0e0</item>
+        <item name="android:colorBackground">@color/background</item>
+        <item name="colorOnBackground">@color/text_primary</item>
 
         <!-- System bars -->
-        <item name="android:statusBarColor">#1a1a1a</item>
-        <item name="android:navigationBarColor">#1a1a1a</item>
-        <item name="android:windowBackground">@color/background_dark</item>
+        <item name="android:statusBarColor">@color/status_bar</item>
+        <item name="android:navigationBarColor">@color/navigation_bar</item>
+        <item name="android:windowBackground">@color/background</item>
+        <item name="android:windowLightStatusBar">true</item>
 
         <!-- Accent for legacy views -->
-        <item name="colorAccent">#FFD700</item>
+        <item name="colorAccent">@color/gold</item>
 
         <!-- Preference theming -->
         <item name="preferenceTheme">@style/CompanionPreferenceTheme</item>
@@ -56,7 +57,7 @@
          Transparent Theme (for AssistActivity)
          ════════════════════════════════════════════════════════════════════ -->
 
-    <style name="Theme.Transparent" parent="Theme.Material3.Dark.NoActionBar">
+    <style name="Theme.Transparent" parent="Theme.Material3.DayNight.NoActionBar">
         <item name="android:windowIsTranslucent">true</item>
         <item name="android:windowBackground">@android:color/transparent</item>
         <item name="android:windowNoTitle">true</item>
@@ -73,12 +74,27 @@
     </style>
 
     <!-- ════════════════════════════════════════════════════════════════════
+         Dialog Theme - background matches app
+         ════════════════════════════════════════════════════════════════════ -->
+
+    <style name="CompanionDialog" parent="ThemeOverlay.Material3.MaterialAlertDialog">
+        <item name="colorSurface">@color/background</item>
+        <item name="colorSurfaceContainerHigh">@color/background</item>
+        <item name="colorSurfaceContainer">@color/background</item>
+        <item name="colorOnSurface">@color/text_primary</item>
+        <item name="colorPrimary">@color/gold</item>
+        <item name="dialogCornerRadius">20dp</item>
+        <item name="android:background">@color/background</item>
+        <item name="android:windowBackground">@color/background</item>
+    </style>
+
+    <!-- ════════════════════════════════════════════════════════════════════
          Button Styles
          ════════════════════════════════════════════════════════════════════ -->
 
     <style name="CompanionButton" parent="Widget.Material3.Button">
-        <item name="android:textColor">#1a1a1a</item>
-        <item name="backgroundTint">#FFD700</item>
+        <item name="android:textColor">@color/button_toggle_text</item>
+        <item name="backgroundTint">@color/button_toggle_background</item>
         <item name="cornerRadius">12dp</item>
         <item name="android:textAllCaps">false</item>
         <item name="android:letterSpacing">0</item>
@@ -91,8 +107,8 @@
     </style>
 
     <style name="CompanionButton.Secondary" parent="Widget.Material3.Button.OutlinedButton">
-        <item name="android:textColor">#FFD700</item>
-        <item name="strokeColor">#FFD700</item>
+        <item name="android:textColor">@color/gold</item>
+        <item name="strokeColor">@color/gold</item>
         <item name="strokeWidth">1dp</item>
         <item name="cornerRadius">12dp</item>
         <item name="android:textAllCaps">false</item>
@@ -100,10 +116,10 @@
     </style>
 
     <style name="CompanionButton.Text" parent="Widget.Material3.Button.TextButton">
-        <item name="android:textColor">#FFD700</item>
+        <item name="android:textColor">@color/gold</item>
         <item name="android:textAllCaps">false</item>
         <item name="android:letterSpacing">0</item>
-        <item name="rippleColor">#33FFD700</item>
+        <item name="rippleColor">@color/gold_ripple</item>
     </style>
 
     <!-- ════════════════════════════════════════════════════════════════════
@@ -111,11 +127,11 @@
          ════════════════════════════════════════════════════════════════════ -->
 
     <style name="CompanionCard" parent="Widget.Material3.CardView.Filled">
-        <item name="cardBackgroundColor">#222222</item>
+        <item name="cardBackgroundColor">@color/card_background</item>
         <item name="cardCornerRadius">16dp</item>
         <item name="cardElevation">4dp</item>
         <item name="strokeWidth">0dp</item>
-        <item name="rippleColor">#22FFD700</item>
+        <item name="rippleColor">@color/gold_ripple</item>
     </style>
 
     <style name="CompanionCard.Flat" parent="CompanionCard">
@@ -127,13 +143,13 @@
          ════════════════════════════════════════════════════════════════════ -->
 
     <style name="TextAppearance.Companion.HeadlineLarge" parent="TextAppearance.Material3.HeadlineLarge">
-        <item name="android:textColor">#FFD700</item>
+        <item name="android:textColor">@color/gold</item>
         <item name="android:textSize">24sp</item>
         <item name="android:textStyle">bold</item>
     </style>
 
     <style name="TextAppearance.Companion.TitleMedium" parent="TextAppearance.Material3.TitleMedium">
-        <item name="android:textColor">#FFD700</item>
+        <item name="android:textColor">@color/gold</item>
         <item name="android:textSize">14sp</item>
         <item name="android:textStyle">bold</item>
     </style>
@@ -144,7 +160,7 @@
     </style>
 
     <style name="TextAppearance.Companion.LabelSmall" parent="TextAppearance.Material3.LabelSmall">
-        <item name="android:textColor">#666666</item>
+        <item name="android:textColor">@color/text_hint</item>
         <item name="android:textSize">11sp</item>
     </style>
 
@@ -159,24 +175,8 @@
         <item name="boxCornerRadiusTopEnd">12dp</item>
         <item name="boxCornerRadiusBottomStart">12dp</item>
         <item name="boxCornerRadiusBottomEnd">12dp</item>
-        <item name="hintTextColor">#999999</item>
-        <item name="android:textColorHint">#999999</item>
-    </style>
-
-    <!-- ════════════════════════════════════════════════════════════════════
-         Dialog Theme
-         ════════════════════════════════════════════════════════════════════ -->
-
-    <style name="CompanionDialog" parent="ThemeOverlay.Material3.MaterialAlertDialog">
-        <item name="colorSurface">#252525</item>
-        <item name="colorOnSurface">#e0e0e0</item>
-        <item name="colorPrimary">#FFD700</item>
-        <item name="materialAlertDialogBodyTextStyle">@style/CompanionDialogBodyText</item>
-        <item name="dialogCornerRadius">20dp</item>
-    </style>
-
-    <style name="CompanionDialogBodyText" parent="MaterialAlertDialog.Material3.Body.Text">
-        <item name="android:textColor">#cccccc</item>
+        <item name="hintTextColor">@color/text_hint</item>
+        <item name="android:textColorHint">@color/text_hint</item>
     </style>
 
 </resources>

@@ -4,7 +4,7 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:background="@color/background_dark">
+    android:background="@color/background">
 
     <!-- Top bar -->
     <LinearLayout
@@ -40,7 +40,7 @@
     <View
         android:layout_width="match_parent"
         android:layout_height="1dp"
-        android:background="#2a2a2a"/>
+        android:background="@color/divider"/>
 
     <FrameLayout
         android:id="@+id/settingsContainer"

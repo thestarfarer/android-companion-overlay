@@ -93,6 +93,7 @@ class MainActivity : AppCompatActivity() {
     private var currentWalkFrame = 0
     private var animating = false
     private var pendingSpriteType: String? = null
+    private var lastDisplayedPresetId: String? = null
 
     private val idleAnimRunnable = object : Runnable {
         override fun run() {
@@ -271,9 +272,27 @@ class MainActivity : AppCompatActivity() {
     private fun updatePresetDisplay(state: MainViewModel.UiState) {
         val preset = state.activePreset ?: return
 
+        // Crossfade prompt text when switching presets
+        val presetChanged = lastDisplayedPresetId != null && lastDisplayedPresetId != preset.id
+        lastDisplayedPresetId = preset.id
+
         presetName.text = preset.name
-        systemPromptPreview.text = preset.systemPrompt.take(200)
-        userMessagePreview.text = preset.userMessage.take(150)
+
+        if (presetChanged) {
+            // Fade out, update, fade in
+            val duration = 200L
+            systemPromptPreview.animate().alpha(0f).setDuration(duration).withEndAction {
+                systemPromptPreview.text = preset.systemPrompt.take(200)
+                systemPromptPreview.animate().alpha(1f).setDuration(duration).start()
+            }.start()
+            userMessagePreview.animate().alpha(0f).setDuration(duration).withEndAction {
+                userMessagePreview.text = preset.userMessage.take(150)
+                userMessagePreview.animate().alpha(1f).setDuration(duration).start()
+            }.start()
+        } else {
+            systemPromptPreview.text = preset.systemPrompt.take(200)
+            userMessagePreview.text = preset.userMessage.take(150)
+        }
 
         // Update pager if preset list changed
         if (pagerAdapter.itemCount != state.presets.size) {
