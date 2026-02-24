@@ -11,6 +11,7 @@ import com.starfarer.companionoverlay.ClaudeAuth
 import com.starfarer.companionoverlay.DebugLog
 import com.starfarer.companionoverlay.event.OverlayCoordinator
 import com.starfarer.companionoverlay.repository.PresetRepository
+import com.starfarer.companionoverlay.repository.SettingsRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -35,6 +36,7 @@ import kotlinx.coroutines.withContext
 class MainViewModel(
     application: Application,
     private val claudeAuth: ClaudeAuth,
+    private val settings: SettingsRepository,
     private val coordinator: OverlayCoordinator,
     private val presetRepository: PresetRepository
 ) : AndroidViewModel(application) {
@@ -58,6 +60,7 @@ class MainViewModel(
     }
     
     sealed class AuthState {
+        data class ApiKeyMode(val hasKey: Boolean) : AuthState()
         data object NotConnected : AuthState()
         data object Waiting : AuthState()
         data class Connected(val expiresAt: Long) : AuthState()
@@ -141,17 +144,21 @@ class MainViewModel(
     // ══════════════════════════════════════════════════════════════════════
     
     fun refreshAuthState() {
-        val authState = when {
-            claudeAuth.isWaitingForCallback() -> AuthState.Waiting
-            claudeAuth.isAuthenticated() -> {
-                val expiresAt = claudeAuth.getExpiresAt()
-                if (System.currentTimeMillis() > expiresAt) {
-                    AuthState.Expired
-                } else {
-                    AuthState.Connected(expiresAt)
+        val authState = if (settings.isApiKeyMode) {
+            AuthState.ApiKeyMode(hasKey = !settings.claudeApiKey.isNullOrBlank())
+        } else {
+            when {
+                claudeAuth.isWaitingForCallback() -> AuthState.Waiting
+                claudeAuth.isAuthenticated() -> {
+                    val expiresAt = claudeAuth.getExpiresAt()
+                    if (System.currentTimeMillis() > expiresAt) {
+                        AuthState.Expired
+                    } else {
+                        AuthState.Connected(expiresAt)
+                    }
                 }
+                else -> AuthState.NotConnected
             }
-            else -> AuthState.NotConnected
         }
         _state.update { it.copy(authState = authState) }
     }

@@ -145,7 +145,23 @@
     </PreferenceCategory>
 
     <!-- ════════ ACCOUNT ════════ -->
-    <PreferenceCategory app:iconSpaceReserved="false" app:title="Account">
+    <PreferenceCategory app:iconSpaceReserved="false" app:key="account_category" app:title="Account">
+
+        <EditTextPreference
+            app:iconSpaceReserved="false"
+            app:key="claude_api_key"
+            app:title="Claude API Key"
+            app:summary="Enter your sk-ant-... key"
+            app:singleLineTitle="true"/>
+
+        <ListPreference
+            app:iconSpaceReserved="false"
+            app:key="claude_connection_type"
+            app:title="Connection type"
+            app:entries="@array/connection_type_labels"
+            app:entryValues="@array/connection_type_values"
+            app:defaultValue="api_key"
+            app:persistent="false"/>
 
         <Preference
             app:iconSpaceReserved="false"

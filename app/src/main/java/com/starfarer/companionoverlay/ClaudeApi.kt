@@ -92,17 +92,24 @@ class ClaudeApi(
         webSearch: Boolean = false
     ): ApiResponse = withContext(Dispatchers.IO) {
         try {
-            val token = auth.getValidToken()
-                ?: return@withContext ApiResponse.error("Not authenticated")
-
             val model = settings.model
-            DebugLog.log(TAG, "Sending conversation (${messages.size} messages, model=$model)...")
 
-            val firstUserText = messages.firstOrNull { it.role == "user" }
-                ?.content?.textContent() ?: ""
-            val billingHeader = ClaudeBilling.computeHeader(firstUserText)
-
-            val request = buildRequest(token, messages, systemPrompt, model, webSearch, billingHeader)
+            val request = if (settings.isApiKeyMode) {
+                val apiKey = settings.claudeApiKey
+                if (apiKey.isNullOrBlank()) {
+                    return@withContext ApiResponse.error("Claude API key not set")
+                }
+                DebugLog.log(TAG, "Sending conversation (${messages.size} messages, model=$model, mode=api_key)...")
+                buildApiKeyRequest(apiKey, messages, systemPrompt, model, webSearch)
+            } else {
+                val token = auth.getValidToken()
+                    ?: return@withContext ApiResponse.error("Not authenticated")
+                DebugLog.log(TAG, "Sending conversation (${messages.size} messages, model=$model, mode=oauth)...")
+                val firstUserText = messages.firstOrNull { it.role == "user" }
+                    ?.content?.textContent() ?: ""
+                val billingHeader = ClaudeBilling.computeHeader(firstUserText)
+                buildOAuthRequest(token, messages, systemPrompt, model, webSearch, billingHeader)
+            }
 
             DebugLog.log(TAG, "Executing request...")
             val call = httpClient.newCall(request)
@@ -148,7 +155,44 @@ class ClaudeApi(
     // Request Building
     // ══════════════════════════════════════════════════════════════════════
 
-    private fun buildRequest(
+    private fun buildApiKeyRequest(
+        apiKey: String,
+        messages: List<Message>,
+        systemPrompt: String?,
+        model: String,
+        webSearch: Boolean
+    ): Request {
+        val systemBlocks = if (systemPrompt != null) {
+            listOf(SystemBlock(text = systemPrompt))
+        } else {
+            emptyList()
+        }
+
+        val tools = if (webSearch) listOf(
+            Tool(type = "web_search_20250305", name = "web_search", maxUses = 5)
+        ) else null
+
+        val requestBody = ClaudeRequest(
+            model = model,
+            maxTokens = if (webSearch) 4096 else 512,
+            system = systemBlocks,
+            messages = messages,
+            tools = tools
+        )
+
+        val bodyJson = json.encodeToString(requestBody)
+        DebugLog.log(TAG, "Request body length: ${bodyJson.length}")
+
+        return Request.Builder()
+            .url(API_URL)
+            .post(bodyJson.toRequestBody("application/json".toMediaType()))
+            .header("Content-Type", "application/json")
+            .header("anthropic-version", API_VERSION)
+            .header("x-api-key", apiKey)
+            .build()
+    }
+
+    private fun buildOAuthRequest(
         token: String,
         messages: List<Message>,
         systemPrompt: String?,
