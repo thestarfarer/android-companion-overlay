@@ -33,6 +33,7 @@ class AudioCoordinator(
                 playBeep(BeepManager.Beep.ERROR)
                 onStatusUpdate?.invoke("")
 
+                ttsManager.ensureReady()
                 ttsManager.onSpeechDone = {
                     onSpeechComplete?.invoke()
                     ttsManager.onSpeechDone = null
@@ -55,6 +56,7 @@ class AudioCoordinator(
             }
             geminiTtsManager.speak(text)
         } else {
+            ttsManager.ensureReady()
             ttsManager.onSpeechDone = {
                 onSpeechComplete?.invoke()
                 ttsManager.onSpeechDone = null

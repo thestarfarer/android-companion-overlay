@@ -36,6 +36,17 @@ class TtsManager(
     private var pendingText: String? = null
 
     init {
+        initEngine()
+    }
+
+    fun ensureReady() {
+        if (!isReady && tts == null) {
+            DebugLog.log(TAG, "Re-initializing TTS engine")
+            initEngine()
+        }
+    }
+
+    private fun initEngine() {
         tts = TextToSpeech(context) { status ->
             if (status == TextToSpeech.SUCCESS) {
                 tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
