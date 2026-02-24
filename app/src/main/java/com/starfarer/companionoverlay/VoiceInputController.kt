@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import com.starfarer.companionoverlay.repository.SettingsRepository
+import okhttp3.OkHttpClient
 
 /**
  * Orchestrates voice input: button press → listen → transcribe → Claude → done.
@@ -26,7 +27,8 @@ class VoiceInputController(
     private val context: Context,
     private val host: VoiceInputHost,
     private val settings: SettingsRepository,
-    private val beepManager: BeepManager
+    private val beepManager: BeepManager,
+    private val httpClient: OkHttpClient
 ) {
 
     companion object {
@@ -218,7 +220,7 @@ class VoiceInputController(
 
     private fun startGeminiListening() {
         if (geminiRecognizer == null) {
-            geminiRecognizer = GeminiSpeechRecognizer(context).also { mgr ->
+            geminiRecognizer = GeminiSpeechRecognizer(context, httpClient, settings).also { mgr ->
                 wireCallbacks(
                     { mgr.onReadyForSpeech = it },
                     { mgr.onPartialResult = it },

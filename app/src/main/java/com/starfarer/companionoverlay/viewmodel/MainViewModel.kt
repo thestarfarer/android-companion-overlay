@@ -10,11 +10,14 @@ import com.starfarer.companionoverlay.CharacterPreset
 import com.starfarer.companionoverlay.ClaudeAuth
 import com.starfarer.companionoverlay.DebugLog
 import com.starfarer.companionoverlay.event.OverlayCoordinator
+import com.starfarer.companionoverlay.repository.PresetRepository
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * ViewModel for MainActivity.
@@ -24,13 +27,16 @@ import kotlinx.coroutines.launch
  * - Auth state observation
  * - Overlay running state observation
  * 
- * Sprite animation still lives in the Activity since it directly manipulates
- * ImageViews and Bitmaps (not easily ViewModel-able without significant abstraction).
+ * Preset loading runs on [Dispatchers.IO] to avoid blocking the main thread
+ * with SharedPreferences reads and JSON deserialization. The in-memory cache
+ * in [PresetRepository] makes subsequent reads fast, but the first load
+ * (cold start, after cache invalidation) still hits disk.
  */
 class MainViewModel(
     application: Application,
     private val claudeAuth: ClaudeAuth,
-    private val coordinator: OverlayCoordinator
+    private val coordinator: OverlayCoordinator,
+    private val presetRepository: PresetRepository
 ) : AndroidViewModel(application) {
     
     companion object {
@@ -73,26 +79,31 @@ class MainViewModel(
     // ══════════════════════════════════════════════════════════════════════
     
     fun loadPresets() {
-        val presets = CharacterPreset.loadAll(context)
-        val activeId = CharacterPreset.getActiveId(context)
-        val activeIndex = presets.indexOfFirst { it.id == activeId }.coerceAtLeast(0)
-        
-        _state.update { it.copy(presets = presets, activeIndex = activeIndex) }
-        DebugLog.log(TAG, "Loaded ${presets.size} presets, active: $activeIndex")
+        viewModelScope.launch {
+            val (presets, activeId) = withContext(Dispatchers.IO) {
+                val p = presetRepository.loadAll()
+                val id = presetRepository.getActiveId()
+                Pair(p.toList(), id)
+            }
+            val activeIndex = presets.indexOfFirst { it.id == activeId }.coerceAtLeast(0)
+            
+            _state.update { it.copy(presets = presets, activeIndex = activeIndex) }
+            DebugLog.log(TAG, "Loaded ${presets.size} presets, active: $activeIndex")
+        }
     }
     
     fun selectPreset(index: Int) {
         val presets = _state.value.presets
         if (index < 0 || index >= presets.size) return
         
-        CharacterPreset.setActiveId(context, presets[index].id)
+        presetRepository.setActiveId(presets[index].id)
         _state.update { it.copy(activeIndex = index) }
     }
     
     fun updateActivePreset(transform: (CharacterPreset) -> CharacterPreset) {
         val current = _state.value.activePreset ?: return
         val updated = transform(current)
-        CharacterPreset.save(context, updated)
+        presetRepository.save(updated)
         loadPresets() // Reload to get updated list
     }
     
@@ -107,7 +118,7 @@ class MainViewModel(
             idleFrameCount = source.idleFrameCount,
             walkFrameCount = source.walkFrameCount
         )
-        CharacterPreset.save(context, newPreset)
+        presetRepository.save(newPreset)
         loadPresets()
         
         // Select the new preset
@@ -121,7 +132,7 @@ class MainViewModel(
         val preset = _state.value.activePreset ?: return
         if (_state.value.presets.size <= 1) return // Don't delete last preset
         
-        CharacterPreset.delete(context, preset.id)
+        presetRepository.delete(preset.id)
         loadPresets()
     }
     

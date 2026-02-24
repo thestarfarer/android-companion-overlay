@@ -1,31 +1,32 @@
 package com.starfarer.companionoverlay
 
 import android.app.ActivityOptions
-import android.app.NotificationChannel
-import android.app.NotificationManager
 import android.content.Intent
 import android.content.res.ColorStateList
-import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.provider.Settings
 import android.view.View
-import android.widget.*
+import android.widget.ArrayAdapter
+import android.widget.LinearLayout
+import android.widget.Toast
+import android.widget.AutoCompleteTextView
+import android.widget.Button
+import android.widget.TextView
+import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.view.ViewCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.viewpager2.widget.ViewPager2
-import com.google.android.material.card.MaterialCardView
-import com.google.android.material.textfield.MaterialAutoCompleteTextView
+import com.starfarer.companionoverlay.databinding.ActivityMainBinding
 import com.starfarer.companionoverlay.event.OverlayCoordinator
+import com.starfarer.companionoverlay.repository.SettingsRepository
 import com.starfarer.companionoverlay.ui.PresetDialogHelper
 import com.starfarer.companionoverlay.ui.PresetPagerAdapter
 import com.starfarer.companionoverlay.ui.SpritePickerHelper
+import com.starfarer.companionoverlay.ui.SpritePreviewAnimator
 import com.starfarer.companionoverlay.viewmodel.MainViewModel
 import kotlinx.coroutines.launch
 import org.koin.android.ext.android.inject
@@ -42,14 +43,11 @@ import java.util.*
  * - Overlay service control
  * - Navigation to settings
  *
- * State is managed by [MainViewModel]. UI helpers handle dialog creation.
- * Sprite animation stays here since it directly manipulates Bitmaps.
+ * State is managed by [MainViewModel]. Sprite preview animation is handled
+ * by [SpritePreviewAnimator], which pre-extracts frames on load to avoid
+ * per-tick Bitmap allocations.
  */
 class MainActivity : AppCompatActivity() {
-
-    companion object {
-        private const val OVERLAY_PERMISSION_REQUEST = 1001
-    }
 
     // ══════════════════════════════════════════════════════════════════════
     // ViewModel & Dependencies
@@ -59,61 +57,55 @@ class MainActivity : AppCompatActivity() {
     private val claudeAuth: ClaudeAuth by inject()
     private val claudeApi: ClaudeApi by inject()
     private val coordinator: OverlayCoordinator by inject()
+    private val settings: SettingsRepository by inject()
 
     // UI Helpers
     private lateinit var presetDialogHelper: PresetDialogHelper
     private lateinit var spritePickerHelper: SpritePickerHelper
+    private lateinit var spriteAnimator: SpritePreviewAnimator
 
     // ══════════════════════════════════════════════════════════════════════
-    // Views
+    // View Binding (compile-time safe view references)
     // ══════════════════════════════════════════════════════════════════════
 
-    private lateinit var authDot: View
-    private lateinit var authStatusText: TextView
-    private lateinit var authButton: Button
-    private lateinit var presetName: TextView
-    private lateinit var presetPager: ViewPager2
-    private lateinit var pageIndicatorContainer: LinearLayout
-    private lateinit var systemPromptPreview: TextView
-    private lateinit var userMessagePreview: TextView
-    private lateinit var statusText: TextView
-    private lateinit var toggleButton: Button
-    private lateinit var modelSelector: AutoCompleteTextView
+    private lateinit var binding: ActivityMainBinding
+
+    // Convenience accessors for frequently used views
+    private val authDot get() = binding.authDot
+    private val authStatusText get() = binding.authStatusText
+    private val authButton get() = binding.authButton
+    private val presetName get() = binding.presetName
+    private val presetPager get() = binding.presetPager
+    private val pageIndicatorContainer get() = binding.pageIndicatorContainer
+    private val systemPromptPreview get() = binding.systemPromptPreview
+    private val userMessagePreview get() = binding.userMessagePreview
+    private val statusText get() = binding.statusText
+    private val toggleButton get() = binding.toggleButton
+    private val modelSelector get() = binding.modelSelector
 
     private lateinit var pagerAdapter: PresetPagerAdapter
 
     // ══════════════════════════════════════════════════════════════════════
-    // Sprite Animation
+    // Sprite Picker
     // ══════════════════════════════════════════════════════════════════════
 
-    private val animHandler = Handler(Looper.getMainLooper())
-    private val spriteSheets = mutableMapOf<Int, Pair<Bitmap?, Bitmap?>>() // position -> (idle, walk)
-    private val frameCounts = mutableMapOf<Int, Pair<Int, Int>>() // position -> (idleCount, walkCount)
-    private var currentIdleFrame = 0
-    private var currentWalkFrame = 0
-    private var animating = false
     private var pendingSpriteType: String? = null
     private var lastDisplayedPresetId: String? = null
-
-    private val idleAnimRunnable = object : Runnable {
-        override fun run() {
-            if (!animating) return
-            advanceIdleFrame()
-            animHandler.postDelayed(this, SpriteAnimator.IDLE_FRAME_DURATION_MS)
-        }
-    }
-
-    private val walkAnimRunnable = object : Runnable {
-        override fun run() {
-            if (!animating) return
-            advanceWalkFrame()
-            animHandler.postDelayed(this, SpriteAnimator.WALK_FRAME_DURATION_MS)
-        }
-    }
 
     private val spritePickerLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri -> uri?.let { handleSpriteSelected(it) } }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // Overlay Permission (replaces deprecated onActivityResult)
+    // ══════════════════════════════════════════════════════════════════════
+
+    private val overlayPermissionLauncher: ActivityResultLauncher<Intent> =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            if (Settings.canDrawOverlays(this)) {
+                startOverlayService()
+            }
+        }
 
     // ══════════════════════════════════════════════════════════════════════
     // Lifecycle
@@ -121,18 +113,17 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
+        binding = ActivityMainBinding.inflate(layoutInflater)
+        setContentView(binding.root)
 
         DebugLog.log("Main", "=== App started ===")
 
         presetDialogHelper = PresetDialogHelper(this)
         spritePickerHelper = SpritePickerHelper(this)
 
-        findViews()
         setupPagerAdapter()
         setupModelDropdown()
         setupClickListeners()
-        createNotificationChannel()
         observeState()
     }
 
@@ -140,21 +131,17 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         viewModel.loadPresets()
         viewModel.refreshAuthState()
-        startSpriteAnimation()
+        spriteAnimator.start()
     }
 
     override fun onPause() {
         super.onPause()
-        stopSpriteAnimation()
+        spriteAnimator.stop()
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        stopSpriteAnimation()
-        spriteSheets.values.forEach { (idle, walk) ->
-            idle?.recycle()
-            walk?.recycle()
-        }
+        spriteAnimator.release()
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -177,33 +164,23 @@ class MainActivity : AppCompatActivity() {
     // Initialization
     // ══════════════════════════════════════════════════════════════════════
 
-    private fun findViews() {
-        authDot = findViewById(R.id.authDot)
-        authStatusText = findViewById(R.id.authStatusText)
-        authButton = findViewById(R.id.authButton)
-        presetName = findViewById(R.id.presetName)
-        presetPager = findViewById(R.id.presetPager)
-        pageIndicatorContainer = findViewById(R.id.pageIndicatorContainer)
-        systemPromptPreview = findViewById(R.id.systemPromptPreview)
-        userMessagePreview = findViewById(R.id.userMessagePreview)
-        statusText = findViewById(R.id.statusText)
-        toggleButton = findViewById(R.id.toggleButton)
-        modelSelector = findViewById(R.id.modelSelector)
-    }
-
     private fun setupPagerAdapter() {
         pagerAdapter = PresetPagerAdapter(
             onIdleSpriteClick = { openSpritePicker("idle") },
             onWalkSpriteClick = { openSpritePicker("walk") }
         )
 
+        spriteAnimator = SpritePreviewAnimator(pagerAdapter) { uri, custom, default ->
+            viewModel.loadSpriteSheet(uri, custom, default)
+        }
+
         presetPager.adapter = pagerAdapter
         presetPager.offscreenPageLimit = 1
 
-        // Page change callback
         presetPager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {
                 viewModel.selectPreset(position)
+                spriteAnimator.setCurrentPosition(position)
             }
         })
     }
@@ -212,19 +189,19 @@ class MainActivity : AppCompatActivity() {
         val adapter = ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, PromptSettings.MODEL_NAMES)
         modelSelector.setAdapter(adapter)
 
-        val savedModel = PromptSettings.getModel(this)
+        val savedModel = settings.model
         val idx = PromptSettings.MODEL_IDS.indexOf(savedModel)
         if (idx >= 0) {
             modelSelector.setText(PromptSettings.MODEL_NAMES[idx], false)
         }
 
         modelSelector.setOnItemClickListener { _, _, position, _ ->
-            PromptSettings.setModel(this, PromptSettings.MODEL_IDS[position])
+            settings.model = PromptSettings.MODEL_IDS[position]
         }
     }
 
     private fun setupClickListeners() {
-        findViewById<View>(R.id.settingsButton).setOnClickListener {
+        binding.settingsButton.setOnClickListener {
             val intent = Intent(this, SettingsActivity::class.java)
             val options = ActivityOptions.makeSceneTransitionAnimation(
                 this,
@@ -233,9 +210,9 @@ class MainActivity : AppCompatActivity() {
             startActivity(intent, options.toBundle())
         }
 
-        findViewById<View>(R.id.presetHeader).setOnClickListener { showPresetList() }
+        binding.presetHeader.setOnClickListener { showPresetList() }
 
-        findViewById<MaterialCardView>(R.id.systemPromptCard).setOnClickListener {
+        binding.systemPromptCard.setOnClickListener {
             val preset = viewModel.state.value.activePreset ?: return@setOnClickListener
             SettingsDialogs.showTextEditor(this,
                 title = "System Prompt",
@@ -246,7 +223,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        findViewById<MaterialCardView>(R.id.userMessageCard).setOnClickListener {
+        binding.userMessageCard.setOnClickListener {
             val preset = viewModel.state.value.activePreset ?: return@setOnClickListener
             SettingsDialogs.showTextEditor(this,
                 title = "User Message",
@@ -272,14 +249,12 @@ class MainActivity : AppCompatActivity() {
     private fun updatePresetDisplay(state: MainViewModel.UiState) {
         val preset = state.activePreset ?: return
 
-        // Crossfade prompt text when switching presets
         val presetChanged = lastDisplayedPresetId != null && lastDisplayedPresetId != preset.id
         lastDisplayedPresetId = preset.id
 
         presetName.text = preset.name
 
         if (presetChanged) {
-            // Fade out, update, fade in
             val duration = 200L
             systemPromptPreview.animate().alpha(0f).setDuration(duration).withEndAction {
                 systemPromptPreview.text = preset.systemPrompt.take(200)
@@ -294,20 +269,15 @@ class MainActivity : AppCompatActivity() {
             userMessagePreview.text = preset.userMessage.take(150)
         }
 
-        // Update pager if preset list changed
         if (pagerAdapter.itemCount != state.presets.size) {
             pagerAdapter.submitList(state.presets)
         }
 
-        // Sync pager position
         if (presetPager.currentItem != state.activeIndex) {
             presetPager.setCurrentItem(state.activeIndex, true)
         }
 
-        // Load sprites for current preset
-        loadSpritesForPreset(state.activeIndex, preset)
-
-        // Update page indicators
+        spriteAnimator.loadForPreset(state.activeIndex, preset)
         updatePageIndicators(state)
     }
 
@@ -380,78 +350,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ══════════════════════════════════════════════════════════════════════
-    // Sprite Animation
-    // ══════════════════════════════════════════════════════════════════════
-
-    private fun loadSpritesForPreset(position: Int, preset: CharacterPreset) {
-        // Don't reload if we already have this preset's sprites
-        if (spriteSheets.containsKey(position)) {
-            updateCurrentPresetSprites()
-            return
-        }
-
-        val idleSheet = viewModel.loadSpriteSheet(preset.idleSpriteUri, "custom_idle_sheet.png", "idle_sheet.png")
-        val walkSheet = viewModel.loadSpriteSheet(preset.walkSpriteUri, "custom_walk_sheet.png", "walk_sheet.png")
-
-        spriteSheets[position] = Pair(idleSheet, walkSheet)
-        frameCounts[position] = Pair(
-            preset.idleFrameCount.coerceAtLeast(1),
-            preset.walkFrameCount.coerceAtLeast(1)
-        )
-
-        updateCurrentPresetSprites()
-    }
-
-    private fun updateCurrentPresetSprites() {
-        val position = presetPager.currentItem
-        val (idleSheet, walkSheet) = spriteSheets[position] ?: return
-        val (idleCount, walkCount) = frameCounts[position] ?: return
-
-        val idleFrame = extractFrame(idleSheet, currentIdleFrame, idleCount)
-        val walkFrame = extractFrame(walkSheet, currentWalkFrame, walkCount)
-
-        pagerAdapter.updateSpriteFrame(position, idleFrame, walkFrame)
-    }
-
-    private fun extractFrame(sheet: Bitmap?, frameIndex: Int, frameCount: Int): Bitmap? {
-        if (sheet == null) return null
-        val frameWidth = sheet.width / frameCount.coerceAtLeast(1)
-        val safeIndex = frameIndex % frameCount.coerceAtLeast(1)
-        return runCatching {
-            Bitmap.createBitmap(sheet, safeIndex * frameWidth, 0, frameWidth, sheet.height)
-        }.getOrNull()
-    }
-
-    private fun advanceIdleFrame() {
-        val position = presetPager.currentItem
-        val (idleCount, _) = frameCounts[position] ?: return
-        currentIdleFrame = (currentIdleFrame + 1) % idleCount.coerceAtLeast(1)
-        updateCurrentPresetSprites()
-    }
-
-    private fun advanceWalkFrame() {
-        val position = presetPager.currentItem
-        val (_, walkCount) = frameCounts[position] ?: return
-        currentWalkFrame = (currentWalkFrame + 1) % walkCount.coerceAtLeast(1)
-        updateCurrentPresetSprites()
-    }
-
-    private fun startSpriteAnimation() {
-        if (animating) return
-        animating = true
-        currentIdleFrame = 0
-        currentWalkFrame = 0
-        animHandler.postDelayed(idleAnimRunnable, SpriteAnimator.IDLE_FRAME_DURATION_MS)
-        animHandler.postDelayed(walkAnimRunnable, SpriteAnimator.WALK_FRAME_DURATION_MS)
-    }
-
-    private fun stopSpriteAnimation() {
-        animating = false
-        animHandler.removeCallbacks(idleAnimRunnable)
-        animHandler.removeCallbacks(walkAnimRunnable)
-    }
-
-    // ══════════════════════════════════════════════════════════════════════
     // Preset Management
     // ══════════════════════════════════════════════════════════════════════
 
@@ -472,9 +370,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun createPreset() {
         viewModel.createPreset()
-        // Clear cached sprites so new preset loads fresh
-        spriteSheets.clear()
-        frameCounts.clear()
+        spriteAnimator.clearCache()
         renameActivePreset()
     }
 
@@ -488,10 +384,8 @@ class MainActivity : AppCompatActivity() {
     private fun deleteActivePreset() {
         val preset = viewModel.state.value.activePreset ?: return
         presetDialogHelper.showDeleteConfirmation(preset.name) {
-            val deletedPosition = viewModel.state.value.activeIndex
             viewModel.deleteActivePreset()
-            spriteSheets.remove(deletedPosition)
-            frameCounts.remove(deletedPosition)
+            spriteAnimator.clearCache()
         }
     }
 
@@ -519,7 +413,7 @@ class MainActivity : AppCompatActivity() {
                         if (type == "idle") p.copy(idleFrameCount = result.frameCount)
                         else p.copy(walkFrameCount = result.frameCount)
                     }
-                    clearCachedSprites()
+                    spriteAnimator.clearCache()
                     Toast.makeText(this, "Saved~", Toast.LENGTH_SHORT).show()
                 }
                 is SpritePickerHelper.Result.Reset -> {
@@ -530,7 +424,7 @@ class MainActivity : AppCompatActivity() {
                             p.copy(walkSpriteUri = null, walkFrameCount = PromptSettings.DEFAULT_WALK_FRAME_COUNT)
                         }
                     }
-                    clearCachedSprites()
+                    spriteAnimator.clearCache()
                     Toast.makeText(this, "Reset to default~", Toast.LENGTH_SHORT).show()
                 }
                 is SpritePickerHelper.Result.Cancelled -> { /* Do nothing */ }
@@ -553,17 +447,8 @@ class MainActivity : AppCompatActivity() {
             else preset.copy(walkSpriteUri = uri.toString())
         }
 
-        clearCachedSprites()
+        spriteAnimator.clearCache()
         Toast.makeText(this, "Sprite updated~", Toast.LENGTH_SHORT).show()
-    }
-
-    private fun clearCachedSprites() {
-        spriteSheets.values.forEach { (idle, walk) ->
-            idle?.recycle()
-            walk?.recycle()
-        }
-        spriteSheets.clear()
-        frameCounts.clear()
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -624,18 +509,10 @@ class MainActivity : AppCompatActivity() {
     private fun checkPermissionAndStart() {
         if (!Settings.canDrawOverlays(this)) {
             Toast.makeText(this, "Please grant overlay permission!", Toast.LENGTH_LONG).show()
-            startActivityForResult(
-                Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")),
-                OVERLAY_PERMISSION_REQUEST
+            overlayPermissionLauncher.launch(
+                Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
             )
         } else {
-            startOverlayService()
-        }
-    }
-
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == OVERLAY_PERMISSION_REQUEST && Settings.canDrawOverlays(this)) {
             startOverlayService()
         }
     }
@@ -648,16 +525,4 @@ class MainActivity : AppCompatActivity() {
         coordinator.dismissOverlay()
     }
 
-    // ══════════════════════════════════════════════════════════════════════
-    // Notification
-    // ══════════════════════════════════════════════════════════════════════
-
-    private fun createNotificationChannel() {
-        val channel = NotificationChannel(
-            CompanionOverlayService.CHANNEL_ID,
-            "Companion Overlay",
-            NotificationManager.IMPORTANCE_LOW
-        ).apply { description = "Keeps Senni alive on your screen" }
-        getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
-    }
 }

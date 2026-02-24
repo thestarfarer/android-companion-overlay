@@ -37,20 +37,20 @@
 # Architecture Components
 # ═══════════════════════════════════════════════════════════════════════════
 
-# Event classes (sealed class hierarchy)
--keep class com.starfarer.companionoverlay.event.** { *; }
+# Event classes (sealed class hierarchy — keep hierarchy, not all members)
+-keep class com.starfarer.companionoverlay.event.** { <init>(...); }
 
-# Repository layer
--keep class com.starfarer.companionoverlay.repository.** { *; }
+# Repository layer (Koin-constructed singletons)
+-keep class com.starfarer.companionoverlay.repository.** { <init>(...); }
 
-# UI helpers
--keep class com.starfarer.companionoverlay.ui.** { *; }
+# UI helpers (Fragment-based, need constructors for recreation)
+-keep class com.starfarer.companionoverlay.ui.** { <init>(...); }
 
 # ViewModel classes
--keep class com.starfarer.companionoverlay.viewmodel.** { *; }
+-keep class com.starfarer.companionoverlay.viewmodel.** { <init>(...); }
 
-# Koin modules
--keep class com.starfarer.companionoverlay.di.** { *; }
+# Koin modules (need to be accessible for DI wiring)
+-keep class com.starfarer.companionoverlay.di.** { <init>(...); }
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Third-party Libraries
@@ -78,27 +78,26 @@
 # ═══════════════════════════════════════════════════════════════════════════
 
 -keep class androidx.car.app.** { *; }
--keep class com.starfarer.companionoverlay.CompanionCarAppService { *; }
--keep class com.starfarer.companionoverlay.CompanionCarSession { *; }
--keep class com.starfarer.companionoverlay.CompanionMainScreen { *; }
--keep class com.starfarer.companionoverlay.CompanionModelScreen { *; }
--keep class com.starfarer.companionoverlay.CompanionResponseScreen { *; }
+-keep class com.starfarer.companionoverlay.CompanionCarAppService { <init>(...); }
+-keep class com.starfarer.companionoverlay.CompanionCarSession { <init>(...); }
+-keep class com.starfarer.companionoverlay.CompanionMainScreen { <init>(...); }
+-keep class com.starfarer.companionoverlay.CompanionModelScreen { <init>(...); }
+-keep class com.starfarer.companionoverlay.CompanionResponseScreen { <init>(...); }
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Services (must be kept for manifest references)
 # ═══════════════════════════════════════════════════════════════════════════
 
--keep class com.starfarer.companionoverlay.CompanionOverlayService { *; }
--keep class com.starfarer.companionoverlay.CompanionAccessibilityService { *; }
+-keep class com.starfarer.companionoverlay.CompanionOverlayService { <init>(...); }
+-keep class com.starfarer.companionoverlay.CompanionAccessibilityService { <init>(...); }
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Activities & Fragments
 # ═══════════════════════════════════════════════════════════════════════════
 
--keep class com.starfarer.companionoverlay.MainActivity { *; }
--keep class com.starfarer.companionoverlay.SettingsActivity { *; }
--keep class com.starfarer.companionoverlay.AssistActivity { *; }
--keep class com.starfarer.companionoverlay.SettingsFragment { *; }
+-keep class com.starfarer.companionoverlay.MainActivity { <init>(...); }
+-keep class com.starfarer.companionoverlay.SettingsActivity { <init>(...); }
+-keep class com.starfarer.companionoverlay.SettingsFragment { <init>(...); }
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Interfaces (for Koin injection)
@@ -115,4 +114,13 @@
 -keepclassmembers enum * {
     public static **[] values();
     public static ** valueOf(java.lang.String);
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Strip debug/verbose logging in release builds
+# ═══════════════════════════════════════════════════════════════════════════
+
+-assumenosideeffects class android.util.Log {
+    public static int d(...);
+    public static int v(...);
 }

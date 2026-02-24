@@ -4,12 +4,13 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import com.starfarer.companionoverlay.repository.PresetRepository
 import org.koin.android.ext.koin.androidContext
 import org.koin.core.qualifier.named
 import org.koin.dsl.module
 
 /**
- * Storage dependencies — SharedPreferences only.
+ * Storage dependencies — SharedPreferences and preset persistence.
  */
 val storageModule = module {
     
@@ -30,4 +31,7 @@ val storageModule = module {
             EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
         )
     }
+    
+    // PresetRepository uses the same prefs file as settings (companion_prompts)
+    single { PresetRepository(get(named("settings"))) }
 }

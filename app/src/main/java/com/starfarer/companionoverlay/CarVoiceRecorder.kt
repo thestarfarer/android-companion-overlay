@@ -14,6 +14,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import com.starfarer.companionoverlay.repository.SettingsRepository
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.TimeUnit
 
@@ -24,7 +25,11 @@ import java.util.concurrent.TimeUnit
  * Uses the same Silero VAD + AudioUtils pipeline as GeminiSpeechRecognizer,
  * adapted for CarAudioRecord's byte-oriented API.
  */
-class CarVoiceRecorder(private val carContext: CarContext) {
+class CarVoiceRecorder(
+    private val carContext: CarContext,
+    private val settings: SettingsRepository,
+    baseClient: OkHttpClient
+) {
 
     companion object {
         private const val TAG = "CarVoice"
@@ -44,7 +49,7 @@ class CarVoiceRecorder(private val carContext: CarContext) {
     private var vad: SileroVadDetector? = null
     @Volatile private var recording = false
 
-    private val httpClient = OkHttpClient.Builder()
+    private val httpClient = baseClient.newBuilder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
@@ -90,7 +95,7 @@ class CarVoiceRecorder(private val carContext: CarContext) {
             return
         }
 
-        Thread { recordAndProcess() }.start()
+        Thread({ recordAndProcess() }, "car-voice-record").start()
     }
 
     fun stop() {
@@ -182,7 +187,7 @@ class CarVoiceRecorder(private val carContext: CarContext) {
     }
 
     private fun transcribeWithGemini(wavData: ByteArray) {
-        val apiKey = PromptSettings.getGeminiApiKey(carContext)
+        val apiKey = settings.geminiApiKey
         if (apiKey.isNullOrBlank()) {
             postError("No Gemini API key")
             return
@@ -205,9 +210,12 @@ class CarVoiceRecorder(private val carContext: CarContext) {
             ))
         }
 
-        val url = "$GEMINI_URL?key=$apiKey"
         val body = requestJson.toString().toRequestBody("application/json".toMediaType())
-        val request = Request.Builder().url(url).post(body).build()
+        val request = Request.Builder()
+            .url(GEMINI_URL)
+            .post(body)
+            .header("x-goog-api-key", apiKey)
+            .build()
 
         try {
             val response = httpClient.newCall(request).execute()

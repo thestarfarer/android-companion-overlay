@@ -3,6 +3,8 @@ package com.starfarer.companionoverlay
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
+import android.os.Handler
+import android.os.Looper
 
 /**
  * Generates and plays cozy synthesized beep tones for voice pipeline feedback.
@@ -78,13 +80,20 @@ class BeepManager {
                 .build()
 
             track.write(pcm, 0, pcm.size)
-            track.setNotificationMarkerPosition(pcm.size)
-            track.setPlaybackPositionUpdateListener(object : AudioTrack.OnPlaybackPositionUpdateListener {
-                override fun onMarkerReached(t: AudioTrack?) {
-                    t?.release()
-                }
-                override fun onPeriodicNotification(t: AudioTrack?) {}
-            })
+            val markerResult = track.setNotificationMarkerPosition(pcm.size)
+            if (markerResult == AudioTrack.SUCCESS) {
+                track.setPlaybackPositionUpdateListener(object : AudioTrack.OnPlaybackPositionUpdateListener {
+                    override fun onMarkerReached(t: AudioTrack?) {
+                        t?.release()
+                    }
+                    override fun onPeriodicNotification(t: AudioTrack?) {}
+                })
+            } else {
+                val durationMs = (pcm.size * 1000L) / SAMPLE_RATE + 100
+                Handler(Looper.getMainLooper()).postDelayed({
+                    try { track.release() } catch (_: Exception) {}
+                }, durationMs)
+            }
             track.play()
         } catch (e: Exception) {
             DebugLog.log(TAG, "Beep failed: ${e.message}")

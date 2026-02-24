@@ -117,7 +117,12 @@ class SileroVadDetector(context: Context) {
         return output
     }
 
+    private var closed = false
+
     fun close() {
+        if (closed) return
+        closed = true
         session.close()
+        env.close()
     }
 }

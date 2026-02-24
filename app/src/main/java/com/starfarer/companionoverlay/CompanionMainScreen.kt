@@ -5,18 +5,27 @@ import androidx.car.app.Screen
 import androidx.car.app.model.*
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
+import com.starfarer.companionoverlay.api.assistantMessage
+import com.starfarer.companionoverlay.api.textMessage
+import com.starfarer.companionoverlay.repository.SettingsRepository
 import kotlinx.coroutines.*
-import org.json.JSONArray
-import org.json.JSONObject
+import org.koin.core.component.KoinComponent
+import org.koin.core.component.inject
 
 /**
- * Main Android Auto screen — "Talk to Senni" button + model indicator.
+ * Main Android Auto screen: "Talk to Senni" button + model indicator.
  * Uses PaneTemplate (IOT category).
+ *
+ * Implements [KoinComponent] to access [SettingsRepository] from the
+ * Car App Library context, where standard Android injection isn't available.
  */
 class CompanionMainScreen(
     carContext: CarContext,
     private val session: CompanionCarSession
-) : Screen(carContext) {
+) : Screen(carContext), KoinComponent {
+
+    private val settings: SettingsRepository by inject()
+    private val httpClient: okhttp3.OkHttpClient by inject()
 
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var recorder: CarVoiceRecorder? = null
@@ -27,13 +36,14 @@ class CompanionMainScreen(
         lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onDestroy(owner: LifecycleOwner) {
                 recorder?.stop()
+                recorder?.destroy()
                 scope.cancel()
             }
         })
     }
 
     override fun onGetTemplate(): Template {
-        val modelId = PromptSettings.getModel(carContext)
+        val modelId = settings.model
         val modelName = PromptSettings.MODEL_IDS.indexOf(modelId).let { idx ->
             if (idx >= 0) PromptSettings.MODEL_NAMES[idx] else "Unknown"
         }
@@ -55,7 +65,7 @@ class CompanionMainScreen(
                 Action.Builder()
                     .setTitle("Model")
                     .setOnClickListener {
-                        screenManager.push(CompanionModelScreen(carContext, this))
+                        screenManager.push(CompanionModelScreen(carContext) { onModelChanged() })
                     }
                     .build()
             )
@@ -77,8 +87,8 @@ class CompanionMainScreen(
         statusText = "Listening..."
         invalidate()
 
-        recorder = CarVoiceRecorder(carContext).apply {
-            silenceTimeoutMs = PromptSettings.getSilenceTimeout(carContext)
+        recorder = CarVoiceRecorder(carContext, settings, httpClient).apply {
+            silenceTimeoutMs = settings.silenceTimeoutMs
 
             onResult = { transcript ->
                 isRecording = false
@@ -99,40 +109,26 @@ class CompanionMainScreen(
 
     private fun sendToClaudeAndRespond(userText: String) {
         scope.launch {
-            val userMsg = JSONObject().apply {
-                put("role", "user")
-                put("content", userText)
-            }
-
-            val messagesArray = JSONArray()
-            for (msg in session.conversationHistory) messagesArray.put(msg)
-            messagesArray.put(userMsg)
+            val userMsg = textMessage(userText)
+            val allMessages = session.conversationHistory + userMsg
 
             val systemPrompt = CAR_SYSTEM_PROMPT
-            val webSearch = PromptSettings.getWebSearch(carContext)
+            val webSearch = settings.webSearchEnabled
 
             val response = session.claudeApi.sendConversation(
-                messagesArray, systemPrompt, webSearch
+                allMessages, systemPrompt, webSearch
             )
 
             if (response.success) {
-                session.conversationHistory.add(userMsg)
-                session.conversationHistory.add(JSONObject().apply {
-                    put("role", "assistant")
-                    put("content", response.text)
-                })
-
-                val maxMsgs = PromptSettings.getMaxMessages(carContext)
-                while (session.conversationHistory.size > maxMsgs) {
-                    session.conversationHistory.removeAt(0)
-                    session.conversationHistory.removeAt(0)
-                }
+                session.addMessage(userMsg)
+                session.addMessage(assistantMessage(response.text))
+                session.trimHistory(settings.maxMessages)
 
                 statusText = "Ready"
                 invalidate()
 
                 screenManager.push(
-                    CompanionResponseScreen(carContext, this@CompanionMainScreen, response.text)
+                    CompanionResponseScreen(carContext, response.text)
                 )
             } else {
                 statusText = response.error?.ifBlank { "API error" } ?: "API error"
@@ -141,7 +137,6 @@ class CompanionMainScreen(
         }
     }
 
-    /** Called from model selector when model changes. */
     fun onModelChanged() {
         invalidate()
     }

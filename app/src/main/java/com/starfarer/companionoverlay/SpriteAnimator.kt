@@ -2,8 +2,11 @@ package com.starfarer.companionoverlay
 
 import android.content.Context
 import android.graphics.*
+import android.net.Uri
+import android.os.SystemClock
 import android.view.WindowManager
 import android.widget.ImageView
+import com.starfarer.companionoverlay.repository.SettingsRepository
 import kotlin.math.sin
 import kotlin.random.Random
 
@@ -13,8 +16,37 @@ import kotlin.random.Random
  *
  * Extracted from CompanionOverlayService to separate rendering concerns
  * from conversation, TTS, and service lifecycle logic.
+ *
+ * Screen geometry is passed via [Config] at construction time. View
+ * references are bound later via [attach], which must be called before
+ * the first [update]. This two-phase approach is necessary because the
+ * overlay view dimensions depend on sprite sheet sizes (computed during
+ * [loadSprites]), but the view itself is created after the animator.
  */
-class SpriteAnimator(private val context: Context) {
+class SpriteAnimator(
+    private val context: Context,
+    private val config: Config,
+    private val settings: SettingsRepository
+) {
+
+    /**
+     * Immutable screen geometry, resolved once at service creation.
+     * Everything the animator needs to know about the display without
+     * reaching back into the service.
+     */
+    data class Config(
+        val screenWidth: Int,
+        val screenHeight: Int,
+        val density: Float
+    )
+
+    /**
+     * Mutable view references, set via [attach] after the overlay view
+     * is created and added to the window manager.
+     */
+    private var overlayView: ImageView? = null
+    private var params: WindowManager.LayoutParams? = null
+    private var windowManager: WindowManager? = null
 
     companion object {
         private const val DEFAULT_IDLE_FRAME_COUNT = 6
@@ -36,16 +68,6 @@ class SpriteAnimator(private val context: Context) {
     enum class OverlayPosition { Left, Right }
     private enum class EscapePhase { None, Exit, Enter }
 
-    // --- View references (set via init) ---
-    lateinit var overlayView: ImageView
-    lateinit var params: WindowManager.LayoutParams
-    lateinit var windowManager: WindowManager
-
-    // --- Screen geometry ---
-    var screenWidth = 0
-    var screenHeight = 0
-    var density = 1f
-
     // --- Sprite sheets ---
     private var idleSpriteSheet: Bitmap? = null
     private var walkSpriteSheet: Bitmap? = null
@@ -55,6 +77,14 @@ class SpriteAnimator(private val context: Context) {
     var idleFrameHeight = 0; private set
     var walkFrameWidth = 0; private set
     var walkFrameHeight = 0; private set
+
+    // --- Pre-allocated render buffers (avoids per-frame Bitmap allocations) ---
+    private var idleRenderBitmap: Bitmap? = null
+    private var idleRenderCanvas: Canvas? = null
+
+    // --- Pre-extracted walking frames (avoids per-frame createBitmap + mirror) ---
+    private var walkFramesRight: Array<Bitmap>? = null
+    private var walkFramesLeft: Array<Bitmap>? = null
 
     // --- State machine ---
     var state = OverlayState.Idle; private set
@@ -78,40 +108,83 @@ class SpriteAnimator(private val context: Context) {
     var isGhostMode = false
         private set
 
+    // ══════════════════════════════════════════════════════════════════════
+    // View binding
+    // ══════════════════════════════════════════════════════════════════════
+
+    /**
+     * Bind the overlay view and its layout params after creation.
+     * Must be called before the first [update].
+     */
+    fun attach(view: ImageView, layoutParams: WindowManager.LayoutParams, wm: WindowManager) {
+        overlayView = view
+        params = layoutParams
+        windowManager = wm
+        walkStartX = layoutParams.x
+        walkTargetX = layoutParams.x
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // Ghost mode
+    // ══════════════════════════════════════════════════════════════════════
+
     fun setGhostMode(ghost: Boolean) {
         if (ghost == isGhostMode) return
         isGhostMode = ghost
+        val view = overlayView ?: return
+        val p = params ?: return
+        val wm = windowManager ?: return
 
+        val oldFlags = p.flags
         if (ghost) {
-            overlayView.animate().alpha(0.5f).setDuration(200).start()
-            params.flags = params.flags or android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+            view.animate().alpha(0.5f).setDuration(200).start()
+            p.flags = p.flags or android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
         } else {
-            overlayView.animate().alpha(1f).setDuration(200).start()
-            params.flags = params.flags and android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+            view.animate().alpha(1f).setDuration(200).start()
+            p.flags = p.flags and android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
         }
         try {
-            windowManager.updateViewLayout(overlayView, params)
-        } catch (_: Exception) {}
+            wm.updateViewLayout(view, p)
+        } catch (e: Exception) {
+            p.flags = oldFlags
+            isGhostMode = !ghost
+            DebugLog.log("Sprite", "updateViewLayout failed: ${e.message}")
+        }
     }
 
     fun release() {
+        idleRenderBitmap?.recycle()
+        idleRenderBitmap = null
+        idleRenderCanvas = null
+
+        walkFramesRight?.forEach { it.recycle() }
+        walkFramesLeft?.forEach { it.recycle() }
+        walkFramesRight = null
+        walkFramesLeft = null
+
         idleSpriteSheet?.recycle()
         walkSpriteSheet?.recycle()
         idleSpriteSheet = null
         walkSpriteSheet = null
+
+        overlayView = null
+        params = null
+        windowManager = null
     }
 
-    // --- Sprite loading ---
+    // ══════════════════════════════════════════════════════════════════════
+    // Sprite loading
+    // ══════════════════════════════════════════════════════════════════════
 
     fun loadSprites() {
-        idleFrameCount = PromptSettings.getIdleFrameCount(context)
-        walkFrameCount = PromptSettings.getWalkFrameCount(context)
+        idleFrameCount = settings.idleFrameCount
+        walkFrameCount = settings.walkFrameCount
 
         idleSpriteSheet = loadSprite(
-            PromptSettings.getIdleSpriteUri(context), "custom_idle_sheet.png", "idle_sheet.png"
+            settings.idleSpriteUri, "custom_idle_sheet.png", "idle_sheet.png"
         )
         walkSpriteSheet = loadSprite(
-            PromptSettings.getWalkSpriteUri(context), "custom_walk_sheet.png", "walk_sheet.png"
+            settings.walkSpriteUri, "custom_walk_sheet.png", "walk_sheet.png"
         )
 
         idleSpriteSheet?.let {
@@ -122,13 +195,47 @@ class SpriteAnimator(private val context: Context) {
             walkFrameWidth = it.width / walkFrameCount
             walkFrameHeight = it.height
         }
+
+        // Pre-allocate idle render buffer (reused every frame instead of allocating)
+        val vw = viewWidth
+        val vh = viewHeight
+        if (vw > 0 && vh > 0) {
+            idleRenderBitmap = Bitmap.createBitmap(vw, vh, Bitmap.Config.ARGB_8888)
+            idleRenderCanvas = Canvas(idleRenderBitmap!!)
+        }
+
+        // Pre-extract and pre-mirror walking frames
+        extractWalkFrames()
+    }
+
+    /**
+     * Pre-extracts individual walking frames from the sprite sheet and creates
+     * mirrored copies for left-walking. This moves all Bitmap.createBitmap and
+     * Matrix work from the 60fps render loop to a one-time setup cost.
+     */
+    private fun extractWalkFrames() {
+        val sheet = walkSpriteSheet ?: return
+        if (walkFrameWidth <= 0 || walkFrameHeight <= 0) return
+
+        val right = Array(walkFrameCount) { i ->
+            Bitmap.createBitmap(sheet, i * walkFrameWidth, 0, walkFrameWidth, walkFrameHeight)
+        }
+        val mirrorMatrix = Matrix().apply {
+            preScale(-1f, 1f)
+            postTranslate(walkFrameWidth.toFloat(), 0f)
+        }
+        val left = Array(walkFrameCount) { i ->
+            Bitmap.createBitmap(right[i], 0, 0, walkFrameWidth, walkFrameHeight, mirrorMatrix, true)
+        }
+
+        walkFramesRight = right
+        walkFramesLeft = left
     }
 
     private fun loadSprite(customUri: String?, customAsset: String, defaultAsset: String): Bitmap {
-        // Try user-picked sprite first (content URI from picker)
         if (customUri != null) {
             try {
-                val uri = android.net.Uri.parse(customUri)
+                val uri = Uri.parse(customUri)
                 context.contentResolver.openInputStream(uri)?.use { stream ->
                     val bmp = BitmapFactory.decodeStream(stream)
                     if (bmp != null) {
@@ -141,7 +248,6 @@ class SpriteAnimator(private val context: Context) {
             }
         }
 
-        // Try build-time custom asset bundled in APK
         try {
             context.assets.open(customAsset).use { stream ->
                 val bmp = BitmapFactory.decodeStream(stream)
@@ -152,16 +258,17 @@ class SpriteAnimator(private val context: Context) {
             }
         } catch (_: Exception) {}
 
-        // Fall back to default
         return context.assets.open(defaultAsset).use { stream ->
             BitmapFactory.decodeStream(stream)
         } ?: Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
     }
 
-    // --- Animation update (called from animation runnable) ---
+    // ══════════════════════════════════════════════════════════════════════
+    // Animation update (called from animation runnable)
+    // ══════════════════════════════════════════════════════════════════════
 
     fun update() {
-        val now = System.currentTimeMillis()
+        val now = SystemClock.elapsedRealtime()
         val elapsed = (now - startTime) / 1000.0
 
         when (state) {
@@ -173,13 +280,12 @@ class SpriteAnimator(private val context: Context) {
         }
     }
 
-    // --- Touch handling ---
+    // ══════════════════════════════════════════════════════════════════════
+    // Touch handling
+    // ══════════════════════════════════════════════════════════════════════
 
-    /**
-     * Called on short tap. Tracks disturbance and triggers walk or escape.
-     */
     fun handleTouch() {
-        val now = System.currentTimeMillis()
+        val now = SystemClock.elapsedRealtime()
         if (state != OverlayState.Idle) return
         if (now - lastTouchTime < DISTURBANCE_TIMEOUT_MS) return
 
@@ -197,19 +303,23 @@ class SpriteAnimator(private val context: Context) {
     }
 
     fun dismissAnimated(onComplete: () -> Unit) {
-        overlayView.animate()
+        val view = overlayView ?: run { onComplete(); return }
+        view.animate()
             .alpha(0f)
             .setDuration(250)
             .withEndAction(onComplete)
             .start()
     }
 
-    // --- Walking ---
+    // ══════════════════════════════════════════════════════════════════════
+    // Walking
+    // ══════════════════════════════════════════════════════════════════════
 
     private fun triggerWalk() {
-        walkStartTime = System.currentTimeMillis()
-        walkStartX = params.x
-        val walkDistance = (WALK_DISTANCE_DP * density).toInt()
+        val p = params ?: return
+        walkStartTime = SystemClock.elapsedRealtime()
+        walkStartX = p.x
+        val walkDistance = walkDistancePx
 
         if (position == OverlayPosition.Right) {
             state = OverlayState.WalkingRight
@@ -221,53 +331,55 @@ class SpriteAnimator(private val context: Context) {
             position = OverlayPosition.Right
         }
 
-        val marginRight = (MARGIN_RIGHT_DP * density).toInt()
-        walkTargetX = walkTargetX.coerceIn(marginRight, screenWidth - params.width - marginRight)
+        walkTargetX = walkTargetX.coerceIn(marginRightPx, config.screenWidth - p.width - marginRightPx)
     }
 
     private fun triggerEscape() {
+        val p = params ?: return
         escaping = true
         escapePhase = EscapePhase.Exit
-        walkStartTime = System.currentTimeMillis()
-        walkStartX = params.x
+        walkStartTime = SystemClock.elapsedRealtime()
+        walkStartX = p.x
 
-        val distanceToLeft = params.x + params.width
-        val distanceToRight = screenWidth - params.x
+        val distanceToLeft = p.x + p.width
+        val distanceToRight = config.screenWidth - p.x
 
         if (distanceToRight < distanceToLeft) {
-            walkTargetX = screenWidth + params.width
+            walkTargetX = config.screenWidth + p.width
             position = OverlayPosition.Right
             state = OverlayState.WalkingRight
         } else {
-            walkTargetX = -params.width * 2
+            walkTargetX = -p.width * 2
             position = OverlayPosition.Left
             state = OverlayState.WalkingLeft
         }
     }
 
     private fun handleWalking(now: Long) {
+        val p = params ?: return
+        val view = overlayView ?: return
+        val wm = windowManager ?: return
+
         val walkDuration = WALK_FRAME_DURATION_MS * walkFrameCount
         val walkProgress = (now - walkStartTime).toFloat() / walkDuration
 
         if (walkProgress >= 1.0f) {
-            params.x = walkTargetX
+            p.x = walkTargetX
 
             if (escaping) {
                 if (escapePhase == EscapePhase.Exit) {
                     escapePhase = EscapePhase.Enter
                     walkStartTime = now
-                    val marginRight = (MARGIN_RIGHT_DP * density).toInt()
-                    val walkDistance = (WALK_DISTANCE_DP * density).toInt()
 
                     if (position == OverlayPosition.Right) {
-                        params.x = -params.width
-                        walkStartX = -params.width
-                        walkTargetX = marginRight + walkDistance
+                        p.x = -p.width
+                        walkStartX = -p.width
+                        walkTargetX = marginRightPx + walkDistancePx
                         state = OverlayState.WalkingRight
                     } else {
-                        params.x = screenWidth + params.width
-                        walkStartX = screenWidth + params.width
-                        walkTargetX = screenWidth - params.width - marginRight - walkDistance
+                        p.x = config.screenWidth + p.width
+                        walkStartX = config.screenWidth + p.width
+                        walkTargetX = config.screenWidth - p.width - marginRightPx - walkDistancePx
                         state = OverlayState.WalkingLeft
                     }
                 } else {
@@ -280,73 +392,69 @@ class SpriteAnimator(private val context: Context) {
                 state = OverlayState.Idle
             }
 
-            windowManager.updateViewLayout(overlayView, params)
+            wm.updateViewLayout(view, p)
         } else {
             val newX = walkStartX + ((walkTargetX - walkStartX) * walkProgress).toInt()
-            params.x = newX
-            windowManager.updateViewLayout(overlayView, params)
+            p.x = newX
+            wm.updateViewLayout(view, p)
         }
     }
 
-    // --- Drawing ---
+    // ══════════════════════════════════════════════════════════════════════
+    // Drawing
+    // ══════════════════════════════════════════════════════════════════════
 
     private fun drawIdle(t: Double) {
+        val view = overlayView ?: return
+        val p = params ?: return
         val idleSheet = idleSpriteSheet ?: return
+        val renderBitmap = idleRenderBitmap ?: return
+        val canvas = idleRenderCanvas ?: return
         val frame = ((t / (IDLE_FRAME_DURATION_MS / 1000.0)).toInt()) % idleFrameCount
         val scale = 1.0f + 0.01f * sin(2 * Math.PI * t).toFloat()
         val yOffset = (4.0 * sin(2 * Math.PI * t * 0.5)).toFloat()
 
-        val viewWidth = params.width
-        val viewHeight = params.height
-        val outputBitmap = Bitmap.createBitmap(viewWidth, viewHeight, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(outputBitmap)
+        val vw = p.width
+        val vh = p.height
 
-        val xOffset = (viewWidth - idleFrameWidth) / 2f
-        val yCenter = (viewHeight - idleFrameHeight) / 2f
+        // Clear the pre-allocated buffer instead of allocating a new one
+        canvas.drawColor(android.graphics.Color.TRANSPARENT, android.graphics.PorterDuff.Mode.CLEAR)
+
+        val xOffset = (vw - idleFrameWidth) / 2f
+        val yCenter = (vh - idleFrameHeight) / 2f
 
         canvas.save()
-        canvas.translate(viewWidth / 2f, viewHeight / 2f + yOffset)
+        canvas.translate(vw / 2f, vh / 2f + yOffset)
         canvas.scale(1f, scale)
-        canvas.translate(-viewWidth / 2f, -viewHeight / 2f)
+        canvas.translate(-vw / 2f, -vh / 2f)
 
         val srcRect = Rect(frame * idleFrameWidth, 0, (frame + 1) * idleFrameWidth, idleFrameHeight)
         val dstRect = RectF(xOffset, yCenter, xOffset + idleFrameWidth, yCenter + idleFrameHeight)
         canvas.drawBitmap(idleSheet, srcRect, dstRect, null)
         canvas.restore()
 
-        overlayView.setImageBitmap(outputBitmap)
+        view.setImageBitmap(renderBitmap)
     }
 
     private fun drawWalking(now: Long) {
-        val walkSheet = walkSpriteSheet ?: return
+        val view = overlayView ?: return
         val walkElapsed = now - walkStartTime
         val frame = ((walkElapsed / WALK_FRAME_DURATION_MS).toInt()) % walkFrameCount
 
-        var frameBitmap = Bitmap.createBitmap(
-            walkSheet, frame * walkFrameWidth, 0, walkFrameWidth, walkFrameHeight
-        )
+        // Use pre-extracted frames — no per-frame Bitmap allocation or Matrix work
+        val frames = if (state == OverlayState.WalkingLeft) walkFramesLeft else walkFramesRight
+        val frameBitmap = frames?.getOrNull(frame) ?: return
 
-        if (state == OverlayState.WalkingLeft) {
-            val matrix = Matrix().apply {
-                preScale(-1f, 1f)
-                postTranslate(walkFrameWidth.toFloat(), 0f)
-            }
-            val mirrored = Bitmap.createBitmap(
-                frameBitmap, 0, 0, frameBitmap.width, frameBitmap.height, matrix, true
-            )
-            frameBitmap.recycle()
-            frameBitmap = mirrored
-        }
-
-        overlayView.setImageBitmap(frameBitmap)
+        view.setImageBitmap(frameBitmap)
     }
 
-    // --- Utility ---
+    // ══════════════════════════════════════════════════════════════════════
+    // Utility
+    // ══════════════════════════════════════════════════════════════════════
 
-    /** View dimensions based on the larger of the two sprite sheets. */
     val viewWidth get() = maxOf(idleFrameWidth, walkFrameWidth)
     val viewHeight get() = maxOf(idleFrameHeight, walkFrameHeight)
-    val marginRightPx get() = (MARGIN_RIGHT_DP * density).toInt()
-    val marginBottomPx get() = (MARGIN_BOTTOM_DP * density).toInt()
-    val walkDistancePx get() = (WALK_DISTANCE_DP * density).toInt()
+    val marginRightPx get() = (MARGIN_RIGHT_DP * config.density).toInt()
+    val marginBottomPx get() = (MARGIN_BOTTOM_DP * config.density).toInt()
+    val walkDistancePx get() = (WALK_DISTANCE_DP * config.density).toInt()
 }

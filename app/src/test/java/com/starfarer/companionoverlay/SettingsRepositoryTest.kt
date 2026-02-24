@@ -132,4 +132,5 @@ class SettingsRepositoryTest {
         every { settingsPrefs.getInt("max_messages", PromptSettings.DEFAULT_MAX_MESSAGES) } returns PromptSettings.DEFAULT_MAX_MESSAGES
         assertEquals(PromptSettings.DEFAULT_MAX_MESSAGES, repository.maxMessages)
     }
+
 }

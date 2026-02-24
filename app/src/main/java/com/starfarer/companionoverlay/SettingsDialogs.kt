@@ -1,13 +1,16 @@
 package com.starfarer.companionoverlay
 
 import android.widget.*
-import androidx.appcompat.app.AppCompatActivity
 import androidx.fragment.app.FragmentActivity
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.starfarer.companionoverlay.repository.SettingsRepository
 import com.starfarer.companionoverlay.ui.TextEditorBottomSheet
 
 /**
- * Dialog builders for settings — text editing, voice picker, and TTS tuning.
+ * Dialog builders for settings: text editing, voice picker, and TTS tuning.
+ *
+ * All settings mutations flow through [SettingsRepository] rather than
+ * reaching into PromptSettings statics.
  */
 object SettingsDialogs {
 
@@ -19,22 +22,33 @@ object SettingsDialogs {
         defaultText: String,
         onSave: (String) -> Unit
     ) {
+        activity.supportFragmentManager.setFragmentResultListener(
+            TextEditorBottomSheet.REQUEST_KEY,
+            activity
+        ) { _, bundle ->
+            val text = bundle.getString(TextEditorBottomSheet.RESULT_TEXT) ?: return@setFragmentResultListener
+            onSave(text)
+        }
         val bottomSheet = TextEditorBottomSheet.newInstance(title, currentText, defaultText)
-        bottomSheet.setOnSaveListener(onSave)
         bottomSheet.show(activity.supportFragmentManager, "text_editor")
     }
 
     /** Voice selection with preview playback. */
-    fun showVoicePicker(activity: FragmentActivity, onTuneRequested: () -> Unit) {
-        val tts = TtsManager(activity)
+    fun showVoicePicker(activity: FragmentActivity, settings: SettingsRepository, onTuneRequested: () -> Unit) {
+        val tts = TtsManager(activity, settings)
 
-        tts.onReady = {
+        tts.onReady = ready@{
+            if (activity.isFinishing || activity.isDestroyed) {
+                tts.release()
+                return@ready
+            }
+
             val voices = tts.getAvailableVoices()
             if (voices.isEmpty()) {
                 Toast.makeText(activity, "No voices available on this device", Toast.LENGTH_LONG).show()
                 tts.release()
             } else {
-                val currentVoice = PromptSettings.getTtsVoice(activity)
+                val currentVoice = settings.ttsVoice
                 val labels = voices.map { it.first }.toTypedArray()
                 val names = voices.map { it.second.name }
                 val checkedIndex = names.indexOf(currentVoice).coerceAtLeast(0)
@@ -48,11 +62,11 @@ object SettingsDialogs {
                         tts.speak("Hello~ I'm Senni, your companion.")
                     }
                     .setPositiveButton("Select") { _, _ ->
-                        PromptSettings.setTtsVoice(activity, names[selectedIndex])
+                        settings.ttsVoice = names[selectedIndex]
                         tts.release()
                     }
                     .setNeutralButton("Tune") { _, _ ->
-                        PromptSettings.setTtsVoice(activity, names[selectedIndex])
+                        settings.ttsVoice = names[selectedIndex]
                         tts.release()
                         onTuneRequested()
                     }
@@ -64,11 +78,11 @@ object SettingsDialogs {
     }
 
     /** TTS rate/pitch tuning with live preview. */
-    fun showTuning(activity: FragmentActivity) {
+    fun showTuning(activity: FragmentActivity, settings: SettingsRepository) {
         val d = activity.resources.displayMetrics.density
-        val currentRate = PromptSettings.getTtsSpeechRate(activity)
-        val currentPitch = PromptSettings.getTtsPitch(activity)
-        val tts = TtsManager(activity)
+        val currentRate = settings.ttsSpeechRate
+        val currentPitch = settings.ttsPitch
+        val tts = TtsManager(activity, settings)
 
         val rateSeek = SeekBar(activity).apply {
             max = 150
@@ -120,15 +134,20 @@ object SettingsDialogs {
             addView(pitchSeek)
         }
 
-        tts.onReady = {
+        tts.onReady = ready@{
+            if (activity.isFinishing || activity.isDestroyed) {
+                tts.release()
+                return@ready
+            }
+
             MaterialAlertDialogBuilder(activity, R.style.CompanionDialog)
                 .setTitle("Voice Tuning")
                 .setView(container)
                 .setPositiveButton("Save") { _, _ ->
                     val rate = 0.5f + rateSeek.progress / 100f
                     val pitch = 0.5f + pitchSeek.progress / 100f
-                    PromptSettings.setTtsSpeechRate(activity, rate)
-                    PromptSettings.setTtsPitch(activity, pitch)
+                    settings.ttsSpeechRate = rate
+                    settings.ttsPitch = pitch
                     tts.release()
                 }
                 .setNeutralButton("Preview") { _, _ ->

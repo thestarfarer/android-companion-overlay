@@ -14,16 +14,31 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.preference.*
 import com.starfarer.companionoverlay.event.OverlayCoordinator
+import com.starfarer.companionoverlay.repository.SettingsRepository
 import kotlinx.coroutines.launch
 import org.koin.android.ext.android.inject
 import java.text.SimpleDateFormat
 import java.util.*
 
+/**
+ * Settings screen fragment.
+ *
+ * Routes all settings reads/writes through [SettingsRepository] rather than
+ * calling [PromptSettings] static methods directly. The preference XML still
+ * binds to the same SharedPreferences file — the repository is used for
+ * programmatic access where the preference framework doesn't handle persistence
+ * automatically (int-backed lists, seekbar mappings, encrypted keys).
+ *
+ * [ClaudeApi] is injected for the debug test button — a settings screen
+ * reaching into the API layer is unusual, but a "test connection" feature
+ * is squarely a settings concern and doesn't warrant an intermediary.
+ */
 class SettingsFragment : PreferenceFragmentCompat() {
 
     private val coordinator: OverlayCoordinator by inject()
     private val claudeAuth: ClaudeAuth by inject()
     private val claudeApi: ClaudeApi by inject()
+    private val settings: SettingsRepository by inject()
 
     private val voicePermLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -63,8 +78,8 @@ class SettingsFragment : PreferenceFragmentCompat() {
 
     private fun setupGeminiApi() {
         findPreference<EditTextPreference>("gemini_api_key")?.apply {
-            val saved = PromptSettings.getGeminiApiKey(requireContext())
-            text = saved
+            isPersistent = false
+            text = settings.geminiApiKey
             summaryProvider = Preference.SummaryProvider<EditTextPreference> { pref ->
                 if (pref.text.isNullOrBlank()) "Required for Gemini speech-to-text and text-to-speech"
                 else "Key set (${pref.text!!.take(8)}…)"
@@ -74,15 +89,18 @@ class SettingsFragment : PreferenceFragmentCompat() {
                         android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
                 editText.isSingleLine = true
             }
+            setOnPreferenceChangeListener { _, newValue ->
+                settings.geminiApiKey = newValue as? String
+                true
+            }
         }
     }
 
     // ── Silence timeout ──
 
     private fun setupSilenceTimeout() {
-        val ctx = requireContext()
         findPreference<SeekBarPreference>("silence_timeout_seek")?.apply {
-            val savedMs = PromptSettings.getSilenceTimeout(ctx)
+            val savedMs = settings.silenceTimeoutMs
             // Range 1–50 maps to 100ms–5000ms in steps of 100
             value = ((savedMs - 100) / 100).toInt().coerceIn(1, 50)
             summary = formatSilenceMs(savedMs)
@@ -90,7 +108,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
             setOnPreferenceChangeListener { pref, newValue ->
                 val steps = newValue as Int
                 val ms = steps * 100L + 0L  // step 1 = 100ms, step 50 = 5000ms
-                PromptSettings.setSilenceTimeout(ctx, ms)
+                settings.silenceTimeoutMs = ms
                 pref.summary = formatSilenceMs(ms)
                 true
             }
@@ -107,7 +125,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
     private fun setupVoiceOutput() {
         findPreference<Preference>("tts_voice_picker")?.setOnPreferenceClickListener {
             val activity = requireActivity()
-            SettingsDialogs.showVoicePicker(activity) { SettingsDialogs.showTuning(activity) }
+            SettingsDialogs.showVoicePicker(activity, settings) { SettingsDialogs.showTuning(activity, settings) }
             true
         }
     }
@@ -115,26 +133,22 @@ class SettingsFragment : PreferenceFragmentCompat() {
     // ── Conversation lists (non-persistent, int-backed) ──
 
     private fun setupConversationLists() {
-        val ctx = requireContext()
-
         findPreference<ListPreference>("max_messages")?.apply {
-            val current = PromptSettings.getMaxMessages(ctx)
-            value = current.toString()
+            value = settings.maxMessages.toString()
             summary = "Keep %s messages in context"
             setOnPreferenceChangeListener { _, newValue ->
-                val count = (newValue as String).toIntOrNull() ?: 20
-                PromptSettings.setMaxMessages(ctx, count)
-                true  // let it update the summary via %s
+                val count = (newValue as String).toIntOrNull() ?: PromptSettings.DEFAULT_MAX_MESSAGES
+                settings.maxMessages = count
+                true
             }
         }
 
         findPreference<ListPreference>("bubble_timeout")?.apply {
-            val current = PromptSettings.getBubbleTimeout(ctx)
-            value = current.toString()
+            value = settings.bubbleTimeoutSeconds.toString()
             summary = "Dismiss after %s seconds"
             setOnPreferenceChangeListener { _, newValue ->
-                val secs = (newValue as String).toIntOrNull() ?: 30
-                PromptSettings.setBubbleTimeout(ctx, secs)
+                val secs = (newValue as String).toIntOrNull() ?: PromptSettings.DEFAULT_BUBBLE_TIMEOUT
+                settings.bubbleTimeoutSeconds = secs
                 true
             }
         }

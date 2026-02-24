@@ -1,18 +1,27 @@
 package com.starfarer.companionoverlay.api
 
-import kotlinx.serialization.SerialName
-import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.*
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.descriptors.*
+import kotlinx.serialization.encoding.*
+import kotlinx.serialization.json.*
 
 /**
- * Data models for Claude API requests and responses.
+ * Type-safe models for the Claude Messages API.
  *
- * These replace manual JSONObject construction with type-safe,
- * serializable classes that kotlinx.serialization handles.
+ * Used by [ClaudeApi] for request building and response parsing, and by
+ * [ConversationManager] / [ConversationStorage] for in-memory and on-disk
+ * conversation history.
+ *
+ * The main design challenge is that Claude's `content` field is polymorphic:
+ * it's either a plain string or an array of content blocks. The custom
+ * [MessageContentSerializer] handles this transparently — text-only messages
+ * serialize to a bare string, multimodal messages serialize to a block array,
+ * and deserialization handles both forms.
  */
 
 // ══════════════════════════════════════════════════════════════════════════
-// Request Models
+// Request
 // ══════════════════════════════════════════════════════════════════════════
 
 @Serializable
@@ -26,9 +35,10 @@ data class ClaudeRequest(
     val tools: List<Tool>? = null
 )
 
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 data class SystemBlock(
-    val type: String = "text",
+    @EncodeDefault val type: String = "text",
     val text: String
 )
 
@@ -45,52 +55,57 @@ data class Tool(
 )
 
 // ══════════════════════════════════════════════════════════════════════════
-// Message Models (support both text and multimodal)
+// Messages
 // ══════════════════════════════════════════════════════════════════════════
 
 @Serializable
 data class Message(
     val role: String,
-    val content: MessageContent
+    val content: @Serializable(with = MessageContentSerializer::class) MessageContent
 )
 
-@Serializable
+/**
+ * Message content — either plain text or a list of content blocks.
+ *
+ * Serializes as:
+ * - [Text]: bare JSON string (`"Hello"`)
+ * - [Blocks]: JSON array of content blocks (`[{"type":"text","text":"Hello"}]`)
+ *
+ * This matches Claude's API format exactly.
+ */
 sealed class MessageContent {
-    @Serializable
-    @SerialName("text")
-    data class Text(val value: String) : MessageContent()
-    
-    @Serializable
-    @SerialName("blocks")
+    data class Text(val text: String) : MessageContent()
     data class Blocks(val blocks: List<ContentBlock>) : MessageContent()
+
+    /** Convenience: extract plain text regardless of variant. */
+    fun textContent(): String = when (this) {
+        is Text -> text
+        is Blocks -> blocks.filterIsInstance<ContentBlock.Text>()
+            .joinToString("") { it.text }
+    }
 }
 
 @Serializable
 sealed class ContentBlock {
     @Serializable
     @SerialName("text")
-    data class TextBlock(
-        val type: String = "text",
-        val text: String
-    ) : ContentBlock()
-    
+    data class Text(val text: String) : ContentBlock()
+
     @Serializable
     @SerialName("image")
-    data class ImageBlock(
-        val type: String = "image",
-        val source: ImageSource
-    ) : ContentBlock()
+    data class Image(val source: ImageSource) : ContentBlock()
 }
 
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 data class ImageSource(
-    val type: String = "base64",
-    @SerialName("media_type") val mediaType: String = "image/jpeg",
+    @EncodeDefault val type: String = "base64",
+    @EncodeDefault @SerialName("media_type") val mediaType: String = "image/jpeg",
     val data: String
 )
 
 // ══════════════════════════════════════════════════════════════════════════
-// Response Models
+// Response
 // ══════════════════════════════════════════════════════════════════════════
 
 @Serializable
@@ -98,16 +113,21 @@ data class ClaudeResponse(
     val id: String? = null,
     val type: String? = null,
     val role: String? = null,
-    val content: List<ResponseContent> = emptyList(),
+    val content: List<ResponseBlock> = emptyList(),
     val model: String? = null,
     @SerialName("stop_reason") val stopReason: String? = null,
-    @SerialName("stop_sequence") val stopSequence: String? = null,
     val usage: Usage? = null,
-    val error: ErrorResponse? = null
-)
+    val error: ErrorBody? = null
+) {
+    /** Extract concatenated text from all text blocks in the response. */
+    fun text(): String = content
+        .filter { it.type == "text" }
+        .mapNotNull { it.text }
+        .joinToString("")
+}
 
 @Serializable
-data class ResponseContent(
+data class ResponseBlock(
     val type: String,
     val text: String? = null
 )
@@ -119,51 +139,80 @@ data class Usage(
 )
 
 @Serializable
-data class ErrorResponse(
+data class ErrorBody(
     val type: String? = null,
     val message: String? = null
 )
 
 // ══════════════════════════════════════════════════════════════════════════
-// Serialization Helpers
+// Custom Serializer
 // ══════════════════════════════════════════════════════════════════════════
 
 /**
- * Custom serializer to handle Claude's flexible message content format.
- * Messages can be either a plain string or an array of content blocks.
+ * Handles Claude's polymorphic content field:
+ * - String → [MessageContent.Text]
+ * - Array  → [MessageContent.Blocks]
+ *
+ * This is the piece that the previous model design was missing —
+ * kotlinx.serialization's default sealed class handling adds type
+ * discriminators that Claude's API doesn't understand.
  */
-object MessageContentSerializer {
-    
-    /**
-     * Convert a plain text message to API format.
-     */
-    fun textMessage(role: String, text: String): Map<String, Any> = mapOf(
-        "role" to role,
-        "content" to text
-    )
-    
-    /**
-     * Convert a multimodal message (with image) to API format.
-     */
-    fun multimodalMessage(
-        role: String,
-        imageBase64: String,
-        text: String
-    ): Map<String, Any> = mapOf(
-        "role" to role,
-        "content" to listOf(
-            mapOf(
-                "type" to "image",
-                "source" to mapOf(
-                    "type" to "base64",
-                    "media_type" to "image/jpeg",
-                    "data" to imageBase64
-                )
-            ),
-            mapOf(
-                "type" to "text",
-                "text" to text
+object MessageContentSerializer : KSerializer<MessageContent> {
+
+    override val descriptor: SerialDescriptor =
+        buildClassSerialDescriptor("MessageContent")
+
+    override fun serialize(encoder: Encoder, value: MessageContent) {
+        val jsonEncoder = encoder as JsonEncoder
+        when (value) {
+            is MessageContent.Text -> jsonEncoder.encodeJsonElement(
+                JsonPrimitive(value.text)
             )
-        )
-    )
+            is MessageContent.Blocks -> jsonEncoder.encodeJsonElement(
+                Json.encodeToJsonElement(
+                    ListSerializer(ContentBlock.serializer()),
+                    value.blocks
+                )
+            )
+        }
+    }
+
+    override fun deserialize(decoder: Decoder): MessageContent {
+        val jsonDecoder = decoder as JsonDecoder
+        return when (val element = jsonDecoder.decodeJsonElement()) {
+            is JsonPrimitive -> MessageContent.Text(element.content)
+            is JsonArray -> MessageContent.Blocks(
+                Json.decodeFromJsonElement(
+                    ListSerializer(ContentBlock.serializer()),
+                    element
+                )
+            )
+            else -> MessageContent.Text("")
+        }
+    }
 }
+
+// ══════════════════════════════════════════════════════════════════════════
+// Builder helpers
+// ══════════════════════════════════════════════════════════════════════════
+
+/** Build a text-only user message. */
+fun textMessage(text: String): Message = Message(
+    role = "user",
+    content = MessageContent.Text(text)
+)
+
+/** Build a user message with an image and optional text. */
+fun screenshotMessage(imageBase64: String, text: String): Message = Message(
+    role = "user",
+    content = MessageContent.Blocks(listOf(
+        ContentBlock.Image(ImageSource(data = imageBase64)),
+        ContentBlock.Text(text)
+    ))
+)
+
+/** Build an assistant message from response text. */
+fun assistantMessage(text: String): Message = Message(
+    role = "assistant",
+    content = MessageContent.Text(text)
+)

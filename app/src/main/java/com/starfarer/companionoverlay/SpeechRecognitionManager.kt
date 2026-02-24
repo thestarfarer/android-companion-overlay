@@ -330,7 +330,6 @@ class SpeechRecognitionManager(private val context: Context) {
             "b*****" to "bitchy",
             "b*******" to "bullshit",
             "a**" to "ass",
-            "a*****" to "ashole",
             "a******" to "asshole",
             "d***" to "dick",
             "d**n" to "damn",

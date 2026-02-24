@@ -3,27 +3,37 @@ package com.starfarer.companionoverlay
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import com.starfarer.companionoverlay.api.*
 import com.starfarer.companionoverlay.repository.SettingsRepository
 import kotlinx.coroutines.*
-import org.json.JSONArray
-import org.json.JSONObject
+import java.util.Collections
 
 /**
  * Manages conversation state and Claude API interactions.
  *
  * Responsibilities:
- * - Conversation history (in-memory + persistence)
+ * - Conversation history (in-memory + file-based persistence via [ConversationStorage])
  * - Building API requests (text-only and with images)
  * - Sending to Claude and parsing responses
  * - Auto-copy to clipboard
  *
- * Threading: All public methods are safe to call from any thread.
- * Callbacks are always dispatched to the main thread.
+ * Messages are stored as typed [Message] objects from [ClaudeModels],
+ * serialized to disk via kotlinx.serialization.
+ *
+ * Threading: The conversation history is wrapped in [Collections.synchronizedList]
+ * so access is safe from any thread. All public methods are safe to call from
+ * any thread. Callbacks are always dispatched to the main thread.
+ *
+ * Lifecycle: Created fresh by the overlay module each time the service starts.
+ * Call [destroy] in the service's onDestroy to cancel in-flight work and
+ * release the coroutine scope. The scope is not resurrected — a new instance
+ * is created on the next service start.
  */
 class ConversationManager(
     private val context: Context,
     private val claudeApi: ClaudeApi,
-    private val settings: SettingsRepository
+    private val settings: SettingsRepository,
+    private val storage: ConversationStorage
 ) {
     companion object {
         private const val TAG = "Conversation"
@@ -38,13 +48,16 @@ class ConversationManager(
 
     var listener: Listener? = null
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    private val conversationHistory = mutableListOf<JSONObject>()
+    private val supervisorJob = SupervisorJob()
+    private val scope = CoroutineScope(supervisorJob + Dispatchers.Main)
+    private val conversationHistory: MutableList<Message> =
+        Collections.synchronizedList(mutableListOf())
 
     @Volatile
     private var activeJob: Job? = null
 
     /** The last assistant message, for bubble reopen. */
+    @Volatile
     var lastAssistantMessage: String? = null
         private set
 
@@ -62,13 +75,7 @@ class ConversationManager(
      */
     fun sendText(text: String) {
         cancelPending()
-        
-        val userMessage = JSONObject().apply {
-            put("role", "user")
-            put("content", text)
-        }
-        
-        sendMessage(userMessage)
+        sendMessage(textMessage(text))
     }
 
     /**
@@ -78,26 +85,7 @@ class ConversationManager(
      */
     fun sendWithScreenshot(imageBase64: String, text: String? = null) {
         cancelPending()
-        
-        val userMessage = JSONObject().apply {
-            put("role", "user")
-            put("content", JSONArray().apply {
-                put(JSONObject().apply {
-                    put("type", "image")
-                    put("source", JSONObject().apply {
-                        put("type", "base64")
-                        put("media_type", "image/jpeg")
-                        put("data", imageBase64)
-                    })
-                })
-                put(JSONObject().apply {
-                    put("type", "text")
-                    put("text", text ?: settings.userMessage)
-                })
-            })
-        }
-        
-        sendMessage(userMessage)
+        sendMessage(screenshotMessage(imageBase64, text ?: settings.userMessage))
     }
 
     /** Cancel any in-flight API request. */
@@ -116,22 +104,22 @@ class ConversationManager(
     fun clearHistory() {
         conversationHistory.clear()
         lastAssistantMessage = null
-        saveHistory()
+        scope.launch { storage.clear() }
         DebugLog.log(TAG, "History cleared")
     }
 
     /** Get conversation context for STT (helps Gemini understand domain terms). */
     fun getContextForStt(): String {
-        val recent = conversationHistory.takeLast(6)
+        val recent = synchronized(conversationHistory) {
+            conversationHistory.takeLast(6)
+        }
         if (recent.isEmpty()) return ""
 
         return buildString {
             for (msg in recent) {
-                val role = msg.optString("role", "user")
-                val content = msg.opt("content")
-                val text = extractTextFromContent(content)
+                val text = msg.content.textContent()
                 if (text.isNotBlank()) {
-                    val label = if (role == "assistant") "Assistant" else "User"
+                    val label = if (msg.role == "assistant") "Assistant" else "User"
                     appendLine("$label: ${text.take(200)}")
                 }
             }
@@ -140,58 +128,63 @@ class ConversationManager(
 
     fun destroy() {
         cancelPending()
-        scope.cancel()
+        listener = null
+        supervisorJob.cancel()
     }
 
     // ══════════════════════════════════════════════════════════════════════
     // Internal
     // ══════════════════════════════════════════════════════════════════════
 
-    private fun sendMessage(userMessage: JSONObject) {
+    private fun sendMessage(userMessage: Message) {
         activeJob = scope.launch {
-            val messagesArray = JSONArray().apply {
-                conversationHistory.forEach { put(it) }
-                put(userMessage)
-            }
-
-            val systemPrompt = settings.systemPrompt
-            val webSearch = settings.webSearchEnabled
-
-            DebugLog.log(TAG, "Sending (${messagesArray.length()} messages, webSearch=$webSearch)")
-
-            val response = withContext(Dispatchers.IO) {
-                claudeApi.sendConversation(messagesArray, systemPrompt, webSearch)
-            }
-
-            when {
-                response.success -> handleSuccess(userMessage, response.text)
-                response.cancelled -> {
-                    DebugLog.log(TAG, "Request cancelled")
-                    listener?.onCancelled()
+            try {
+                val allMessages = synchronized(conversationHistory) {
+                    conversationHistory.toList() + userMessage
                 }
-                else -> {
-                    DebugLog.log(TAG, "API error: ${response.error}")
-                    listener?.onError(response.error ?: "Unknown error")
+                val systemPrompt = settings.systemPrompt
+                val webSearch = settings.webSearchEnabled
+
+                DebugLog.log(TAG, "Sending (${allMessages.size} messages, webSearch=$webSearch)")
+
+                val response = withContext(Dispatchers.IO) {
+                    claudeApi.sendConversation(allMessages, systemPrompt, webSearch)
                 }
+
+                when {
+                    response.success -> handleSuccess(userMessage, response.text)
+                    response.cancelled -> {
+                        DebugLog.log(TAG, "Request cancelled")
+                        listener?.onCancelled()
+                    }
+                    else -> {
+                        DebugLog.log(TAG, "API error: ${response.error}")
+                        listener?.onError(response.error ?: "Unknown error")
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                DebugLog.log(TAG, "Unexpected error: ${e::class.simpleName}: ${e.message}")
+                listener?.onError(e.message ?: "Unexpected error")
             }
         }
     }
 
-    private fun handleSuccess(userMessage: JSONObject, responseText: String) {
-        conversationHistory.add(userMessage)
-        conversationHistory.add(JSONObject().apply {
-            put("role", "assistant")
-            put("content", responseText)
-        })
+    private fun handleSuccess(userMessage: Message, responseText: String) {
+        synchronized(conversationHistory) {
+            conversationHistory.add(userMessage)
+            conversationHistory.add(assistantMessage(responseText))
+
+            val maxMessages = settings.maxMessages
+            while (conversationHistory.size > maxMessages) {
+                conversationHistory.removeAt(0)
+                conversationHistory.removeAt(0)
+            }
+        }
 
         lastAssistantMessage = responseText
         DebugLog.log(TAG, "Response: ${responseText.take(60)}...")
-
-        val maxMessages = settings.maxMessages
-        while (conversationHistory.size > maxMessages) {
-            conversationHistory.removeAt(0)
-            conversationHistory.removeAt(0)
-        }
 
         saveHistory()
 
@@ -203,58 +196,37 @@ class ConversationManager(
         listener?.onResponseReceived(responseText)
     }
 
-    private fun extractTextFromContent(content: Any?): String {
-        return when (content) {
-            is String -> content
-            is JSONArray -> {
-                for (j in 0 until content.length()) {
-                    val block = content.getJSONObject(j)
-                    if (block.optString("type") == "text") {
-                        return block.optString("text", "")
-                    }
-                }
-                ""
-            }
-            else -> ""
-        }
-    }
-
     // ══════════════════════════════════════════════════════════════════════
     // Persistence
     // ══════════════════════════════════════════════════════════════════════
 
     private fun saveHistory() {
+        val snapshot = synchronized(conversationHistory) {
+            conversationHistory.toList()
+        }
         if (settings.keepDialogue) {
-            val arr = JSONArray().apply {
-                conversationHistory.forEach { put(it) }
-            }
-            settings.conversationHistory = arr.toString()
+            scope.launch { storage.save(snapshot) }
         } else {
-            settings.conversationHistory = null
+            scope.launch { storage.clear() }
         }
     }
 
     private fun restoreHistory() {
         if (!settings.keepDialogue) return
 
-        val json = settings.conversationHistory ?: return
-
-        try {
-            val arr = JSONArray(json)
-            for (i in 0 until arr.length()) {
-                conversationHistory.add(arr.getJSONObject(i))
+        scope.launch {
+            val messages = storage.load()
+            synchronized(conversationHistory) {
+                conversationHistory.addAll(messages)
             }
             DebugLog.log(TAG, "Restored ${conversationHistory.size} messages")
 
-            for (i in conversationHistory.indices.reversed()) {
-                val msg = conversationHistory[i]
-                if (msg.optString("role") == "assistant") {
-                    lastAssistantMessage = extractTextFromContent(msg.opt("content"))
+            for (msg in messages.asReversed()) {
+                if (msg.role == "assistant") {
+                    lastAssistantMessage = msg.content.textContent()
                     break
                 }
             }
-        } catch (e: Exception) {
-            DebugLog.log(TAG, "Failed to restore history: ${e.message}")
         }
     }
 }
