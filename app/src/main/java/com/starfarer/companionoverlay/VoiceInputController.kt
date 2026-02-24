@@ -1,7 +1,9 @@
 package com.starfarer.companionoverlay
 
+import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import com.starfarer.companionoverlay.repository.SettingsRepository
 
 /**
  * Orchestrates voice input: button press → listen → transcribe → Claude → done.
@@ -14,11 +16,23 @@ import android.os.Looper
  *
  * Every recording starts with a deliberate button press. Nothing auto-restarts.
  * The mic is either on because you asked for it, or it's off.
+ *
+ * Dependencies are injected rather than reaching through the service:
+ * - [VoiceInputHost] for UI and input handling
+ * - [SettingsRepository] for configuration
+ * - [BeepManager] for audio feedback
  */
-class VoiceInputController(private val service: CompanionOverlayService) {
+class VoiceInputController(
+    private val context: Context,
+    private val host: VoiceInputHost,
+    private val settings: SettingsRepository,
+    private val beepManager: BeepManager
+) {
 
     companion object {
         private const val TAG = "VoiceCtrl"
+        private const val SAFETY_TIMEOUT_MS = 300_000L
+        private const val BT_CLEAR_DELAY_MS = 300L
     }
 
     enum class State { IDLE, LISTENING, PROCESSING }
@@ -29,11 +43,16 @@ class VoiceInputController(private val service: CompanionOverlayService) {
     private val handler = Handler(Looper.getMainLooper())
     private var speechManager: SpeechRecognitionManager? = null
     private var geminiRecognizer: GeminiSpeechRecognizer? = null
-    private val btRouter = BluetoothAudioRouter(service)
-    private val beepManager = BeepManager()
+    private val btRouter = BluetoothAudioRouter(context)
 
-    private val beepsEnabled: Boolean
-        get() = PromptSettings.getBeepsEnabled(service)
+    private var safetyTimeoutRunnable: Runnable? = null
+
+    private val beepsEnabled: Boolean get() = settings.beepsEnabled
+    private val useGemini: Boolean get() = settings.geminiSttEnabled
+
+    // ══════════════════════════════════════════════════════════════════════
+    // Public API
+    // ══════════════════════════════════════════════════════════════════════
 
     /**
      * Toggle voice input. Called from accessibility service (Shokz button).
@@ -44,15 +63,27 @@ class VoiceInputController(private val service: CompanionOverlayService) {
         when (state) {
             State.IDLE -> startListening()
             State.LISTENING -> cancelListening()
-            State.PROCESSING -> {
-                // User wants to interrupt — stop TTS, cancel everything, start fresh
-                DebugLog.log(TAG, "Interrupting processing → start listening")
-                service.activeTtsStop()
-                speechManager?.cancel()
-                state = State.IDLE
-                service.hideVoiceBubble()
-                startListening()
-            }
+            State.PROCESSING -> interruptAndRestart()
+        }
+    }
+
+    /** Cancel safety timeout when API response arrives — TTS handles its own completion. */
+    fun cancelSafetyTimeout() {
+        safetyTimeoutRunnable?.let { handler.removeCallbacks(it) }
+        safetyTimeoutRunnable = null
+    }
+
+    /**
+     * Called by the service after Claude's response has been shown.
+     * Returns to IDLE. The next recording starts only when the user
+     * presses the button again.
+     */
+    fun onVoiceResponseComplete() {
+        cancelSafetyTimeout()
+        if (state == State.PROCESSING) {
+            DebugLog.log(TAG, "Response complete → IDLE")
+            state = State.IDLE
+            btRouter.clearRouting()
         }
     }
 
@@ -66,56 +97,24 @@ class VoiceInputController(private val service: CompanionOverlayService) {
         state = State.IDLE
     }
 
-    /**
-     * Called by the service after Claude's response has been shown.
-     * Returns to IDLE. The next recording starts only when the user
-     * presses the button again.
-     */
-    /** Cancel safety timeout when API response arrives — TTS handles its own completion. */
-    fun cancelSafetyTimeoutPublic() {
-        cancelSafetyTimeout()
+    // ══════════════════════════════════════════════════════════════════════
+    // State Transitions
+    // ══════════════════════════════════════════════════════════════════════
+
+    private fun interruptAndRestart() {
+        DebugLog.log(TAG, "Interrupting processing → start listening")
+        host.stopTtsAndCancel()
+        speechManager?.cancel()
+        state = State.IDLE
+        host.hideVoiceBubble()
+        startListening()
     }
-
-    fun onVoiceResponseComplete() {
-        cancelSafetyTimeout()
-        if (state == State.PROCESSING) {
-            DebugLog.log(TAG, "Response complete → IDLE")
-            state = State.IDLE
-            btRouter.clearRouting()
-        }
-    }
-
-    private var safetyTimeoutRunnable: Runnable? = null
-
-    private fun startSafetyTimeout() {
-        cancelSafetyTimeout()
-        safetyTimeoutRunnable = Runnable {
-            if (state != State.IDLE) {
-                DebugLog.log(TAG, "Safety timeout! Stuck in $state, forcing IDLE")
-                service.activeTtsStop()
-                speechManager?.cancel()
-                state = State.IDLE
-                btRouter.clearRouting()
-                service.hideVoiceBubble()
-            }
-        }
-        handler.postDelayed(safetyTimeoutRunnable!!, 300_000L)
-    }
-
-    private fun cancelSafetyTimeout() {
-        safetyTimeoutRunnable?.let { handler.removeCallbacks(it) }
-        safetyTimeoutRunnable = null
-    }
-
-    private val useGemini: Boolean
-        get() = PromptSettings.getGeminiStt(service)
 
     private fun startListening() {
         state = State.LISTENING
-        service.activeTtsStop()
-        service.showVoiceBubble("Starting...")
+        host.stopTtsAndCancel()
+        host.showVoiceBubble("Starting...")
 
-        // Route mic input to BT headset if connected
         val routed = btRouter.routeToBluetoothHeadset()
         DebugLog.log(TAG, "BT audio routing: ${if (routed) "active" else "using built-in mic"}")
 
@@ -127,7 +126,20 @@ class VoiceInputController(private val service: CompanionOverlayService) {
         DebugLog.log(TAG, "Listening started (${if (useGemini) "Gemini" else "on-device"})")
     }
 
-    /** Wires up the standard callbacks shared by both recognizers. */
+    private fun cancelListening() {
+        DebugLog.log(TAG, "Cancelling listening")
+        speechManager?.cancel()
+        geminiRecognizer?.cancel()
+        state = State.IDLE
+        btRouter.clearRouting()
+        host.hideVoiceBubble()
+        host.clearPendingScreenshot()
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // Recognition Setup
+    // ══════════════════════════════════════════════════════════════════════
+
     private fun wireCallbacks(
         setOnReady: (() -> Unit) -> Unit,
         setOnPartial: ((String) -> Unit) -> Unit,
@@ -138,49 +150,51 @@ class VoiceInputController(private val service: CompanionOverlayService) {
         setOnReady {
             val label = if (useGemini) "🎤 Recording..." else "Listening..."
             handler.post {
-                service.showVoiceBubble(label)
+                host.showVoiceBubble(label)
                 if (beepsEnabled) beepManager.play(BeepManager.Beep.READY)
             }
         }
+
         setOnPartial { partial ->
             handler.post {
-                service.updateVoiceBubble(partial)
-                // Beep when silence detected and transcription begins (Gemini STT)
+                host.updateVoiceBubble(partial)
                 if (partial == "Transcribing..." && beepsEnabled) {
                     beepManager.play(BeepManager.Beep.STEP)
                 }
             }
         }
+
         setOnFinal { text ->
             handler.post {
                 DebugLog.log(TAG, "Got speech: ${text.take(80)}")
                 state = State.PROCESSING
-                service.hideVoiceBubble()
+                host.hideVoiceBubble()
                 startSafetyTimeout()
-                service.sendVoiceInput(text)
-                // Delay BT clear so Thinking beep plays through SCO
-                handler.postDelayed({ btRouter.clearRouting() }, 300)
+                host.sendVoiceInput(text)
+                handler.postDelayed({ btRouter.clearRouting() }, BT_CLEAR_DELAY_MS)
             }
         }
+
         setOnError { error ->
             handler.post {
                 DebugLog.log(TAG, "Recognition error: $error")
                 if (beepsEnabled) beepManager.play(BeepManager.Beep.ERROR)
                 state = State.IDLE
                 btRouter.clearRouting()
-                service.hideVoiceBubble()
-                service.clearPendingScreenshot()
-                service.showBriefBubblePublic("Couldn't hear that~ ($error)")
+                host.hideVoiceBubble()
+                host.clearPendingScreenshot()
+                host.showBriefBubble("Couldn't hear that~ ($error)")
             }
         }
+
         setOnStopped {
             handler.post {
                 if (state == State.LISTENING) {
                     DebugLog.log(TAG, "No speech detected → IDLE")
                     state = State.IDLE
                     btRouter.clearRouting()
-                    service.hideVoiceBubble()
-                    service.clearPendingScreenshot()
+                    host.hideVoiceBubble()
+                    host.clearPendingScreenshot()
                 }
             }
         }
@@ -188,7 +202,7 @@ class VoiceInputController(private val service: CompanionOverlayService) {
 
     private fun startOnDeviceListening() {
         if (speechManager == null) {
-            speechManager = SpeechRecognitionManager(service).also { mgr ->
+            speechManager = SpeechRecognitionManager(context).also { mgr ->
                 wireCallbacks(
                     { mgr.onReadyForSpeech = it },
                     { mgr.onPartialResult = it },
@@ -198,13 +212,13 @@ class VoiceInputController(private val service: CompanionOverlayService) {
                 )
             }
         }
-        speechManager?.silenceTimeoutMs = PromptSettings.getSilenceTimeout(service)
+        speechManager?.silenceTimeoutMs = settings.silenceTimeoutMs
         speechManager?.startListening()
     }
 
     private fun startGeminiListening() {
         if (geminiRecognizer == null) {
-            geminiRecognizer = GeminiSpeechRecognizer(service).also { mgr ->
+            geminiRecognizer = GeminiSpeechRecognizer(context).also { mgr ->
                 wireCallbacks(
                     { mgr.onReadyForSpeech = it },
                     { mgr.onPartialResult = it },
@@ -214,18 +228,27 @@ class VoiceInputController(private val service: CompanionOverlayService) {
                 )
             }
         }
-        geminiRecognizer?.silenceDurationMs = PromptSettings.getSilenceTimeout(service)
-        geminiRecognizer?.conversationContext = service.getConversationContextForStt()
+        geminiRecognizer?.silenceDurationMs = settings.silenceTimeoutMs
+        geminiRecognizer?.conversationContext = host.getConversationContextForStt()
         geminiRecognizer?.startListening()
     }
 
-    private fun cancelListening() {
-        DebugLog.log(TAG, "Cancelling listening")
-        speechManager?.cancel()
-        geminiRecognizer?.cancel()
-        state = State.IDLE
-        btRouter.clearRouting()
-        service.hideVoiceBubble()
-        service.clearPendingScreenshot()
+    // ══════════════════════════════════════════════════════════════════════
+    // Safety
+    // ══════════════════════════════════════════════════════════════════════
+
+    private fun startSafetyTimeout() {
+        cancelSafetyTimeout()
+        safetyTimeoutRunnable = Runnable {
+            if (state != State.IDLE) {
+                DebugLog.log(TAG, "Safety timeout! Stuck in $state, forcing IDLE")
+                host.stopTtsAndCancel()
+                speechManager?.cancel()
+                state = State.IDLE
+                btRouter.clearRouting()
+                host.hideVoiceBubble()
+            }
+        }
+        handler.postDelayed(safetyTimeoutRunnable!!, SAFETY_TIMEOUT_MS)
     }
 }

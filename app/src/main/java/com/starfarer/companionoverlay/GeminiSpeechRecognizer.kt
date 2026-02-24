@@ -12,11 +12,9 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
-import java.io.DataOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.concurrent.TimeUnit
-import kotlin.math.sqrt
 
 /**
  * Records audio via AudioRecord, detects silence, then sends to
@@ -40,8 +38,10 @@ class GeminiSpeechRecognizer(private val context: Context) {
         private const val CHANNEL = AudioFormat.CHANNEL_IN_MONO
         private const val ENCODING = AudioFormat.ENCODING_PCM_16BIT
 
-        /** RMS threshold below which audio is considered silence. */
-        private const val SILENCE_THRESHOLD = 500.0
+        /** Silero VAD speech probability threshold. */
+        private const val VAD_SPEECH_THRESHOLD = 0.5f
+        /** Ignore first N ms to skip beep bleed from bone conduction headsets. */
+        private const val CALIBRATION_MS = 400L
 
         /** Default silence duration — overridden by getSilenceTimeoutMs(). */
         private const val DEFAULT_silenceDurationMs = 1500L
@@ -82,6 +82,12 @@ class GeminiSpeechRecognizer(private val context: Context) {
         .readTimeout(60, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
         .build()
+
+    private var vad: SileroVadDetector? = null
+
+    private fun getVad(): SileroVadDetector {
+        return vad ?: SileroVadDetector(context).also { vad = it }
+    }
 
     fun startListening() {
         if (isListening) {
@@ -129,27 +135,31 @@ class GeminiSpeechRecognizer(private val context: Context) {
         }
 
         recordingThread = Thread({
-            recordAndDetectSilence(bufferSize)
+            recordAndDetectSilence()
         }, "gemini-stt-record").also { it.start() }
     }
 
     /**
-     * Recording loop: reads PCM buffers, computes RMS, detects silence.
+     * Recording loop: reads PCM in 512-sample chunks, runs Silero VAD for silence detection.
      * When silence persists for silenceDurationMs, stops and transcribes.
      */
-    private fun recordAndDetectSilence(bufferSize: Int) {
+    private fun recordAndDetectSilence() {
         val pcmOutput = ByteArrayOutputStream()
-        // Read in ~100ms chunks (1600 samples @ 16kHz) for fine-grained silence detection
-        val readBuffer = ShortArray(SAMPLE_RATE / 10)
+        // Read in 512-sample chunks — Silero VAD's native window size at 16kHz
+        val readBuffer = ShortArray(SileroVadDetector.WINDOW_SAMPLES)
         var silenceStartMs = 0L
         var speechDetected = false
         val recordStartMs = System.currentTimeMillis()
+
+        val vadDetector = getVad()
+        vadDetector.reset()
+        DebugLog.log(TAG, "Silero VAD active (window=${SileroVadDetector.WINDOW_SAMPLES}, thr=$VAD_SPEECH_THRESHOLD)")
 
         while (recording && !cancelled) {
             val shortsRead = audioRecord?.read(readBuffer, 0, readBuffer.size) ?: -1
             if (shortsRead <= 0) continue
 
-            // Write PCM bytes
+            // Write PCM bytes (always — we want complete audio for transcription)
             val byteBuffer = ByteBuffer.allocate(shortsRead * 2)
             byteBuffer.order(ByteOrder.LITTLE_ENDIAN)
             for (i in 0 until shortsRead) {
@@ -157,29 +167,34 @@ class GeminiSpeechRecognizer(private val context: Context) {
             }
             pcmOutput.write(byteBuffer.array())
 
-            // Compute RMS
-            var sumSquares = 0.0
-            for (i in 0 until shortsRead) {
-                val sample = readBuffer[i].toDouble()
-                sumSquares += sample * sample
-            }
-            val rms = sqrt(sumSquares / shortsRead)
-
-            handler.post { onRmsChanged?.invoke(rms.toFloat()) }
-
             val now = System.currentTimeMillis()
+            val elapsed = now - recordStartMs
 
-            if (rms > SILENCE_THRESHOLD) {
+            // Skip calibration period (beep bleed from bone conduction headsets)
+            if (elapsed < CALIBRATION_MS) continue
+
+            // Run Silero VAD on this 512-sample window
+            val speechProb = if (shortsRead == SileroVadDetector.WINDOW_SAMPLES) {
+                vadDetector.detect(readBuffer)
+            } else {
+                // Partial chunk at end — pad with zeros
+                val padded = readBuffer.copyOf(SileroVadDetector.WINDOW_SAMPLES)
+                vadDetector.detect(padded)
+            }
+
+            // Report probability for bubble animation (scale 0-1 → RMS-like range)
+            handler.post { onRmsChanged?.invoke(speechProb * 2000f) }
+
+            if (speechProb >= VAD_SPEECH_THRESHOLD) {
                 speechDetected = true
                 silenceStartMs = 0L
-                // Show a visual indicator that speech is being captured
                 handler.post { onPartialResult?.invoke("🎤 Recording...") }
             } else if (speechDetected) {
-                // Below threshold — start or continue silence timer
+                // Below threshold \u2014 start or continue silence timer
                 if (silenceStartMs == 0L) {
                     silenceStartMs = now
                 } else if (now - silenceStartMs >= silenceDurationMs) {
-                    DebugLog.log(TAG, "Silence detected after speech, stopping")
+                    DebugLog.log(TAG, "VAD silence (${now - silenceStartMs}ms, lastProb=${"%.2f".format(speechProb)})")
                     break
                 }
             }
@@ -223,57 +238,10 @@ class GeminiSpeechRecognizer(private val context: Context) {
         handler.post { onPartialResult?.invoke("Transcribing...") }
 
         // Convert to WAV and send to Gemini
-        transcribeWithGemini(pcmToWav(pcmData))
+        transcribeWithGemini(AudioUtils.pcmToWav(pcmData))
     }
 
     /** Build a WAV file from raw PCM data. */
-    private fun pcmToWav(pcmData: ByteArray): ByteArray {
-        val bos = ByteArrayOutputStream()
-        val dos = DataOutputStream(bos)
-
-        val numChannels = 1
-        val bitsPerSample = 16
-        val byteRate = SAMPLE_RATE * numChannels * bitsPerSample / 8
-        val blockAlign = numChannels * bitsPerSample / 8
-        val dataSize = pcmData.size
-        val chunkSize = 36 + dataSize
-
-        // RIFF header
-        dos.writeBytes("RIFF")
-        dos.writeIntLE(chunkSize)
-        dos.writeBytes("WAVE")
-
-        // fmt subchunk
-        dos.writeBytes("fmt ")
-        dos.writeIntLE(16) // subchunk1 size
-        dos.writeShortLE(1) // PCM format
-        dos.writeShortLE(numChannels)
-        dos.writeIntLE(SAMPLE_RATE)
-        dos.writeIntLE(byteRate)
-        dos.writeShortLE(blockAlign)
-        dos.writeShortLE(bitsPerSample)
-
-        // data subchunk
-        dos.writeBytes("data")
-        dos.writeIntLE(dataSize)
-        dos.write(pcmData)
-
-        dos.flush()
-        return bos.toByteArray()
-    }
-
-    /** Little-endian write helpers for WAV header. */
-    private fun DataOutputStream.writeIntLE(value: Int) {
-        write(value and 0xFF)
-        write((value shr 8) and 0xFF)
-        write((value shr 16) and 0xFF)
-        write((value shr 24) and 0xFF)
-    }
-
-    private fun DataOutputStream.writeShortLE(value: Int) {
-        write(value and 0xFF)
-        write((value shr 8) and 0xFF)
-    }
 
     /** Send WAV audio to Gemini for transcription with conversation context. */
     private fun transcribeWithGemini(wavData: ByteArray) {
@@ -397,5 +365,7 @@ class GeminiSpeechRecognizer(private val context: Context) {
     fun destroy() {
         cancel()
         recordingThread = null
+        vad?.close()
+        vad = null
     }
 }

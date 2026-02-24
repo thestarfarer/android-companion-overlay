@@ -1,0 +1,181 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <!-- ════════ GEMINI API ════════ -->
+    <PreferenceCategory app:iconSpaceReserved="false" app:title="Gemini API">
+
+        <EditTextPreference
+            app:iconSpaceReserved="false"
+            app:key="gemini_api_key"
+            app:title="API Key"
+            app:summary="Required for Gemini speech-to-text and text-to-speech"
+            app:singleLineTitle="true"/>
+
+        <SwitchPreferenceCompat
+            app:iconSpaceReserved="false"
+            app:key="gemini_stt_enabled"
+            app:title="Speech-to-text"
+            app:summary="Use Gemini to transcribe voice input instead of on-device recognition"
+            app:defaultValue="false"/>
+
+        <SwitchPreferenceCompat
+            app:iconSpaceReserved="false"
+            app:key="gemini_tts_enabled"
+            app:title="Text-to-speech"
+            app:summary="Use Gemini to generate voice instead of on-device synthesis"
+            app:defaultValue="false"/>
+
+    </PreferenceCategory>
+
+    <!-- ════════ VOICE INPUT ════════ -->
+    <PreferenceCategory app:iconSpaceReserved="false" app:title="Voice Input">
+
+        <SeekBarPreference
+            app:iconSpaceReserved="false"
+            app:key="silence_timeout_seek"
+            app:title="Silence timeout"
+            app:summary="How long to wait after you stop talking before sending"
+            android:max="50"
+            app:min="1"
+            app:defaultValue="15"
+            app:persistent="false"/>
+
+        <SwitchPreferenceCompat
+            app:iconSpaceReserved="false"
+            app:key="voice_screenshot_enabled"
+            app:title="Screenshot with voice"
+            app:summary="Automatically capture the screen when voice input starts"
+            app:defaultValue="false"/>
+
+        <SwitchPreferenceCompat
+            app:iconSpaceReserved="false"
+            app:key="volume_toggle_enabled"
+            app:title="Volume button shortcut"
+            app:summary="Press volume down to activate voice input from any screen"
+            app:defaultValue="true"/>
+
+    </PreferenceCategory>
+
+    <!-- ════════ VOICE OUTPUT ════════ -->
+    <PreferenceCategory app:iconSpaceReserved="false" app:title="Voice Output">
+
+        <SwitchPreferenceCompat
+            app:iconSpaceReserved="false"
+            app:key="tts_enabled"
+            app:title="Read aloud"
+            app:summary="Speak responses using text-to-speech"
+            app:defaultValue="true"/>
+
+        <SwitchPreferenceCompat
+            app:iconSpaceReserved="false"
+            app:key="beeps_enabled"
+            app:title="Feedback beeps"
+            app:summary="Short tones when listening starts, processing, and finishing"
+            app:defaultValue="true"/>
+
+        <Preference
+            app:iconSpaceReserved="false"
+            app:key="tts_voice_picker"
+            app:title="On-device voice"
+            app:summary="Choose the voice and adjust speed and pitch for on-device TTS"/>
+
+    </PreferenceCategory>
+
+    <!-- ════════ CONVERSATION ════════ -->
+    <PreferenceCategory app:iconSpaceReserved="false" app:title="Conversation">
+
+        <SwitchPreferenceCompat
+            app:iconSpaceReserved="false"
+            app:key="web_search_enabled"
+            app:title="Web search"
+            app:summary="Allow Claude to search the web for current information"
+            app:defaultValue="false"/>
+
+        <SwitchPreferenceCompat
+            app:iconSpaceReserved="false"
+            app:key="keep_dialogue"
+            app:title="Keep dialogue"
+            app:summary="Remember conversation history across overlay restarts"
+            app:defaultValue="false"/>
+
+        <SwitchPreferenceCompat
+            app:iconSpaceReserved="false"
+            app:key="auto_copy"
+            app:title="Auto-copy replies"
+            app:summary="Copy every response to the clipboard automatically"
+            app:defaultValue="false"/>
+
+        <ListPreference
+            app:iconSpaceReserved="false"
+            app:key="max_messages"
+            app:title="History length"
+            app:summary="How many messages to keep in the conversation context"
+            app:entries="@array/history_labels"
+            app:entryValues="@array/history_values"
+            app:defaultValue="20"
+            app:persistent="false"/>
+
+        <ListPreference
+            app:iconSpaceReserved="false"
+            app:key="bubble_timeout"
+            app:title="Bubble timeout"
+            app:summary="How long the speech bubble stays visible"
+            app:entries="@array/timeout_labels"
+            app:entryValues="@array/timeout_values"
+            app:defaultValue="30"
+            app:persistent="false"/>
+
+    </PreferenceCategory>
+
+    <!-- ════════ PERMISSIONS ════════ -->
+    <PreferenceCategory app:iconSpaceReserved="false" app:title="Permissions">
+
+        <Preference
+            app:iconSpaceReserved="false"
+            app:key="perm_accessibility"
+            app:title="Accessibility service"
+            app:summary="Required for screenshots and volume button shortcut"/>
+
+        <Preference
+            app:iconSpaceReserved="false"
+            app:key="perm_voice"
+            app:title="Voice input"
+            app:summary="Microphone and Bluetooth permissions for voice recording"/>
+
+    </PreferenceCategory>
+
+    <!-- ════════ ACCOUNT ════════ -->
+    <PreferenceCategory app:iconSpaceReserved="false" app:title="Account">
+
+        <Preference
+            app:iconSpaceReserved="false"
+            app:key="account_auth"
+            app:title="Claude connection"
+            app:summary="Not connected"/>
+
+    </PreferenceCategory>
+
+    <!-- ════════ DEBUG ════════ -->
+    <PreferenceCategory app:iconSpaceReserved="false" app:title="Debug">
+
+        <Preference
+            app:iconSpaceReserved="false"
+            app:key="debug_test"
+            app:title="Send test message"
+            app:summary="Send a test prompt to verify the connection"/>
+
+        <Preference
+            app:iconSpaceReserved="false"
+            app:key="debug_copy_log"
+            app:title="Copy log"
+            app:summary="Copy the debug log to clipboard"/>
+
+        <Preference
+            app:iconSpaceReserved="false"
+            app:key="debug_clear_log"
+            app:title="Clear log"
+            app:summary="Erase all debug log entries"/>
+
+    </PreferenceCategory>
+
+</PreferenceScreen>

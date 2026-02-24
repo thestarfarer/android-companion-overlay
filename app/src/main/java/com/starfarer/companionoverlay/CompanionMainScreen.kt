@@ -108,9 +108,7 @@ class CompanionMainScreen(
             for (msg in session.conversationHistory) messagesArray.put(msg)
             messagesArray.put(userMsg)
 
-            // Use a car-appropriate system prompt
             val systemPrompt = CAR_SYSTEM_PROMPT
-            session.claudeApi.model = PromptSettings.getModel(carContext)
             val webSearch = PromptSettings.getWebSearch(carContext)
 
             val response = session.claudeApi.sendConversation(
@@ -124,7 +122,6 @@ class CompanionMainScreen(
                     put("content", response.text)
                 })
 
-                // Trim history
                 val maxMsgs = PromptSettings.getMaxMessages(carContext)
                 while (session.conversationHistory.size > maxMsgs) {
                     session.conversationHistory.removeAt(0)

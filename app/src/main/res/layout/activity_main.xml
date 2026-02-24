@@ -1,421 +1,281 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.coordinatorlayout.widget.CoordinatorLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:background="#1a1a1a">
+    android:background="@color/background_dark"
+    android:fitsSystemWindows="true">
 
-    <ScrollView
+    <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:fillViewport="true"
-        android:scrollbarThumbVertical="@drawable/scrollbar_thumb"
-        android:scrollbarTrackVertical="@drawable/scrollbar_track"
-        android:scrollbarSize="5dp"
-        android:scrollbarStyle="outsideOverlay"
-        android:fadeScrollbars="true"
-        android:scrollbarFadeDuration="800"
-        android:scrollbarDefaultDelayBeforeFade="1500"
-        android:padding="32dp"
-        android:clipToPadding="false">
+        android:layout_height="match_parent"
+        android:orientation="vertical">
+
+        <!-- ════════════════════════════════════════════════════════════════
+             Top Bar
+             ════════════════════════════════════════════════════════════════ -->
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:gravity="center_horizontal">
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="20dp"
+            android:paddingTop="12dp"
+            android:paddingBottom="8dp">
 
-            <!-- Permission buttons -->
-            <Button
-                android:id="@+id/screenshotPermButton"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Enable Accessibility Service"
-                android:textSize="12sp"
-                android:paddingHorizontal="16dp"
-                android:layout_marginBottom="8dp"/>
+            <View
+                android:id="@+id/authDot"
+                android:layout_width="8dp"
+                android:layout_height="8dp"
+                android:background="@drawable/auth_dot"
+                android:layout_marginEnd="8dp"
+                android:transitionName="auth_dot"/>
 
-            <Button
-                android:id="@+id/voicePermButton"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Enable Voice Input"
-                android:textSize="12sp"
-                android:paddingHorizontal="16dp"
-                android:layout_marginBottom="8dp"/>
-
-            <!-- Sprite edit buttons -->
-            <LinearLayout
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:layout_marginBottom="8dp">
-
-                <Button
-                    android:id="@+id/editIdleSpriteButton"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Idle Sprite"
-                    android:textSize="11sp"
-                    android:paddingHorizontal="12dp"
-                    android:layout_marginEnd="8dp"/>
-
-                <Button
-                    android:id="@+id/editWalkSpriteButton"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Walk Sprite"
-                    android:textSize="11sp"
-                    android:paddingHorizontal="12dp"
-                    android:layout_marginEnd="8dp"/>
-
-                <Button
-                    android:id="@+id/resetSpritesButton"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Reset"
-                    android:textSize="11sp"
-                    android:paddingHorizontal="12dp"/>
-
-            </LinearLayout>
-
-            <!-- Prompt edit buttons -->
-            <LinearLayout
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:layout_marginBottom="8dp">
-
-                <Button
-                    android:id="@+id/editSystemPromptButton"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="System Prompt"
-                    android:textSize="11sp"
-                    android:paddingHorizontal="12dp"
-                    android:layout_marginEnd="8dp"/>
-
-                <Button
-                    android:id="@+id/editUserMessageButton"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="User Message"
-                    android:textSize="11sp"
-                    android:paddingHorizontal="12dp"/>
-
-            </LinearLayout>
-
-            <!-- Checkboxes row 1 -->
-            <LinearLayout
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:layout_marginBottom="4dp">
-
-                <CheckBox
-                    android:id="@+id/autoCopyCheckbox"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Auto-copy reply"
-                    android:textSize="12sp"
-                    android:layout_marginEnd="16dp"/>
-
-                <CheckBox
-                    android:id="@+id/volumeToggleCheckbox"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Vol. toggle"
-                    android:textSize="12sp"/>
-
-            </LinearLayout>
-
-            <!-- Checkboxes row 2 -->
-            <LinearLayout
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:layout_marginBottom="4dp">
-
-                <CheckBox
-                    android:id="@+id/keepDialogueCheckbox"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Keep dialogue"
-                    android:textSize="12sp"
-                    android:layout_marginEnd="16dp"/>
-
-                <CheckBox
-                    android:id="@+id/webSearchCheckbox"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Web search"
-                    android:textSize="12sp"/>
-
-            </LinearLayout>
-
-            <!-- TTS + Voice controls -->
-            <LinearLayout
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:layout_marginBottom="4dp">
-
-                <CheckBox
-                    android:id="@+id/ttsCheckbox"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Read aloud"
-                    android:textSize="12sp"
-                    android:layout_marginEnd="16dp"/>
-
-                <CheckBox
-                    android:id="@+id/voiceScreenshotCheckbox"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Voice+SS"
-                    android:textSize="12sp"
-                    android:layout_marginEnd="8dp"/>
-
-                <CheckBox
-                    android:id="@+id/beepsCheckbox"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Beeps"
-                    android:textSize="12sp"
-                    android:layout_marginEnd="8dp"/>
-
-                <Button
-                    android:id="@+id/ttsVoiceButton"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Voice..."
-                    android:textSize="11sp"
-                    android:paddingHorizontal="12dp"/>
-
-            </LinearLayout>
-
-            <!-- Gemini STT -->
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:layout_marginBottom="4dp">
-
-                <CheckBox
-                    android:id="@+id/geminiSttCheckbox"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Gemini STT"
-                    android:textSize="12sp"
-                    android:layout_marginEnd="8dp"/>
-
-                <CheckBox
-                    android:id="@+id/geminiTtsCheckbox"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Gemini TTS"
-                    android:textSize="12sp"
-                    android:layout_marginEnd="8dp"/>
-
-                <EditText
-                    android:id="@+id/geminiApiKeyEdit"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:hint="Gemini API key"
-                    android:textSize="11sp"
-                    android:inputType="textPassword"
-                    android:singleLine="true"
-                    android:imeOptions="actionDone"/>
-
-            </LinearLayout>
-
-
-            <!-- Silence timeout slider -->
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:paddingStart="4dp"
-                android:paddingEnd="4dp"
-                android:layout_marginTop="4dp">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Silence"
-                    android:textSize="11sp"
-                    android:layout_marginEnd="4dp"/>
-
-                <SeekBar
-                    android:id="@+id/silenceTimeoutSeek"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:max="49"/>
-
-                <TextView
-                    android:id="@+id/silenceTimeoutLabel"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="1.5s"
-                    android:textSize="11sp"
-                    android:layout_marginStart="4dp"
-                    android:minWidth="28dp"/>
-
-            </LinearLayout>
-
-            <!-- Spinners -->
-            <LinearLayout
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:layout_marginBottom="8dp">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Reply timeout:"
-                    android:textSize="12sp"
-                    android:layout_marginEnd="8dp"/>
-
-                <Spinner
-                    android:id="@+id/timeoutSpinner"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"/>
-
-            </LinearLayout>
-
-            <LinearLayout
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:layout_marginBottom="8dp">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="History:"
-                    android:textSize="12sp"
-                    android:layout_marginEnd="8dp"/>
-
-                <Spinner
-                    android:id="@+id/historySpinner"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"/>
-
-            </LinearLayout>
-
-            <LinearLayout
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:layout_marginBottom="16dp">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Model:"
-                    android:textSize="12sp"
-                    android:layout_marginEnd="8dp"/>
-
-                <Spinner
-                    android:id="@+id/modelSpinner"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"/>
-
-            </LinearLayout>
-
-            <!-- Main action -->
-            <Button
-                android:id="@+id/toggleButton"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Wake Her Up"
-                android:paddingHorizontal="32dp"
-                android:layout_marginBottom="8dp"/>
-
-            <TextView
-                android:id="@+id/statusText"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Senni is sleeping..."
-                android:textSize="20sp"
-                android:gravity="center"
-                android:layout_marginBottom="16dp"/>
-
-            <!-- Auth + debug (now scrollable too) -->
             <TextView
                 android:id="@+id/authStatusText"
-                android:layout_width="wrap_content"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:text="Not connected to Claude"
-                android:textSize="14sp"
-                android:textColor="#666666"
-                android:gravity="center"
-                android:layout_marginBottom="12dp"/>
+                android:layout_weight="1"
+                android:text="Not connected"
+                android:textSize="12sp"
+                android:textColor="@color/text_secondary"
+                android:singleLine="true"/>
 
-            <Button
-                android:id="@+id/authButton"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Authenticate"
-                android:paddingHorizontal="24dp"
-                android:layout_marginBottom="16dp"/>
-
-            <Button
-                android:id="@+id/testButton"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Send Test Message"
-                android:paddingHorizontal="24dp"
-                android:enabled="false"
-                android:layout_marginBottom="16dp"/>
-
-            <TextView
-                android:id="@+id/responseText"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Authenticate first to hear me speak~"
-                android:textSize="14sp"
-                android:textColor="#666666"
-                android:gravity="center"
-                android:layout_marginBottom="16dp"/>
-
-            <LinearLayout
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:layout_marginBottom="32dp">
-
-                <Button
-                    android:id="@+id/copyLogButton"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Copy Debug Log"
-                    android:textSize="12sp"
-                    android:paddingHorizontal="16dp"/>
-
-                <Button
-                    android:id="@+id/clearLogButton"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Clear Log"
-                    android:textSize="12sp"
-                    android:paddingHorizontal="16dp"
-                    android:layout_marginStart="8dp"/>
-
-            </LinearLayout>
+            <ImageView
+                android:id="@+id/settingsButton"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:src="@drawable/ic_settings"
+                android:padding="8dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Settings"
+                app:tint="@color/text_secondary"/>
 
         </LinearLayout>
 
-    </ScrollView>
+        <!-- ════════════════════════════════════════════════════════════════
+             Scrollable Content
+             ════════════════════════════════════════════════════════════════ -->
 
-</LinearLayout>
+        <ScrollView
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:fillViewport="true"
+            android:scrollbarThumbVertical="@drawable/scrollbar_thumb"
+            android:scrollbarSize="4dp"
+            android:fadeScrollbars="true"
+            android:clipToPadding="false">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingBottom="32dp">
+
+                <!-- ════════════════════════════════════════════════════════
+                     Preset Header
+                     ════════════════════════════════════════════════════════ -->
+
+                <LinearLayout
+                    android:id="@+id/presetHeader"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:paddingHorizontal="24dp"
+                    android:paddingVertical="12dp"
+                    android:background="?attr/selectableItemBackground">
+
+                    <TextView
+                        android:id="@+id/presetName"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Senni"
+                        android:textAppearance="@style/TextAppearance.Companion.HeadlineLarge"
+                        android:transitionName="preset_name"/>
+
+                    <TextView
+                        android:id="@+id/presetSwitcher"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="▾"
+                        android:textSize="18sp"
+                        android:textColor="@color/text_secondary"
+                        android:paddingHorizontal="8dp"/>
+
+                </LinearLayout>
+
+                <!-- ════════════════════════════════════════════════════════
+                     Preset Carousel (ViewPager2)
+                     ════════════════════════════════════════════════════════ -->
+
+                <androidx.viewpager2.widget.ViewPager2
+                    android:id="@+id/presetPager"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginHorizontal="16dp"
+                    android:clipToPadding="false"
+                    android:clipChildren="false"
+                    android:overScrollMode="never"/>
+
+                <!-- Page Indicator -->
+                <LinearLayout
+                    android:id="@+id/pageIndicatorContainer"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center"
+                    android:paddingTop="12dp"
+                    android:paddingBottom="16dp"/>
+
+                <!-- ════════════════════════════════════════════════════════
+                     Model Selector
+                     ════════════════════════════════════════════════════════ -->
+
+                <com.google.android.material.textfield.TextInputLayout
+                    android:id="@+id/modelDropdown"
+                    style="@style/CompanionDropdown"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginHorizontal="24dp"
+                    android:layout_marginBottom="16dp"
+                    android:hint="Model">
+
+                    <AutoCompleteTextView
+                        android:id="@+id/modelSelector"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="none"
+                        android:textColor="@color/text_primary"
+                        android:textSize="14sp"
+                        android:popupBackground="@color/surface_dark"/>
+
+                </com.google.android.material.textfield.TextInputLayout>
+
+                <!-- ════════════════════════════════════════════════════════
+                     System Prompt Card
+                     ════════════════════════════════════════════════════════ -->
+
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/systemPromptCard"
+                    style="@style/CompanionCard"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginHorizontal="24dp"
+                    android:layout_marginBottom="12dp"
+                    android:clickable="true"
+                    android:focusable="true">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="16dp">
+
+                        <TextView
+                            android:id="@+id/systemPromptTitle"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="System Prompt"
+                            android:textAppearance="@style/TextAppearance.Companion.TitleMedium"
+                            android:layout_marginBottom="6dp"/>
+
+                        <TextView
+                            android:id="@+id/systemPromptPreview"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:textAppearance="@style/TextAppearance.Companion.BodyMedium"
+                            android:maxLines="3"
+                            android:ellipsize="end"/>
+
+                    </LinearLayout>
+
+                </com.google.android.material.card.MaterialCardView>
+
+                <!-- ════════════════════════════════════════════════════════
+                     User Message Card
+                     ════════════════════════════════════════════════════════ -->
+
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/userMessageCard"
+                    style="@style/CompanionCard"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginHorizontal="24dp"
+                    android:layout_marginBottom="24dp"
+                    android:clickable="true"
+                    android:focusable="true">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="16dp">
+
+                        <TextView
+                            android:id="@+id/userMessageTitle"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="User Message"
+                            android:textAppearance="@style/TextAppearance.Companion.TitleMedium"
+                            android:layout_marginBottom="6dp"/>
+
+                        <TextView
+                            android:id="@+id/userMessagePreview"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:textAppearance="@style/TextAppearance.Companion.BodyMedium"
+                            android:maxLines="2"
+                            android:ellipsize="end"/>
+
+                    </LinearLayout>
+
+                </com.google.android.material.card.MaterialCardView>
+
+                <!-- ════════════════════════════════════════════════════════
+                     Auth Button (when needed)
+                     ════════════════════════════════════════════════════════ -->
+
+                <Button
+                    android:id="@+id/authButton"
+                    style="@style/CompanionButton.Secondary"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginHorizontal="24dp"
+                    android:layout_marginBottom="12dp"
+                    android:text="Connect to Claude"
+                    android:visibility="gone"/>
+
+                <!-- ════════════════════════════════════════════════════════
+                     Status + Toggle
+                     ════════════════════════════════════════════════════════ -->
+
+                <TextView
+                    android:id="@+id/statusText"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginHorizontal="24dp"
+                    android:text="Senni is sleeping..."
+                    android:textSize="16sp"
+                    android:textColor="@color/text_secondary"
+                    android:gravity="center"
+                    android:layout_marginBottom="12dp"/>
+
+                <Button
+                    android:id="@+id/toggleButton"
+                    style="@style/CompanionButton.Large"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginHorizontal="24dp"
+                    android:text="Wake Her Up"/>
+
+            </LinearLayout>
+        </ScrollView>
+
+    </LinearLayout>
+
+</androidx.coordinatorlayout.widget.CoordinatorLayout>
