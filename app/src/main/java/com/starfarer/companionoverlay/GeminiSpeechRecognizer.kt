@@ -80,6 +80,7 @@ class GeminiSpeechRecognizer(
     /** Conversation context to inject into the transcription prompt. */
     var conversationContext: String = ""
 
+
     /** Silence duration in ms — set from settings before startListening(). */
     var silenceDurationMs: Long = DEFAULT_silenceDurationMs
 
@@ -249,6 +250,79 @@ class GeminiSpeechRecognizer(
 
     /** Build a WAV file from raw PCM data. */
 
+    /** Build the Gemini API request JSON, optionally including conversation context. */
+    private fun buildGeminiRequestJson(base64Audio: String, includeContext: Boolean): JSONObject {
+        return JSONObject().apply {
+            if (includeContext && conversationContext.isNotBlank()) {
+                put("systemInstruction", JSONObject().apply {
+                    put("parts", JSONArray().put(
+                        JSONObject().put("text",
+                            "You are a speech-to-text transcriber. The user is in an ongoing conversation. " +
+                            "Use the following context ONLY to resolve ambiguous words, names, and terms. " +
+                            "Do NOT include any of this context in your output.\n\n$conversationContext")
+                    ))
+                })
+            }
+            put("contents", JSONArray().put(
+                JSONObject().put("parts", JSONArray().apply {
+                    put(JSONObject().put("text", "Transcribe this audio. Return ONLY the spoken words, nothing else."))
+                    put(JSONObject().apply {
+                        put("inline_data", JSONObject().apply {
+                            put("mime_type", "audio/wav")
+                            put("data", base64Audio)
+                        })
+                    })
+                })
+            ))
+        }
+    }
+
+    /** Check if a Gemini response was blocked by safety/content filters. */
+    private fun isContentBlocked(responseBody: String?, httpCode: Int): Boolean {
+        if (responseBody == null) return false
+        val json = runCatching { JSONObject(responseBody) }.getOrNull() ?: return false
+
+        // HTTP error — check error message for safety-related keywords
+        if (httpCode !in 200..299) {
+            val msg = json.optJSONObject("error")?.optString("message", "") ?: ""
+            val blocked = listOf("content", "blocked", "safety", "prohibited")
+            return blocked.any { msg.contains(it, ignoreCase = true) }
+        }
+
+        // Prompt-level block: promptFeedback.blockReason present
+        val blockReason = json.optJSONObject("promptFeedback")?.optString("blockReason", "") ?: ""
+        if (blockReason.isNotBlank()) return true
+
+        // Candidate-level block: finishReason indicates safety
+        val candidate = json.optJSONArray("candidates")?.optJSONObject(0)
+        if (candidate != null) {
+            val reason = candidate.optString("finishReason", "")
+            if (reason in listOf("SAFETY", "RECITATION", "OTHER")) return true
+        }
+
+        // No candidates at all (but 200) — also a block
+        if (!json.has("candidates") || json.optJSONArray("candidates")?.length() == 0) return true
+
+        return false
+    }
+
+    /** Execute a single Gemini transcription request. Returns (responseBody, httpCode). */
+    private fun executeGeminiRequest(requestJson: JSONObject, apiKey: String): Pair<String?, Int> {
+        val body = requestJson.toString().toRequestBody("application/json".toMediaType())
+        val request = Request.Builder()
+            .url(GEMINI_URL)
+            .post(body)
+            .header("x-goog-api-key", apiKey)
+            .build()
+        val hasContext = requestJson.has("systemInstruction")
+        DebugLog.log(TAG, "Sending to Gemini (context=$hasContext, ${requestJson.toString().length} chars)...")
+        val call = httpClient.newCall(request)
+        activeHttpCall = call
+        val response = call.execute()
+        activeHttpCall = null
+        return Pair(response.body?.string(), response.code)
+    }
+
     /** Send WAV audio to Gemini for transcription with conversation context. */
     private fun transcribeWithGemini(wavData: ByteArray) {
         val apiKey = settings.geminiApiKey
@@ -264,60 +338,34 @@ class GeminiSpeechRecognizer(
         val base64Audio = android.util.Base64.encodeToString(wavData, android.util.Base64.NO_WRAP)
         DebugLog.log(TAG, "WAV size: ${wavData.size} bytes, base64: ${base64Audio.length} chars")
 
-        val prompt = "Transcribe this audio. Return ONLY the spoken words, nothing else."
-
-        // Build Gemini API request body
-        val requestJson = JSONObject().apply {
-            // Move conversation context to systemInstruction so it can't leak into transcription
-            if (conversationContext.isNotBlank()) {
-                put("systemInstruction", JSONObject().apply {
-                    put("parts", JSONArray().put(
-                        JSONObject().put("text",
-                            "You are a speech-to-text transcriber. The user is in an ongoing conversation. " +
-                            "Use the following context ONLY to resolve ambiguous words, names, and terms. " +
-                            "Do NOT include any of this context in your output.\n\n$conversationContext")
-                    ))
-                })
-            }
-            put("contents", JSONArray().put(
-                JSONObject().put("parts", JSONArray().apply {
-                    put(JSONObject().put("text", prompt))
-                    put(JSONObject().apply {
-                        put("inline_data", JSONObject().apply {
-                            put("mime_type", "audio/wav")
-                            put("data", base64Audio)
-                        })
-                    })
-                })
-            ))
-        }
-
-        val body = requestJson.toString().toRequestBody("application/json".toMediaType())
-        val request = Request.Builder()
-            .url(GEMINI_URL)
-            .post(body)
-            .header("x-goog-api-key", apiKey)
-            .build()
-
-        DebugLog.log(TAG, "Sending to Gemini (${requestJson.toString().length} chars request)...")
-
         try {
-            val call = httpClient.newCall(request)
-            activeHttpCall = call
-            val response = call.execute()
-            activeHttpCall = null
+            var requestJson = buildGeminiRequestJson(base64Audio, includeContext = true)
+            var (responseBody, httpCode) = executeGeminiRequest(requestJson, apiKey)
 
             if (cancelled) return
 
-            val responseBody = response.body?.string()
+            // Retry without conversation context if safety filters blocked the request
+            if (isContentBlocked(responseBody, httpCode)) {
+                DebugLog.log(TAG, "Content blocked with context, retrying without")
+                handler.post { onPartialResult?.invoke("Retrying transcription...") }
 
-            if (!response.isSuccessful) {
+                if (cancelled) return
+
+                requestJson = buildGeminiRequestJson(base64Audio, includeContext = false)
+                val retry = executeGeminiRequest(requestJson, apiKey)
+                responseBody = retry.first
+                httpCode = retry.second
+
+                if (cancelled) return
+            }
+
+            if (httpCode !in 200..299) {
                 val errorMsg = try {
                     JSONObject(responseBody ?: "")
                         .getJSONObject("error")
                         .getString("message")
                 } catch (_: Exception) {
-                    "HTTP ${response.code}"
+                    "HTTP $httpCode"
                 }
                 DebugLog.log(TAG, "Gemini error: $errorMsg")
                 handler.post {
