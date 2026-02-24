@@ -4,12 +4,11 @@
     <!-- ════════ GEMINI API ════════ -->
     <PreferenceCategory app:iconSpaceReserved="false" app:title="Gemini API">
 
-        <EditTextPreference
+        <Preference
             app:iconSpaceReserved="false"
             app:key="gemini_api_key"
             app:title="API Key"
-            app:summary="Required for Gemini speech-to-text and text-to-speech"
-            app:singleLineTitle="true"/>
+            app:summary="Required for Gemini speech-to-text and text-to-speech"/>
 
         <SwitchPreferenceCompat
             app:iconSpaceReserved="false"
@@ -51,7 +50,7 @@
             app:iconSpaceReserved="false"
             app:key="volume_toggle_enabled"
             app:title="Volume button shortcut"
-            app:summary="Press volume down to activate voice input from any screen"
+            app:summary="Double press volume down to show/hide avatar, triple — activate voice input"
             app:defaultValue="true"/>
 
     </PreferenceCategory>

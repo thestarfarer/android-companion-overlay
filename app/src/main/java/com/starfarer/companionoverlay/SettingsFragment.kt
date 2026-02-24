@@ -68,6 +68,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
 
         setupGeminiApi()
         setupSilenceTimeout()
+        setupVolumeShortcut()
         setupVoiceOutput()
         setupConversationLists()
         setupPermissions()
@@ -194,23 +195,57 @@ class SettingsFragment : PreferenceFragmentCompat() {
     // ── Gemini API ──
 
     private fun setupGeminiApi() {
-        findPreference<EditTextPreference>("gemini_api_key")?.apply {
-            isPersistent = false
-            text = settings.geminiApiKey
-            summaryProvider = Preference.SummaryProvider<EditTextPreference> { pref ->
-                if (pref.text.isNullOrBlank()) "Required for Gemini speech-to-text and text-to-speech"
-                else "Key set (${pref.text!!.take(8)}…)"
-            }
-            setOnBindEditTextListener { editText ->
-                editText.inputType = android.text.InputType.TYPE_CLASS_TEXT or
-                        android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
-                editText.isSingleLine = true
-            }
-            setOnPreferenceChangeListener { _, newValue ->
-                settings.geminiApiKey = newValue as? String
+        findPreference<Preference>("gemini_api_key")?.apply {
+            refreshGeminiKeySummary(this)
+            setOnPreferenceClickListener {
+                showGeminiKeyDialog()
                 true
             }
         }
+    }
+
+    private fun refreshGeminiKeySummary(pref: Preference? = findPreference("gemini_api_key")) {
+        pref ?: return
+        val key = settings.geminiApiKey
+        pref.summary = if (key.isNullOrBlank()) "Required for Gemini speech-to-text and text-to-speech"
+        else "Key set (${key.take(8)}…)"
+    }
+
+    private fun showGeminiKeyDialog() {
+        val ctx = context ?: return
+        val d = ctx.resources.displayMetrics.density
+        val pad = (20 * d).toInt()
+
+        val r = 12 * d
+        val inputLayout = TextInputLayout(ctx, null, com.google.android.material.R.attr.textInputOutlinedStyle).apply {
+            hint = "AIza..."
+            endIconMode = TextInputLayout.END_ICON_PASSWORD_TOGGLE
+            setBoxCornerRadii(r, r, r, r)
+        }
+        val editText = TextInputEditText(inputLayout.context).apply {
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                    android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            isSingleLine = true
+            setText(settings.geminiApiKey ?: "")
+        }
+        inputLayout.addView(editText)
+
+        val container = FrameLayout(ctx).apply {
+            setPadding(pad, (12 * d).toInt(), pad, 0)
+            addView(inputLayout)
+        }
+
+        MaterialAlertDialogBuilder(ctx, R.style.CompanionDialog)
+            .setTitle("Gemini API Key")
+            .setView(container)
+            .setPositiveButton("Save") { _, _ ->
+                settings.geminiApiKey = editText.text?.toString()?.trim()
+                refreshGeminiKeySummary()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+
+        editText.requestFocus()
     }
 
     // ── Silence timeout ──
@@ -235,6 +270,17 @@ class SettingsFragment : PreferenceFragmentCompat() {
     private fun formatSilenceMs(ms: Long): String {
         val sec = ms / 1000.0
         return "${"%.1f".format(sec)}s — wait this long after silence before sending"
+    }
+
+    // ── Volume shortcut ──
+
+    private fun setupVolumeShortcut() {
+        findPreference<SwitchPreferenceCompat>("volume_toggle_enabled")?.setOnPreferenceChangeListener { _, newValue ->
+            if (newValue == true) {
+                Toast.makeText(requireContext(), "This option will interfere with long press for volume down", Toast.LENGTH_LONG).show()
+            }
+            true
+        }
     }
 
     // ── Voice output ──
