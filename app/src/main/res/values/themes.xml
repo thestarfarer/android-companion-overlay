@@ -78,14 +78,18 @@
          ════════════════════════════════════════════════════════════════════ -->
 
     <style name="CompanionDialog" parent="ThemeOverlay.Material3.MaterialAlertDialog">
-        <item name="colorSurface">@color/background</item>
-        <item name="colorSurfaceContainerHigh">@color/background</item>
-        <item name="colorSurfaceContainer">@color/background</item>
         <item name="colorOnSurface">@color/text_primary</item>
         <item name="colorPrimary">@color/gold</item>
-        <item name="dialogCornerRadius">20dp</item>
-        <item name="android:background">@color/background</item>
-        <item name="android:windowBackground">@color/background</item>
+        <item name="alertDialogStyle">@style/CompanionAlertDialog</item>
+    </style>
+
+    <style name="CompanionAlertDialog" parent="MaterialAlertDialog.Material3">
+        <item name="backgroundTint">@color/background</item>
+        <item name="shapeAppearance">@style/CompanionDialogShape</item>
+    </style>
+
+    <style name="CompanionDialogShape" parent="">
+        <item name="cornerSize">20dp</item>
     </style>
 
     <!-- ════════════════════════════════════════════════════════════════════

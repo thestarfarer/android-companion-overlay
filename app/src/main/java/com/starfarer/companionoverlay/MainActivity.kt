@@ -331,7 +331,7 @@ class MainActivity : AppCompatActivity() {
                     authDot.backgroundTintList = ColorStateList.valueOf(getColor(R.color.status_error))
                     authStatusText.text = "API Key not set"
                     authButton.visibility = View.VISIBLE
-                    authButton.text = "Open Settings"
+                    authButton.text = "Set Claude API key"
                 }
             }
             is MainViewModel.AuthState.Waiting -> {
@@ -470,7 +470,9 @@ class MainActivity : AppCompatActivity() {
     private fun handleAuthClick() {
         when (viewModel.state.value.authState) {
             is MainViewModel.AuthState.ApiKeyMode -> {
-                startActivity(Intent(this, SettingsActivity::class.java))
+                startActivity(Intent(this, SettingsActivity::class.java).apply {
+                    putExtra(SettingsActivity.EXTRA_HIGHLIGHT_KEY, "claude_api_key")
+                })
             }
             is MainViewModel.AuthState.Waiting -> {
                 viewModel.cancelAuth()
