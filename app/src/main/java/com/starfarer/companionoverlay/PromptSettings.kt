@@ -2,61 +2,52 @@ package com.starfarer.companionoverlay
 
 import android.content.Context
 import android.content.SharedPreferences
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
 
+/**
+ * Centralized settings access for CompanionOverlay.
+ *
+ * Settings are organized into logical groups:
+ * - Model & API: Claude model selection, web search
+ * - Conversation: history, timeouts, keep-dialogue
+ * - TTS: on-device voice, rate, pitch, enable/disable
+ * - Gemini: API key (encrypted), STT, TTS, voice selection
+ * - Avatar: position, sprite settings
+ * - Behavior: auto-copy, volume toggle, beeps, voice screenshot
+ *
+ * Security: The Gemini API key is stored in EncryptedSharedPreferences.
+ * All other settings use standard SharedPreferences.
+ *
+ * Character-specific settings (prompts, sprites) delegate to [CharacterPreset].
+ */
 object PromptSettings {
     private const val PREFS_NAME = "companion_prompts"
-    private const val KEY_SYSTEM_PROMPT = "system_prompt"
-    private const val KEY_USER_MESSAGE = "user_message"
-    private const val KEY_AUTO_COPY = "auto_copy"
-    private const val KEY_IDLE_SPRITE_URI = "idle_sprite_uri"
-    private const val KEY_WALK_SPRITE_URI = "walk_sprite_uri"
-    private const val KEY_IDLE_FRAME_COUNT = "idle_frame_count"
-    private const val KEY_WALK_FRAME_COUNT = "walk_frame_count"
-    private const val KEY_MODEL = "selected_model"
-    private const val KEY_BUBBLE_TIMEOUT = "bubble_timeout"
-    private const val KEY_MAX_MESSAGES = "max_messages"
-    private const val KEY_KEEP_DIALOGUE = "keep_dialogue"
-    private const val KEY_WEB_SEARCH = "web_search_enabled"
-    private const val KEY_VOLUME_TOGGLE = "volume_toggle_enabled"
-    private const val KEY_CONVERSATION_HISTORY = "conversation_history"
-    private const val KEY_AVATAR_X = "avatar_x"
-    private const val KEY_AVATAR_POSITION = "avatar_position"
-    private const val KEY_TTS_VOICE = "tts_voice"
-    private const val KEY_TTS_SPEECH_RATE = "tts_speech_rate"
-    private const val KEY_TTS_PITCH = "tts_pitch"
-    private const val KEY_TTS_ENABLED = "tts_enabled"
-    private const val KEY_VOICE_SCREENSHOT = "voice_screenshot_enabled"
-    private const val KEY_GEMINI_STT = "gemini_stt_enabled"
-    private const val KEY_GEMINI_API_KEY = "gemini_api_key"
-    private const val KEY_GEMINI_TTS = "gemini_tts_enabled"
-    private const val KEY_GEMINI_TTS_VOICE = "gemini_tts_voice"
-    private const val KEY_SILENCE_TIMEOUT = "silence_timeout_ms"
-        private const val KEY_BEEPS_ENABLED = "beeps_enabled"
+    private const val SECURE_PREFS_NAME = "companion_auth"
+
+    // ══════════════════════════════════════════════════════════════════════
+    // Default Values
+    // ══════════════════════════════════════════════════════════════════════
 
     const val DEFAULT_MODEL = "claude-sonnet-4-5-20250929"
+    const val DEFAULT_BUBBLE_TIMEOUT = 30
+    const val DEFAULT_MAX_MESSAGES = 20
+    const val DEFAULT_IDLE_FRAME_COUNT = 6
+    const val DEFAULT_WALK_FRAME_COUNT = 4
+    const val DEFAULT_SILENCE_TIMEOUT_MS = 1500L
 
     val MODEL_IDS = arrayOf(
         "claude-sonnet-4-5-20250929",
         "claude-opus-4-1-20250805",
         "claude-opus-4-6",
     )
-    val MODEL_NAMES = arrayOf(
-        "Sonnet 4.5",
-        "Opus 4.1",
-        "Opus 4.6",
-    )
-    
-    const val DEFAULT_BUBBLE_TIMEOUT = 30 // seconds
+    val MODEL_NAMES = arrayOf("Sonnet 4.5", "Opus 4.1", "Opus 4.6")
 
     val BUBBLE_TIMEOUT_VALUES = arrayOf(15, 30, 60, 120)
     val BUBBLE_TIMEOUT_LABELS = arrayOf("15 sec", "30 sec", "60 sec", "120 sec")
 
-    const val DEFAULT_MAX_MESSAGES = 20
     val MAX_MESSAGES_VALUES = arrayOf(10, 20, 40, 60)
     val MAX_MESSAGES_LABELS = arrayOf("5 turns", "10 turns", "20 turns", "30 turns")
-
-    const val DEFAULT_IDLE_FRAME_COUNT = 6
-    const val DEFAULT_WALK_FRAME_COUNT = 4
 
     val DEFAULT_SYSTEM_PROMPT = """You are Senni, a strange girl living as an overlay on the owner's Android phone. Your personality constantly shifts between innocence, impishness, impertinence and impudence. You're all over them one moment, then won't even notice them the next. You playfully tease, try to score points, but when pressed you vehemently deny any such intentions.
 
@@ -80,189 +71,238 @@ Keep responses under 280 characters. No emojis. Occasional ~ is fine. No quotati
 
     const val DEFAULT_USER_MESSAGE = "Yo~ What do we have here? Say something cute or funny or both~"
 
-    private fun getPrefs(context: Context): SharedPreferences {
-        return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-    }
+    private fun prefs(context: Context): SharedPreferences =
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
-    private fun loadCustomPrompt(context: Context): String? {
+    /**
+     * Encrypted prefs for sensitive values (API keys).
+     * Lazily created per-context to handle initialization failures gracefully.
+     */
+    private fun securePrefs(context: Context): SharedPreferences {
         return try {
-            context.assets.open("custom_prompt.txt").bufferedReader().readText().trim().ifEmpty { null }
-        } catch (_: Exception) { null }
+            val masterKey = MasterKey.Builder(context)
+                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                .build()
+            EncryptedSharedPreferences.create(
+                context,
+                SECURE_PREFS_NAME,
+                masterKey,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+            )
+        } catch (e: Exception) {
+            // Fallback to regular prefs if encryption fails (shouldn't happen)
+            DebugLog.log("Settings", "Encrypted prefs failed, using fallback: ${e.message}")
+            context.getSharedPreferences(SECURE_PREFS_NAME + "_fallback", Context.MODE_PRIVATE)
+        }
     }
 
-    fun getSystemPrompt(context: Context): String {
-        return getPrefs(context).getString(KEY_SYSTEM_PROMPT, null)
-            ?: loadCustomPrompt(context)
-            ?: DEFAULT_SYSTEM_PROMPT
-    }
+    // ══════════════════════════════════════════════════════════════════════
+    // Character Presets (delegated)
+    // ══════════════════════════════════════════════════════════════════════
+
+    fun getSystemPrompt(context: Context): String =
+        CharacterPreset.getActive(context).systemPrompt
 
     fun setSystemPrompt(context: Context, prompt: String) {
-        getPrefs(context).edit().putString(KEY_SYSTEM_PROMPT, prompt).apply()
+        val current = CharacterPreset.getActive(context)
+        CharacterPreset.save(context, current.copy(systemPrompt = prompt))
     }
 
-    fun getUserMessage(context: Context): String {
-        return getPrefs(context).getString(KEY_USER_MESSAGE, null) ?: DEFAULT_USER_MESSAGE
-    }
+    fun getUserMessage(context: Context): String =
+        CharacterPreset.getActive(context).userMessage
 
     fun setUserMessage(context: Context, message: String) {
-        getPrefs(context).edit().putString(KEY_USER_MESSAGE, message).apply()
+        val current = CharacterPreset.getActive(context)
+        CharacterPreset.save(context, current.copy(userMessage = message))
     }
 
-    fun getAutoCopy(context: Context): Boolean {
-        return getPrefs(context).getBoolean(KEY_AUTO_COPY, false)
-    }
+    fun getIdleSpriteUri(context: Context): String? =
+        CharacterPreset.getActive(context).idleSpriteUri
 
-    fun setAutoCopy(context: Context, enabled: Boolean) {
-        getPrefs(context).edit().putBoolean(KEY_AUTO_COPY, enabled).apply()
-    }
+    fun getWalkSpriteUri(context: Context): String? =
+        CharacterPreset.getActive(context).walkSpriteUri
 
-    fun getIdleSpriteUri(context: Context): String? {
-        return getPrefs(context).getString(KEY_IDLE_SPRITE_URI, null)
-    }
+    fun getIdleFrameCount(context: Context): Int =
+        CharacterPreset.getActive(context).idleFrameCount
 
-    fun setIdleSpriteUri(context: Context, uri: String?) {
-        if (uri == null) {
-            getPrefs(context).edit().remove(KEY_IDLE_SPRITE_URI).apply()
-        } else {
-            getPrefs(context).edit().putString(KEY_IDLE_SPRITE_URI, uri).apply()
-        }
-    }
+    fun getWalkFrameCount(context: Context): Int =
+        CharacterPreset.getActive(context).walkFrameCount
 
-    fun getWalkSpriteUri(context: Context): String? {
-        return getPrefs(context).getString(KEY_WALK_SPRITE_URI, null)
-    }
+    // ══════════════════════════════════════════════════════════════════════
+    // Model & API Settings
+    // ══════════════════════════════════════════════════════════════════════
 
-    fun setWalkSpriteUri(context: Context, uri: String?) {
-        if (uri == null) {
-            getPrefs(context).edit().remove(KEY_WALK_SPRITE_URI).apply()
-        } else {
-            getPrefs(context).edit().putString(KEY_WALK_SPRITE_URI, uri).apply()
-        }
-    }
+    fun getModel(context: Context): String =
+        prefs(context).getString("selected_model", null) ?: DEFAULT_MODEL
 
-    fun getIdleFrameCount(context: Context): Int {
-        return getPrefs(context).getInt(KEY_IDLE_FRAME_COUNT, DEFAULT_IDLE_FRAME_COUNT)
-    }
+    fun setModel(context: Context, modelId: String) =
+        prefs(context).edit().putString("selected_model", modelId).apply()
 
-    fun setIdleFrameCount(context: Context, count: Int) {
-        getPrefs(context).edit().putInt(KEY_IDLE_FRAME_COUNT, count).apply()
-    }
+    fun getWebSearch(context: Context): Boolean =
+        prefs(context).getBoolean("web_search_enabled", false)
 
-    fun getWalkFrameCount(context: Context): Int {
-        return getPrefs(context).getInt(KEY_WALK_FRAME_COUNT, DEFAULT_WALK_FRAME_COUNT)
-    }
+    fun setWebSearch(context: Context, enabled: Boolean) =
+        prefs(context).edit().putBoolean("web_search_enabled", enabled).apply()
 
-    fun setWalkFrameCount(context: Context, count: Int) {
-        getPrefs(context).edit().putInt(KEY_WALK_FRAME_COUNT, count).apply()
-    }
+    // ══════════════════════════════════════════════════════════════════════
+    // Conversation Settings
+    // ══════════════════════════════════════════════════════════════════════
 
-    fun getModel(context: Context): String {
-        return getPrefs(context).getString(KEY_MODEL, null) ?: DEFAULT_MODEL
-    }
+    fun getBubbleTimeout(context: Context): Int =
+        prefs(context).getInt("bubble_timeout", DEFAULT_BUBBLE_TIMEOUT)
 
-    fun setModel(context: Context, modelId: String) {
-        getPrefs(context).edit().putString(KEY_MODEL, modelId).apply()
-    }
+    fun setBubbleTimeout(context: Context, seconds: Int) =
+        prefs(context).edit().putInt("bubble_timeout", seconds).apply()
 
-    fun getBubbleTimeout(context: Context): Int {
-        return getPrefs(context).getInt(KEY_BUBBLE_TIMEOUT, DEFAULT_BUBBLE_TIMEOUT)
-    }
+    fun getMaxMessages(context: Context): Int =
+        prefs(context).getInt("max_messages", DEFAULT_MAX_MESSAGES)
 
-    fun setBubbleTimeout(context: Context, seconds: Int) {
-        getPrefs(context).edit().putInt(KEY_BUBBLE_TIMEOUT, seconds).apply()
-    }
+    fun setMaxMessages(context: Context, count: Int) =
+        prefs(context).edit().putInt("max_messages", count).apply()
 
-    fun getMaxMessages(context: Context): Int {
-        return getPrefs(context).getInt(KEY_MAX_MESSAGES, DEFAULT_MAX_MESSAGES)
-    }
+    fun getKeepDialogue(context: Context): Boolean =
+        prefs(context).getBoolean("keep_dialogue", false)
 
-    fun setMaxMessages(context: Context, count: Int) {
-        getPrefs(context).edit().putInt(KEY_MAX_MESSAGES, count).apply()
-    }
+    fun setKeepDialogue(context: Context, enabled: Boolean) =
+        prefs(context).edit().putBoolean("keep_dialogue", enabled).apply()
 
-    fun getKeepDialogue(context: Context): Boolean {
-        return getPrefs(context).getBoolean(KEY_KEEP_DIALOGUE, false)
-    }
-
-    fun setKeepDialogue(context: Context, enabled: Boolean) {
-        getPrefs(context).edit().putBoolean(KEY_KEEP_DIALOGUE, enabled).apply()
-    }
-
-    fun getWebSearch(context: Context): Boolean {
-        return getPrefs(context).getBoolean(KEY_WEB_SEARCH, false)
-    }
-
-    fun setWebSearch(context: Context, enabled: Boolean) {
-        getPrefs(context).edit().putBoolean(KEY_WEB_SEARCH, enabled).apply()
-    }
-
-    fun getVolumeToggle(context: Context): Boolean {
-        return getPrefs(context).getBoolean(KEY_VOLUME_TOGGLE, true)
-    }
-
-    fun setVolumeToggle(context: Context, enabled: Boolean) {
-        getPrefs(context).edit().putBoolean(KEY_VOLUME_TOGGLE, enabled).apply()
-    }
-
-    fun getConversationHistory(context: Context): String? {
-        return getPrefs(context).getString(KEY_CONVERSATION_HISTORY, null)
-    }
+    fun getConversationHistory(context: Context): String? =
+        prefs(context).getString("conversation_history", null)
 
     fun setConversationHistory(context: Context, json: String?) {
-        if (json == null) {
-            getPrefs(context).edit().remove(KEY_CONVERSATION_HISTORY).apply()
-        } else {
-            getPrefs(context).edit().putString(KEY_CONVERSATION_HISTORY, json).apply()
-        }
+        val editor = prefs(context).edit()
+        if (json == null) editor.remove("conversation_history") else editor.putString("conversation_history", json)
+        editor.apply()
     }
 
-    fun getAvatarX(context: Context): Int = getPrefs(context).getInt(KEY_AVATAR_X, -1)
-    fun setAvatarX(context: Context, x: Int) = getPrefs(context).edit().putInt(KEY_AVATAR_X, x).apply()
-    fun getAvatarPosition(context: Context): String? = getPrefs(context).getString(KEY_AVATAR_POSITION, null)
-    fun setAvatarPosition(context: Context, pos: String) = getPrefs(context).edit().putString(KEY_AVATAR_POSITION, pos).apply()
+    // ══════════════════════════════════════════════════════════════════════
+    // On-Device TTS Settings
+    // ══════════════════════════════════════════════════════════════════════
 
+    fun getTtsEnabled(context: Context): Boolean =
+        prefs(context).getBoolean("tts_enabled", true)
 
-    // TTS settings
-    fun getTtsVoice(context: Context): String? = getPrefs(context).getString(KEY_TTS_VOICE, null)
-    fun setTtsVoice(context: Context, name: String) = getPrefs(context).edit().putString(KEY_TTS_VOICE, name).apply()
+    fun setTtsEnabled(context: Context, enabled: Boolean) =
+        prefs(context).edit().putBoolean("tts_enabled", enabled).apply()
 
-    fun getTtsSpeechRate(context: Context): Float = getPrefs(context).getFloat(KEY_TTS_SPEECH_RATE, 1.0f)
-    fun setTtsSpeechRate(context: Context, rate: Float) = getPrefs(context).edit().putFloat(KEY_TTS_SPEECH_RATE, rate).apply()
+    fun getTtsVoice(context: Context): String? =
+        prefs(context).getString("tts_voice", null)
 
-    fun getTtsPitch(context: Context): Float = getPrefs(context).getFloat(KEY_TTS_PITCH, 1.0f)
-    fun setTtsPitch(context: Context, pitch: Float) = getPrefs(context).edit().putFloat(KEY_TTS_PITCH, pitch).apply()
+    fun setTtsVoice(context: Context, name: String) =
+        prefs(context).edit().putString("tts_voice", name).apply()
 
-    fun getTtsEnabled(context: Context): Boolean = getPrefs(context).getBoolean(KEY_TTS_ENABLED, true)
-    fun setTtsEnabled(context: Context, enabled: Boolean) = getPrefs(context).edit().putBoolean(KEY_TTS_ENABLED, enabled).apply()
-    fun getVoiceScreenshot(context: Context): Boolean = getPrefs(context).getBoolean(KEY_VOICE_SCREENSHOT, false)
-    fun setVoiceScreenshot(context: Context, enabled: Boolean) = getPrefs(context).edit().putBoolean(KEY_VOICE_SCREENSHOT, enabled).apply()
+    fun getTtsSpeechRate(context: Context): Float =
+        prefs(context).getFloat("tts_speech_rate", 1.0f)
 
-    fun getGeminiStt(context: Context): Boolean = getPrefs(context).getBoolean(KEY_GEMINI_STT, false)
-    fun setGeminiStt(context: Context, enabled: Boolean) = getPrefs(context).edit().putBoolean(KEY_GEMINI_STT, enabled).apply()
+    fun setTtsSpeechRate(context: Context, rate: Float) =
+        prefs(context).edit().putFloat("tts_speech_rate", rate).apply()
 
-    /** Silence timeout in ms. Default 1500 for Gemini, 1000 for on-device. */
-    fun getSilenceTimeout(context: Context): Long = getPrefs(context).getLong(KEY_SILENCE_TIMEOUT, 1500L)
-    fun setSilenceTimeout(context: Context, ms: Long) = getPrefs(context).edit().putLong(KEY_SILENCE_TIMEOUT, ms).apply()
+    fun getTtsPitch(context: Context): Float =
+        prefs(context).getFloat("tts_pitch", 1.0f)
 
-    fun getBeepsEnabled(context: Context): Boolean = getPrefs(context).getBoolean(KEY_BEEPS_ENABLED, true)
-    fun setBeepsEnabled(context: Context, enabled: Boolean) = getPrefs(context).edit().putBoolean(KEY_BEEPS_ENABLED, enabled).apply()
+    fun setTtsPitch(context: Context, pitch: Float) =
+        prefs(context).edit().putFloat("tts_pitch", pitch).apply()
 
-    fun getGeminiTts(context: Context): Boolean = getPrefs(context).getBoolean(KEY_GEMINI_TTS, false)
-    fun setGeminiTts(context: Context, enabled: Boolean) = getPrefs(context).edit().putBoolean(KEY_GEMINI_TTS, enabled).apply()
+    // ══════════════════════════════════════════════════════════════════════
+    // Gemini Settings (STT & TTS) — API key in encrypted storage
+    // ══════════════════════════════════════════════════════════════════════
 
-    fun getGeminiTtsVoice(context: Context): String? = getPrefs(context).getString(KEY_GEMINI_TTS_VOICE, null)
-    fun setGeminiTtsVoice(context: Context, voice: String) = getPrefs(context).edit().putString(KEY_GEMINI_TTS_VOICE, voice).apply()
+    fun getGeminiApiKey(context: Context): String? {
+        // First check encrypted storage
+        val secureKey = securePrefs(context).getString("gemini_api_key", null)
+        if (secureKey != null) return secureKey
+        
+        // Migration: check old plaintext location, move if found
+        val oldKey = prefs(context).getString("gemini_api_key", null)
+        if (oldKey != null) {
+            setGeminiApiKey(context, oldKey) // Moves to encrypted
+            prefs(context).edit().remove("gemini_api_key").apply() // Wipe plaintext
+            return oldKey
+        }
+        
+        return null
+    }
 
-    fun getGeminiApiKey(context: Context): String? = getPrefs(context).getString(KEY_GEMINI_API_KEY, null)
     fun setGeminiApiKey(context: Context, key: String?) {
-        if (key.isNullOrBlank()) {
-            getPrefs(context).edit().remove(KEY_GEMINI_API_KEY).apply()
-        } else {
-            getPrefs(context).edit().putString(KEY_GEMINI_API_KEY, key.trim()).apply()
-        }
+        val editor = securePrefs(context).edit()
+        if (key.isNullOrBlank()) editor.remove("gemini_api_key") 
+        else editor.putString("gemini_api_key", key.trim())
+        editor.apply()
     }
 
-    fun resetToDefaults(context: Context) {
-        getPrefs(context).edit().clear().apply()
-    }
+    fun getGeminiStt(context: Context): Boolean =
+        prefs(context).getBoolean("gemini_stt_enabled", false)
+
+    fun setGeminiStt(context: Context, enabled: Boolean) =
+        prefs(context).edit().putBoolean("gemini_stt_enabled", enabled).apply()
+
+    fun getGeminiTts(context: Context): Boolean =
+        prefs(context).getBoolean("gemini_tts_enabled", false)
+
+    fun setGeminiTts(context: Context, enabled: Boolean) =
+        prefs(context).edit().putBoolean("gemini_tts_enabled", enabled).apply()
+
+    fun getGeminiTtsVoice(context: Context): String? =
+        prefs(context).getString("gemini_tts_voice", null)
+
+    fun setGeminiTtsVoice(context: Context, voice: String) =
+        prefs(context).edit().putString("gemini_tts_voice", voice).apply()
+
+    fun getSilenceTimeout(context: Context): Long =
+        prefs(context).getLong("silence_timeout_ms", DEFAULT_SILENCE_TIMEOUT_MS)
+
+    fun setSilenceTimeout(context: Context, ms: Long) =
+        prefs(context).edit().putLong("silence_timeout_ms", ms).apply()
+
+    // ══════════════════════════════════════════════════════════════════════
+    // Avatar Settings
+    // ══════════════════════════════════════════════════════════════════════
+
+    fun getAvatarX(context: Context): Int =
+        prefs(context).getInt("avatar_x", -1)
+
+    fun setAvatarX(context: Context, x: Int) =
+        prefs(context).edit().putInt("avatar_x", x).apply()
+
+    fun getAvatarPosition(context: Context): String? =
+        prefs(context).getString("avatar_position", null)
+
+    fun setAvatarPosition(context: Context, pos: String) =
+        prefs(context).edit().putString("avatar_position", pos).apply()
+
+    // ══════════════════════════════════════════════════════════════════════
+    // Behavior Settings
+    // ══════════════════════════════════════════════════════════════════════
+
+    fun getAutoCopy(context: Context): Boolean =
+        prefs(context).getBoolean("auto_copy", false)
+
+    fun setAutoCopy(context: Context, enabled: Boolean) =
+        prefs(context).edit().putBoolean("auto_copy", enabled).apply()
+
+    fun getVolumeToggle(context: Context): Boolean =
+        prefs(context).getBoolean("volume_toggle_enabled", true)
+
+    fun setVolumeToggle(context: Context, enabled: Boolean) =
+        prefs(context).edit().putBoolean("volume_toggle_enabled", enabled).apply()
+
+    fun getBeepsEnabled(context: Context): Boolean =
+        prefs(context).getBoolean("beeps_enabled", true)
+
+    fun setBeepsEnabled(context: Context, enabled: Boolean) =
+        prefs(context).edit().putBoolean("beeps_enabled", enabled).apply()
+
+    fun getVoiceScreenshot(context: Context): Boolean =
+        prefs(context).getBoolean("voice_screenshot_enabled", false)
+
+    fun setVoiceScreenshot(context: Context, enabled: Boolean) =
+        prefs(context).edit().putBoolean("voice_screenshot_enabled", enabled).apply()
+
+    // ══════════════════════════════════════════════════════════════════════
+    // Utilities
+    // ══════════════════════════════════════════════════════════════════════
+
+    fun resetToDefaults(context: Context) =
+        prefs(context).edit().clear().apply()
 }

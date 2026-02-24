@@ -1,22 +1,182 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.CompanionOverlay" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+
+    <!-- ════════════════════════════════════════════════════════════════════
+         Base Theme
+         ════════════════════════════════════════════════════════════════════ -->
+
+    <style name="Theme.CompanionOverlay" parent="Theme.Material3.Dark.NoActionBar">
+        <!-- Primary: gold accent -->
         <item name="colorPrimary">#FFD700</item>
-        <item name="colorPrimaryVariant">#C7A600</item>
+        <item name="colorPrimaryContainer">#3D3000</item>
         <item name="colorOnPrimary">#1a1a1a</item>
-        <item name="colorSecondary">#FFD700</item>
-        <item name="colorSecondaryVariant">#C7A600</item>
+        <item name="colorOnPrimaryContainer">#FFE566</item>
+
+        <!-- Secondary: muted gold -->
+        <item name="colorSecondary">#C7A600</item>
+        <item name="colorSecondaryContainer">#2D2400</item>
         <item name="colorOnSecondary">#1a1a1a</item>
+        <item name="colorOnSecondaryContainer">#E8D066</item>
+
+        <!-- Surface: dark grays -->
+        <item name="colorSurface">#1a1a1a</item>
+        <item name="colorSurfaceVariant">#2a2a2a</item>
+        <item name="colorOnSurface">#e0e0e0</item>
+        <item name="colorOnSurfaceVariant">#999999</item>
+
+        <!-- Background -->
+        <item name="android:colorBackground">#1a1a1a</item>
+        <item name="colorOnBackground">#e0e0e0</item>
+
+        <!-- System bars -->
         <item name="android:statusBarColor">#1a1a1a</item>
         <item name="android:navigationBarColor">#1a1a1a</item>
-        <item name="android:windowBackground">#1a1a1a</item>
+        <item name="android:windowBackground">@color/background_dark</item>
+
+        <!-- Accent for legacy views -->
+        <item name="colorAccent">#FFD700</item>
+
+        <!-- Preference theming -->
+        <item name="preferenceTheme">@style/CompanionPreferenceTheme</item>
+
+        <!-- Default text colors -->
+        <item name="android:textColor">@color/text_primary</item>
+        <item name="android:textColorPrimary">@color/text_primary</item>
+        <item name="android:textColorSecondary">@color/text_secondary</item>
+
+        <!-- Transitions -->
+        <item name="android:windowActivityTransitions">true</item>
+        <item name="android:windowEnterTransition">@transition/fade_in</item>
+        <item name="android:windowExitTransition">@transition/fade_out</item>
+        <item name="android:windowSharedElementEnterTransition">@transition/shared_element</item>
+        <item name="android:windowSharedElementExitTransition">@transition/shared_element</item>
     </style>
 
-    <style name="Theme.Transparent" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+    <!-- ════════════════════════════════════════════════════════════════════
+         Transparent Theme (for AssistActivity)
+         ════════════════════════════════════════════════════════════════════ -->
+
+    <style name="Theme.Transparent" parent="Theme.Material3.Dark.NoActionBar">
         <item name="android:windowIsTranslucent">true</item>
         <item name="android:windowBackground">@android:color/transparent</item>
         <item name="android:windowNoTitle">true</item>
         <item name="android:windowContentOverlay">@null</item>
         <item name="android:backgroundDimEnabled">false</item>
     </style>
+
+    <!-- ════════════════════════════════════════════════════════════════════
+         Preference Theme
+         ════════════════════════════════════════════════════════════════════ -->
+
+    <style name="CompanionPreferenceTheme" parent="PreferenceThemeOverlay.v14.Material">
+        <item name="android:scrollbars">none</item>
+    </style>
+
+    <!-- ════════════════════════════════════════════════════════════════════
+         Button Styles
+         ════════════════════════════════════════════════════════════════════ -->
+
+    <style name="CompanionButton" parent="Widget.Material3.Button">
+        <item name="android:textColor">#1a1a1a</item>
+        <item name="backgroundTint">#FFD700</item>
+        <item name="cornerRadius">12dp</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:letterSpacing">0</item>
+    </style>
+
+    <style name="CompanionButton.Large" parent="CompanionButton">
+        <item name="android:paddingTop">14dp</item>
+        <item name="android:paddingBottom">14dp</item>
+        <item name="android:textSize">15sp</item>
+    </style>
+
+    <style name="CompanionButton.Secondary" parent="Widget.Material3.Button.OutlinedButton">
+        <item name="android:textColor">#FFD700</item>
+        <item name="strokeColor">#FFD700</item>
+        <item name="strokeWidth">1dp</item>
+        <item name="cornerRadius">12dp</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:letterSpacing">0</item>
+    </style>
+
+    <style name="CompanionButton.Text" parent="Widget.Material3.Button.TextButton">
+        <item name="android:textColor">#FFD700</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:letterSpacing">0</item>
+        <item name="rippleColor">#33FFD700</item>
+    </style>
+
+    <!-- ════════════════════════════════════════════════════════════════════
+         Card Styles
+         ════════════════════════════════════════════════════════════════════ -->
+
+    <style name="CompanionCard" parent="Widget.Material3.CardView.Filled">
+        <item name="cardBackgroundColor">#222222</item>
+        <item name="cardCornerRadius">16dp</item>
+        <item name="cardElevation">4dp</item>
+        <item name="strokeWidth">0dp</item>
+        <item name="rippleColor">#22FFD700</item>
+    </style>
+
+    <style name="CompanionCard.Flat" parent="CompanionCard">
+        <item name="cardElevation">0dp</item>
+    </style>
+
+    <!-- ════════════════════════════════════════════════════════════════════
+         Text Styles
+         ════════════════════════════════════════════════════════════════════ -->
+
+    <style name="TextAppearance.Companion.HeadlineLarge" parent="TextAppearance.Material3.HeadlineLarge">
+        <item name="android:textColor">#FFD700</item>
+        <item name="android:textSize">24sp</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <style name="TextAppearance.Companion.TitleMedium" parent="TextAppearance.Material3.TitleMedium">
+        <item name="android:textColor">#FFD700</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <style name="TextAppearance.Companion.BodyMedium" parent="TextAppearance.Material3.BodyMedium">
+        <item name="android:textColor">@color/text_secondary</item>
+        <item name="android:textSize">13sp</item>
+    </style>
+
+    <style name="TextAppearance.Companion.LabelSmall" parent="TextAppearance.Material3.LabelSmall">
+        <item name="android:textColor">#666666</item>
+        <item name="android:textSize">11sp</item>
+    </style>
+
+    <!-- ════════════════════════════════════════════════════════════════════
+         Dropdown Style
+         ════════════════════════════════════════════════════════════════════ -->
+
+    <style name="CompanionDropdown" parent="Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu">
+        <item name="boxStrokeColor">@color/dropdown_stroke</item>
+        <item name="boxStrokeWidth">1dp</item>
+        <item name="boxCornerRadiusTopStart">12dp</item>
+        <item name="boxCornerRadiusTopEnd">12dp</item>
+        <item name="boxCornerRadiusBottomStart">12dp</item>
+        <item name="boxCornerRadiusBottomEnd">12dp</item>
+        <item name="hintTextColor">#999999</item>
+        <item name="android:textColorHint">#999999</item>
+    </style>
+
+    <!-- ════════════════════════════════════════════════════════════════════
+         Dialog Theme
+         ════════════════════════════════════════════════════════════════════ -->
+
+    <style name="CompanionDialog" parent="ThemeOverlay.Material3.MaterialAlertDialog">
+        <item name="colorSurface">#252525</item>
+        <item name="colorOnSurface">#e0e0e0</item>
+        <item name="colorPrimary">#FFD700</item>
+        <item name="materialAlertDialogBodyTextStyle">@style/CompanionDialogBodyText</item>
+        <item name="dialogCornerRadius">20dp</item>
+    </style>
+
+    <style name="CompanionDialogBodyText" parent="MaterialAlertDialog.Material3.Body.Text">
+        <item name="android:textColor">#cccccc</item>
+    </style>
+
 </resources>

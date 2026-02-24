@@ -14,105 +14,75 @@ import android.provider.Settings
 import android.widget.Toast
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityWindowInfo
+import com.starfarer.companionoverlay.event.OverlayCoordinator
+import com.starfarer.companionoverlay.event.OverlayEvent
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.filterIsInstance
+import kotlinx.coroutines.launch
+import org.koin.android.ext.android.inject
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.Executors
 
+/**
+ * Accessibility service for screenshot capture and hardware key interception.
+ * 
+ * Communicates with other components via [OverlayCoordinator] instead of
+ * static instance references.
+ */
 class CompanionAccessibilityService : AccessibilityService() {
 
     companion object {
         private const val TAG = "A11y"
         private const val DOUBLE_TAP_WINDOW_MS = 400L
-
-        @Volatile
-        var instance: CompanionAccessibilityService? = null
-            private set
-
-        val isRunning: Boolean get() = instance != null
-
-        fun takeScreenshot(callback: (String?) -> Unit) {
-            val service = instance
-            if (service == null) {
-                DebugLog.log(TAG, "Service not running!")
-                callback(null)
-                return
-            }
-
-            DebugLog.log(TAG, "Taking screenshot via AccessibilityService...")
-
-            service.takeScreenshot(
-                Display.DEFAULT_DISPLAY,
-                Executors.newSingleThreadExecutor(),
-                object : TakeScreenshotCallback {
-                    override fun onSuccess(result: ScreenshotResult) {
-                        try {
-                            val hwBuffer = result.hardwareBuffer
-                            val colorSpace = result.colorSpace
-
-                            val bitmap = Bitmap.wrapHardwareBuffer(hwBuffer, colorSpace)
-                            hwBuffer.close()
-
-                            if (bitmap == null) {
-                                DebugLog.log(TAG, "Failed to create bitmap from HardwareBuffer")
-                                callback(null)
-                                return
-                            }
-
-                            DebugLog.log(TAG, "Got screenshot: ${bitmap.width}x${bitmap.height}")
-
-                            val maxDim = maxOf(bitmap.width, bitmap.height)
-                            val scale = if (maxDim > 1024) 1024f / maxDim else 1f
-                            val scaledBitmap = if (scale < 1f) {
-                                val sw = (bitmap.width * scale).toInt()
-                                val sh = (bitmap.height * scale).toInt()
-                                val softBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, false)
-                                bitmap.recycle()
-                                val scaled = Bitmap.createScaledBitmap(softBitmap, sw, sh, true)
-                                softBitmap.recycle()
-                                scaled
-                            } else {
-                                val softBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, false)
-                                bitmap.recycle()
-                                softBitmap
-                            }
-
-                            val outputStream = ByteArrayOutputStream()
-                            scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 80, outputStream)
-                            scaledBitmap.recycle()
-
-                            val base64 = Base64.encodeToString(
-                                outputStream.toByteArray(), Base64.NO_WRAP
-                            )
-                            DebugLog.log(TAG, "Screenshot base64 length: ${base64.length}")
-                            callback(base64)
-
-                        } catch (e: Exception) {
-                            DebugLog.log(TAG, "Screenshot processing error: ${e.message}")
-                            callback(null)
-                        }
-                    }
-
-                    override fun onFailure(errorCode: Int) {
-                        DebugLog.log(TAG, "Screenshot failed with error code: $errorCode")
-                        callback(null)
-                    }
-                }
-            )
-        }
     }
 
-    // Double-tap detection — greedy, eats all volume-down events
+    private val coordinator: OverlayCoordinator by inject()
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    
     private val handler = Handler(Looper.getMainLooper())
     private var tapCount = 0
     private var pendingVolumeDown: Runnable? = null
 
+    override fun onServiceConnected() {
+        super.onServiceConnected()
+        coordinator.onAccessibilityServiceConnected()
+
+        // Reinforce key event filtering programmatically (some OEMs ignore XML)
+        serviceInfo = serviceInfo.apply {
+            flags = flags or AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS
+        }
+
+        // Subscribe to screenshot requests
+        serviceScope.launch {
+            coordinator.events
+                .filterIsInstance<OverlayEvent.ScreenshotRequest>()
+                .collect { event ->
+                    takeScreenshotInternal { base64 ->
+                        coordinator.onScreenshotComplete(base64)
+                    }
+                }
+        }
+
+        DebugLog.log(TAG, "Senni's eyes are open~ (flags: ${serviceInfo.flags})")
+        val prefs = getSharedPreferences("companion_prompts", MODE_PRIVATE)
+        if (!prefs.getBoolean("accessibility_toast_shown", false)) {
+            prefs.edit().putBoolean("accessibility_toast_shown", true).apply()
+            Toast.makeText(this, "Accessibility enabled~ Reboot if volume button toggle doesn't work", Toast.LENGTH_LONG).show()
+        }
+    }
+
     override fun onKeyEvent(event: KeyEvent): Boolean {
-        // --- Shokz / headset button: toggle voice input ---
         DebugLog.log(TAG, "KEY: code=${event.keyCode} (${KeyEvent.keyCodeToString(event.keyCode)}) action=${event.action} device=${event.device?.name ?: "none"}")
+        
+        // --- Shokz / headset button: toggle voice input ---
         if (event.keyCode == KeyEvent.KEYCODE_HEADSETHOOK) {
             if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
-                if (CompanionOverlayService.isRunning) {
+                if (coordinator.overlayRunning.value) {
                     DebugLog.log(TAG, "Headset button → toggle voice")
-                    CompanionOverlayService.instance?.voiceController?.toggle()
+                    coordinator.toggleVoice()
                     return true
                 }
             }
@@ -134,8 +104,8 @@ class CompanionAccessibilityService : AccessibilityService() {
                 // Triple-tap — toggle voice input
                 DebugLog.log(TAG, "Triple-tap volume down → toggle voice")
                 tapCount = 0
-                if (CompanionOverlayService.isRunning) {
-                    CompanionOverlayService.instance?.voiceController?.toggle()
+                if (coordinator.overlayRunning.value) {
+                    coordinator.toggleVoice()
                 }
             } else {
                 // Wait to see if more taps are coming
@@ -170,9 +140,9 @@ class CompanionAccessibilityService : AccessibilityService() {
     }
 
     private fun toggleOverlay() {
-        if (CompanionOverlayService.isRunning) {
+        if (coordinator.overlayRunning.value) {
             DebugLog.log(TAG, "Hiding Senni~")
-            CompanionOverlayService.dismiss()
+            coordinator.dismissOverlay()
         } else {
             if (!Settings.canDrawOverlays(this)) {
                 DebugLog.log(TAG, "No overlay permission, ignoring toggle")
@@ -185,17 +155,67 @@ class CompanionAccessibilityService : AccessibilityService() {
         }
     }
 
-    override fun onServiceConnected() {
-        super.onServiceConnected()
-        instance = this
+    private fun takeScreenshotInternal(callback: (String?) -> Unit) {
+        DebugLog.log(TAG, "Taking screenshot via AccessibilityService...")
 
-        // Reinforce key event filtering programmatically (some OEMs ignore XML)
-        serviceInfo = serviceInfo.apply {
-            flags = flags or AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS
-        }
+        takeScreenshot(
+            Display.DEFAULT_DISPLAY,
+            Executors.newSingleThreadExecutor(),
+            object : TakeScreenshotCallback {
+                override fun onSuccess(result: ScreenshotResult) {
+                    try {
+                        val hwBuffer = result.hardwareBuffer
+                        val colorSpace = result.colorSpace
 
-        DebugLog.log(TAG, "Senni's eyes are open~ (flags: ${serviceInfo.flags})")
-        Toast.makeText(this, "Accessibility enabled~ Reboot if volume button toggle doesn't work", Toast.LENGTH_LONG).show()
+                        val bitmap = Bitmap.wrapHardwareBuffer(hwBuffer, colorSpace)
+                        hwBuffer.close()
+
+                        if (bitmap == null) {
+                            DebugLog.log(TAG, "Failed to create bitmap from HardwareBuffer")
+                            callback(null)
+                            return
+                        }
+
+                        DebugLog.log(TAG, "Got screenshot: ${bitmap.width}x${bitmap.height}")
+
+                        val maxDim = maxOf(bitmap.width, bitmap.height)
+                        val scale = if (maxDim > 1024) 1024f / maxDim else 1f
+                        val scaledBitmap = if (scale < 1f) {
+                            val sw = (bitmap.width * scale).toInt()
+                            val sh = (bitmap.height * scale).toInt()
+                            val softBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, false)
+                            bitmap.recycle()
+                            val scaled = Bitmap.createScaledBitmap(softBitmap, sw, sh, true)
+                            softBitmap.recycle()
+                            scaled
+                        } else {
+                            val softBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, false)
+                            bitmap.recycle()
+                            softBitmap
+                        }
+
+                        val outputStream = ByteArrayOutputStream()
+                        scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 80, outputStream)
+                        scaledBitmap.recycle()
+
+                        val base64 = Base64.encodeToString(
+                            outputStream.toByteArray(), Base64.NO_WRAP
+                        )
+                        DebugLog.log(TAG, "Screenshot base64 length: ${base64.length}")
+                        callback(base64)
+
+                    } catch (e: Exception) {
+                        DebugLog.log(TAG, "Screenshot processing error: ${e.message}")
+                        callback(null)
+                    }
+                }
+
+                override fun onFailure(errorCode: Int) {
+                    DebugLog.log(TAG, "Screenshot failed with error code: $errorCode")
+                    callback(null)
+                }
+            }
+        )
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -216,7 +236,7 @@ class CompanionAccessibilityService : AccessibilityService() {
             }
         }
         
-        CompanionOverlayService.instance?.setGhostMode(keyboardVisible)
+        coordinator.notifyKeyboardVisibility(keyboardVisible)
     }
 
     override fun onInterrupt() {
@@ -226,7 +246,8 @@ class CompanionAccessibilityService : AccessibilityService() {
     override fun onDestroy() {
         super.onDestroy()
         pendingVolumeDown?.let { handler.removeCallbacks(it) }
-        instance = null
+        serviceScope.cancel()
+        coordinator.onAccessibilityServiceDisconnected()
         DebugLog.log(TAG, "Senni's eyes are closed.")
     }
 }

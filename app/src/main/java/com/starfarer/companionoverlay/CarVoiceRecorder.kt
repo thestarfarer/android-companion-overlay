@@ -15,20 +15,21 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
-import java.io.DataOutputStream
 import java.util.concurrent.TimeUnit
-import kotlin.math.sqrt
 
 /**
- * Records from the car's microphone via CarAudioRecord, detects silence,
- * then transcribes via Gemini STT. Adapted from GeminiSpeechRecognizer.
+ * Records from the car's microphone via CarAudioRecord, detects silence
+ * with Silero VAD, then transcribes via Gemini STT.
+ *
+ * Uses the same Silero VAD + AudioUtils pipeline as GeminiSpeechRecognizer,
+ * adapted for CarAudioRecord's byte-oriented API.
  */
 class CarVoiceRecorder(private val carContext: CarContext) {
 
     companion object {
         private const val TAG = "CarVoice"
-        private const val SAMPLE_RATE = 16000 // CarAudioRecord fixed rate
-        private const val SILENCE_THRESHOLD = 500.0
+        private const val VAD_SPEECH_THRESHOLD = 0.5f
+        private const val CALIBRATION_MS = 400L
         private const val GEMINI_URL =
             "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
     }
@@ -40,6 +41,7 @@ class CarVoiceRecorder(private val carContext: CarContext) {
     private val handler = Handler(Looper.getMainLooper())
     private var record: CarAudioRecord? = null
     private var audioFocusRequest: AudioFocusRequest? = null
+    private var vad: SileroVadDetector? = null
     @Volatile private var recording = false
 
     private val httpClient = OkHttpClient.Builder()
@@ -48,13 +50,16 @@ class CarVoiceRecorder(private val carContext: CarContext) {
         .writeTimeout(30, TimeUnit.SECONDS)
         .build()
 
+    private fun getVad(): SileroVadDetector {
+        return vad ?: SileroVadDetector(carContext).also { vad = it }
+    }
+
     fun start() {
         if (recording) return
 
         val audioManager = carContext.getSystemService(AudioManager::class.java)
             ?: run { postError("No AudioManager"); return }
 
-        // Acquire exclusive audio focus (suppresses media)
         val attrs = AudioAttributes.Builder()
             .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
             .setUsage(USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
@@ -63,9 +68,7 @@ class CarVoiceRecorder(private val carContext: CarContext) {
         val focusReq = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
             .setAudioAttributes(attrs)
             .setOnAudioFocusChangeListener { state ->
-                if (state == AudioManager.AUDIOFOCUS_LOSS) {
-                    stop()
-                }
+                if (state == AudioManager.AUDIOFOCUS_LOSS) stop()
             }
             .build()
         audioFocusRequest = focusReq
@@ -87,25 +90,26 @@ class CarVoiceRecorder(private val carContext: CarContext) {
             return
         }
 
-        // Record on background thread
-        Thread {
-            recordAndProcess()
-        }.start()
+        Thread { recordAndProcess() }.start()
     }
 
     fun stop() {
         recording = false
-        try {
-            record?.stopRecording()
-        } catch (_: Exception) {}
+        try { record?.stopRecording() } catch (_: Exception) {}
     }
 
     private fun recordAndProcess() {
-        // Read in ~100ms chunks (3200 bytes = 1600 samples @ 16kHz 16-bit mono)
-        val buffer = ByteArray(SAMPLE_RATE * 2 / 10)
+        // Read in 512-sample chunks to match Silero VAD window size
+        val bytesPerWindow = SileroVadDetector.WINDOW_SAMPLES * 2  // 1024 bytes
+        val buffer = ByteArray(bytesPerWindow)
         val pcmData = ByteArrayOutputStream()
         var silenceStartMs = 0L
         var speechDetected = false
+        val startTime = System.currentTimeMillis()
+
+        val vadDetector = getVad()
+        vadDetector.reset()
+        DebugLog.log(TAG, "Silero VAD active")
 
         while (recording) {
             val bytesRead = try {
@@ -119,32 +123,35 @@ class CarVoiceRecorder(private val carContext: CarContext) {
 
             pcmData.write(buffer, 0, bytesRead)
 
-            // Compute RMS
-            var sum = 0.0
-            val samples = bytesRead / 2
-            for (i in 0 until samples) {
-                val lo = buffer[i * 2].toInt() and 0xFF
-                val hi = buffer[i * 2 + 1].toInt()
-                val sample = (hi shl 8) or lo
-                sum += (sample * sample).toDouble()
-            }
-            val rms = sqrt(sum / samples)
-
             val now = System.currentTimeMillis()
-            if (rms > SILENCE_THRESHOLD) {
+            val elapsed = now - startTime
+
+            // Convert bytes to shorts and run VAD
+            val shorts = AudioUtils.bytesToShorts(buffer, bytesRead)
+            val speechProb = if (shorts.size == SileroVadDetector.WINDOW_SAMPLES) {
+                vadDetector.detect(shorts)
+            } else {
+                val padded = shorts.copyOf(SileroVadDetector.WINDOW_SAMPLES)
+                vadDetector.detect(padded)
+            }
+
+            // Skip calibration period (beep bleed on car speakers)
+            if (elapsed < CALIBRATION_MS) continue
+
+            if (speechProb >= VAD_SPEECH_THRESHOLD) {
                 speechDetected = true
                 silenceStartMs = 0L
             } else {
                 if (silenceStartMs == 0L) {
                     silenceStartMs = now
                 } else if (speechDetected && now - silenceStartMs >= silenceTimeoutMs) {
-                    DebugLog.log(TAG, "Silence detected after speech")
+                    DebugLog.log(TAG, "VAD silence (${now - silenceStartMs}ms)")
                     break
                 }
             }
 
             // Safety: max 30s recording
-            if (pcmData.size() > SAMPLE_RATE * 2 * 30) {
+            if (pcmData.size() > AudioUtils.SAMPLE_RATE * 2 * 30) {
                 DebugLog.log(TAG, "Max recording length reached")
                 break
             }
@@ -155,14 +162,14 @@ class CarVoiceRecorder(private val carContext: CarContext) {
         releaseAudioFocus()
 
         val pcmBytes = pcmData.toByteArray()
-        if (!speechDetected || pcmBytes.size < SAMPLE_RATE) {
+        if (!speechDetected || pcmBytes.size < AudioUtils.SAMPLE_RATE) {
             DebugLog.log(TAG, "No speech detected (${pcmBytes.size} bytes)")
             postError("No speech detected")
             return
         }
 
-        DebugLog.log(TAG, "Captured ${pcmBytes.size} bytes (${pcmBytes.size / (SAMPLE_RATE * 2.0)}s)")
-        val wavData = pcmToWav(pcmBytes)
+        DebugLog.log(TAG, "Captured ${pcmBytes.size} bytes (${pcmBytes.size / (AudioUtils.SAMPLE_RATE * 2.0)}s)")
+        val wavData = AudioUtils.pcmToWav(pcmBytes)
         transcribeWithGemini(wavData)
     }
 
@@ -172,50 +179,6 @@ class CarVoiceRecorder(private val carContext: CarContext) {
                 ?.abandonAudioFocusRequest(req)
         }
         audioFocusRequest = null
-    }
-
-    private fun pcmToWav(pcmData: ByteArray): ByteArray {
-        val numChannels = 1
-        val bitsPerSample = 16
-        val byteRate = SAMPLE_RATE * numChannels * bitsPerSample / 8
-        val blockAlign = numChannels * bitsPerSample / 8
-        val dataSize = pcmData.size
-        val headerSize = 44
-
-        val out = ByteArrayOutputStream(headerSize + dataSize)
-        val dos = DataOutputStream(out)
-
-        // RIFF header
-        dos.writeBytes("RIFF")
-        dos.writeIntLE(dataSize + 36)
-        dos.writeBytes("WAVE")
-        // fmt chunk
-        dos.writeBytes("fmt ")
-        dos.writeIntLE(16) // chunk size
-        dos.writeShortLE(1) // PCM
-        dos.writeShortLE(numChannels)
-        dos.writeIntLE(SAMPLE_RATE)
-        dos.writeIntLE(byteRate)
-        dos.writeShortLE(blockAlign)
-        dos.writeShortLE(bitsPerSample)
-        // data chunk
-        dos.writeBytes("data")
-        dos.writeIntLE(dataSize)
-        dos.write(pcmData)
-
-        return out.toByteArray()
-    }
-
-    private fun DataOutputStream.writeIntLE(value: Int) {
-        write(value and 0xFF)
-        write((value shr 8) and 0xFF)
-        write((value shr 16) and 0xFF)
-        write((value shr 24) and 0xFF)
-    }
-
-    private fun DataOutputStream.writeShortLE(value: Int) {
-        write(value and 0xFF)
-        write((value shr 8) and 0xFF)
     }
 
     private fun transcribeWithGemini(wavData: ByteArray) {
@@ -260,13 +223,9 @@ class CarVoiceRecorder(private val carContext: CarContext) {
 
             val text = try {
                 JSONObject(responseBody ?: "{}")
-                    .getJSONArray("candidates")
-                    .getJSONObject(0)
-                    .getJSONObject("content")
-                    .getJSONArray("parts")
-                    .getJSONObject(0)
-                    .getString("text")
-                    .trim()
+                    .getJSONArray("candidates").getJSONObject(0)
+                    .getJSONObject("content").getJSONArray("parts")
+                    .getJSONObject(0).getString("text").trim()
             } catch (_: Exception) { "" }
 
             DebugLog.log(TAG, "Transcription: ${text.take(80)}")
@@ -276,10 +235,14 @@ class CarVoiceRecorder(private val carContext: CarContext) {
             } else {
                 postError("Empty transcription")
             }
-
         } catch (e: Exception) {
             postError("Network: ${e.message}")
         }
+    }
+
+    fun destroy() {
+        vad?.close()
+        vad = null
     }
 
     private fun postError(msg: String) {

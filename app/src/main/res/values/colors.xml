@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Background -->
+    <color name="background_dark">#1a1a1a</color>
+    <color name="surface_dark">#222222</color>
+    <color name="surface_variant">#2a2a2a</color>
+
+    <!-- Text -->
+    <color name="text_primary">#e0e0e0</color>
+    <color name="text_secondary">#999999</color>
+    <color name="text_hint">#666666</color>
+
+    <!-- Accent -->
+    <color name="gold">#FFD700</color>
+    <color name="gold_dim">#C7A600</color>
+    <color name="gold_ripple">#22FFD700</color>
+
+    <!-- Status -->
+    <color name="status_connected">#4CAF50</color>
+    <color name="status_warning">#FF9800</color>
+    <color name="status_error">#FF5722</color>
+
+    <!-- Dropdown stroke color selector -->
+    <color name="dropdown_stroke">#444444</color>
+</resources>
