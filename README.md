@@ -2,7 +2,10 @@
 
 An animated sprite companion powered by Claude AI that lives on your Android screen. Talk to her by voice, text, or screenshot — she talks back.
 
-<!-- TODO: add screenshot/demo GIF -->
+<p align="center">
+  <img src="docs/screenshots/screenshot-overlay.png" width="280" alt="Overlay">
+  <img src="docs/screenshots/screenshot-settings.png" width="280" alt="Settings">
+</p>
 
 ## Features
 
