@@ -126,6 +126,25 @@
 
     </PreferenceCategory>
 
+    <!-- ════════ MCP SERVERS ════════ -->
+    <PreferenceCategory app:iconSpaceReserved="false" app:title="MCP Servers">
+
+        <SwitchPreferenceCompat
+            app:iconSpaceReserved="false"
+            app:key="mcp_enabled"
+            app:title="Enable MCP tools"
+            app:summary="Connect to external tool servers using Model Context Protocol"
+            app:defaultValue="false"/>
+
+        <Preference
+            app:iconSpaceReserved="false"
+            app:key="mcp_manage_servers"
+            app:title="Manage servers"
+            app:summary="No servers configured"
+            app:dependency="mcp_enabled"/>
+
+    </PreferenceCategory>
+
     <!-- ════════ PERMISSIONS ════════ -->
     <PreferenceCategory app:iconSpaceReserved="false" app:title="Permissions">
 

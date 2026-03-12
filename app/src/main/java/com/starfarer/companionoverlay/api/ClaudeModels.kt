@@ -49,9 +49,11 @@ data class RequestMetadata(
 
 @Serializable
 data class Tool(
-    val type: String,
+    val type: String? = null,
     val name: String,
-    @SerialName("max_uses") val maxUses: Int? = null
+    @SerialName("max_uses") val maxUses: Int? = null,
+    val description: String? = null,
+    @SerialName("input_schema") val inputSchema: JsonObject? = null
 )
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -94,6 +96,23 @@ sealed class ContentBlock {
     @Serializable
     @SerialName("image")
     data class Image(val source: ImageSource) : ContentBlock()
+
+    @OptIn(ExperimentalSerializationApi::class)
+    @Serializable
+    @SerialName("tool_use")
+    data class ToolUse(
+        val id: String,
+        val name: String,
+        @EncodeDefault val input: JsonObject = JsonObject(emptyMap())
+    ) : ContentBlock()
+
+    @Serializable
+    @SerialName("tool_result")
+    data class ToolResult(
+        @SerialName("tool_use_id") val toolUseId: String,
+        val content: String,
+        @SerialName("is_error") val isError: Boolean = false
+    ) : ContentBlock()
 }
 
 @OptIn(ExperimentalSerializationApi::class)
@@ -124,12 +143,21 @@ data class ClaudeResponse(
         .filter { it.type == "text" }
         .mapNotNull { it.text }
         .joinToString("")
+
+    /** Check if the response requires tool execution. */
+    fun hasToolUse(): Boolean = stopReason == "tool_use"
+
+    /** Extract tool_use blocks from the response. */
+    fun toolUseBlocks(): List<ResponseBlock> = content.filter { it.type == "tool_use" }
 }
 
 @Serializable
 data class ResponseBlock(
     val type: String,
-    val text: String? = null
+    val text: String? = null,
+    val id: String? = null,
+    val name: String? = null,
+    val input: JsonObject? = null
 )
 
 @Serializable
@@ -169,7 +197,7 @@ object MessageContentSerializer : KSerializer<MessageContent> {
                 JsonPrimitive(value.text)
             )
             is MessageContent.Blocks -> jsonEncoder.encodeJsonElement(
-                Json.encodeToJsonElement(
+                jsonEncoder.json.encodeToJsonElement(
                     ListSerializer(ContentBlock.serializer()),
                     value.blocks
                 )
@@ -182,7 +210,7 @@ object MessageContentSerializer : KSerializer<MessageContent> {
         return when (val element = jsonDecoder.decodeJsonElement()) {
             is JsonPrimitive -> MessageContent.Text(element.content)
             is JsonArray -> MessageContent.Blocks(
-                Json.decodeFromJsonElement(
+                jsonDecoder.json.decodeFromJsonElement(
                     ListSerializer(ContentBlock.serializer()),
                     element
                 )

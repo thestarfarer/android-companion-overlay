@@ -3,6 +3,8 @@ package com.starfarer.companionoverlay.di
 import com.starfarer.companionoverlay.ClaudeApi
 import com.starfarer.companionoverlay.ClaudeAuth
 import com.starfarer.companionoverlay.event.OverlayCoordinator
+import com.starfarer.companionoverlay.mcp.McpManager
+import com.starfarer.companionoverlay.mcp.McpRepository
 import com.starfarer.companionoverlay.repository.PresetRepository
 import com.starfarer.companionoverlay.repository.SettingsRepository
 import okhttp3.OkHttpClient
@@ -44,4 +46,10 @@ val appModule = module {
     
     // API client depends on shared HTTP client, auth, and settings
     single { ClaudeApi(get(), get(), get()) }
+
+    // MCP server config persistence
+    single { McpRepository(get(named("settings")), get(named("auth"))) }
+
+    // MCP manager — coordinates all MCP server connections
+    single { McpManager(get(), get()) }
 }

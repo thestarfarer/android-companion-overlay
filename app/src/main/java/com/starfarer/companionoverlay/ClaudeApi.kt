@@ -89,7 +89,8 @@ class ClaudeApi(
     suspend fun sendConversation(
         messages: List<Message>,
         systemPrompt: String? = null,
-        webSearch: Boolean = false
+        webSearch: Boolean = false,
+        mcpTools: List<Tool> = emptyList()
     ): ApiResponse = withContext(Dispatchers.IO) {
         try {
             val model = settings.model
@@ -100,7 +101,7 @@ class ClaudeApi(
                     return@withContext ApiResponse.error("Claude API key not set")
                 }
                 DebugLog.log(TAG, "Sending conversation (${messages.size} messages, model=$model, mode=api_key)...")
-                buildApiKeyRequest(apiKey, messages, systemPrompt, model, webSearch)
+                buildApiKeyRequest(apiKey, messages, systemPrompt, model, webSearch, mcpTools)
             } else {
                 val token = auth.getValidToken()
                     ?: return@withContext ApiResponse.error("Not authenticated")
@@ -108,7 +109,7 @@ class ClaudeApi(
                 val firstUserText = messages.firstOrNull { it.role == "user" }
                     ?.content?.textContent() ?: ""
                 val billingHeader = ClaudeBilling.computeHeader(firstUserText)
-                buildOAuthRequest(token, messages, systemPrompt, model, webSearch, billingHeader)
+                buildOAuthRequest(token, messages, systemPrompt, model, webSearch, billingHeader, mcpTools)
             }
 
             DebugLog.log(TAG, "Executing request...")
@@ -130,7 +131,7 @@ class ClaudeApi(
             val responseText = claudeResponse.text()
             DebugLog.log(TAG, "Response text: ${responseText.take(100)}...")
 
-            ApiResponse.success(responseText)
+            ApiResponse.success(responseText, claudeResponse)
 
         } catch (e: CancellationException) {
             DebugLog.log(TAG, "Request cancelled")
@@ -160,7 +161,8 @@ class ClaudeApi(
         messages: List<Message>,
         systemPrompt: String?,
         model: String,
-        webSearch: Boolean
+        webSearch: Boolean,
+        mcpTools: List<Tool> = emptyList()
     ): Request {
         val systemBlocks = if (systemPrompt != null) {
             listOf(SystemBlock(text = systemPrompt))
@@ -168,13 +170,15 @@ class ClaudeApi(
             emptyList()
         }
 
-        val tools = if (webSearch) listOf(
-            Tool(type = "web_search_20250305", name = "web_search", maxUses = 5)
-        ) else null
+        val tools = buildList {
+            if (webSearch) add(Tool(type = "web_search_20250305", name = "web_search", maxUses = 5))
+            addAll(mcpTools)
+        }.ifEmpty { null }
 
+        val hasTools = webSearch || mcpTools.isNotEmpty()
         val requestBody = ClaudeRequest(
             model = model,
-            maxTokens = if (webSearch) 4096 else 512,
+            maxTokens = if (hasTools) 4096 else 512,
             system = systemBlocks,
             messages = messages,
             tools = tools
@@ -198,7 +202,8 @@ class ClaudeApi(
         systemPrompt: String?,
         model: String,
         webSearch: Boolean,
-        billingHeader: String
+        billingHeader: String,
+        mcpTools: List<Tool> = emptyList()
     ): Request {
         val systemBlocks = buildList {
             add(SystemBlock(text = billingHeader))
@@ -208,13 +213,15 @@ class ClaudeApi(
             }
         }
 
-        val tools = if (webSearch) listOf(
-            Tool(type = "web_search_20250305", name = "web_search", maxUses = 5)
-        ) else null
+        val tools = buildList {
+            if (webSearch) add(Tool(type = "web_search_20250305", name = "web_search", maxUses = 5))
+            addAll(mcpTools)
+        }.ifEmpty { null }
 
+        val hasTools = webSearch || mcpTools.isNotEmpty()
         val requestBody = ClaudeRequest(
             model = model,
-            maxTokens = if (webSearch) 4096 else 512,
+            maxTokens = if (hasTools) 4096 else 512,
             system = systemBlocks,
             messages = messages,
             metadata = RequestMetadata(userId = auth.buildMetadataUserId()),
@@ -258,10 +265,12 @@ class ClaudeApi(
         val success: Boolean,
         val text: String,
         val error: String? = null,
-        val cancelled: Boolean = false
+        val cancelled: Boolean = false,
+        val fullResponse: ClaudeResponse? = null
     ) {
         companion object {
-            fun success(text: String) = ApiResponse(true, text)
+            fun success(text: String, response: ClaudeResponse? = null) =
+                ApiResponse(true, text, fullResponse = response)
             fun error(message: String) = ApiResponse(false, "", message)
             fun cancelled() = ApiResponse(false, "", "Cancelled", cancelled = true)
         }
