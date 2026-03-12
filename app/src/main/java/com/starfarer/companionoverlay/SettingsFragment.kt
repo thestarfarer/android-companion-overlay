@@ -18,7 +18,15 @@ import androidx.preference.*
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
+import android.widget.LinearLayout
+import android.widget.RadioButton
+import android.widget.RadioGroup
 import com.starfarer.companionoverlay.event.OverlayCoordinator
+import com.starfarer.companionoverlay.mcp.McpAuthType
+import com.starfarer.companionoverlay.mcp.McpClient
+import com.starfarer.companionoverlay.mcp.McpManager
+import com.starfarer.companionoverlay.mcp.McpRepository
+import com.starfarer.companionoverlay.mcp.McpServerConfig
 import com.starfarer.companionoverlay.repository.SettingsRepository
 import kotlinx.coroutines.launch
 import org.koin.android.ext.android.inject
@@ -107,6 +115,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
         setupVolumeShortcut()
         setupVoiceOutput()
         setupConversationLists()
+        setupMcpServers()
         setupPermissions()
         setupAccount()
         setupAbout()
@@ -576,6 +585,281 @@ class SettingsFragment : PreferenceFragmentCompat() {
                     else "Connect to Claude first"
             }
         }
+    }
+
+    // ── MCP Servers ──
+
+    private fun setupMcpServers() {
+        findPreference<SwitchPreferenceCompat>("mcp_enabled")?.apply {
+            isChecked = settings.mcpEnabled
+            setOnPreferenceChangeListener { _, newValue ->
+                settings.mcpEnabled = newValue as Boolean
+                true
+            }
+        }
+
+        findPreference<Preference>("mcp_manage_servers")?.apply {
+            refreshMcpServersSummary(this)
+            setOnPreferenceClickListener {
+                showMcpServersDialog()
+                true
+            }
+        }
+    }
+
+    private fun refreshMcpServersSummary(pref: Preference? = findPreference("mcp_manage_servers")) {
+        pref ?: return
+        val mcpRepo: McpRepository by inject()
+        val servers = mcpRepo.loadServers()
+        pref.summary = if (servers.isEmpty()) "No servers configured"
+        else "${servers.size} server(s) configured"
+    }
+
+    private fun showMcpServersDialog() {
+        val ctx = context ?: return
+        val mcpRepo: McpRepository by inject()
+        val servers = mcpRepo.loadServers()
+
+        if (servers.isEmpty()) {
+            showMcpServerFormDialog(null)
+            return
+        }
+
+        val d = ctx.resources.displayMetrics.density
+        val pad = (20 * d).toInt()
+
+        val scrollView = android.widget.ScrollView(ctx)
+        val listContainer = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, (8 * d).toInt(), pad, 0)
+        }
+
+        for (server in servers) {
+            val row = LinearLayout(ctx).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(0, (8 * d).toInt(), 0, (8 * d).toInt())
+            }
+
+            val nameLabel = android.widget.TextView(ctx).apply {
+                text = server.name
+                textSize = 16f
+                layoutParams = LinearLayout.LayoutParams(
+                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f
+                )
+                setOnClickListener { showMcpServerFormDialog(server) }
+            }
+
+            val checkButton = android.widget.Button(ctx, null,
+                com.google.android.material.R.attr.borderlessButtonStyle).apply {
+                text = "Check"
+                textSize = 13f
+                minWidth = 0
+                minimumWidth = 0
+                setPadding((12 * d).toInt(), 0, (12 * d).toInt(), 0)
+                setOnClickListener { checkMcpServer(server) }
+            }
+
+            row.addView(nameLabel)
+            row.addView(checkButton)
+            listContainer.addView(row)
+        }
+
+        scrollView.addView(listContainer)
+
+        MaterialAlertDialogBuilder(ctx, R.style.CompanionDialog)
+            .setTitle("MCP Servers")
+            .setView(scrollView)
+            .setPositiveButton("Add server") { _, _ ->
+                showMcpServerFormDialog(null)
+            }
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
+    private fun checkMcpServer(config: McpServerConfig) {
+        val ctx = context ?: return
+        val mcpRepo: McpRepository by inject()
+        val baseClient: okhttp3.OkHttpClient by inject()
+
+        Toast.makeText(ctx, "Connecting to ${config.name}...", Toast.LENGTH_SHORT).show()
+
+        lifecycleScope.launch {
+            val client = McpClient(
+                baseClient = baseClient,
+                config = config,
+                secretProvider = { mcpRepo.getClientSecret(config.id) }
+            )
+
+            val result = client.initialize()
+            client.disconnect()
+
+            if (result.isSuccess) {
+                val tools = result.getOrDefault(emptyList())
+                val toolList = if (tools.isEmpty()) "No tools found."
+                else tools.joinToString("\n") { "• ${it.name}" +
+                    (it.description?.let { d -> " — $d" } ?: "") }
+
+                MaterialAlertDialogBuilder(ctx, R.style.CompanionDialog)
+                    .setTitle("${config.name} — ${tools.size} tools")
+                    .setMessage(toolList)
+                    .setPositiveButton("OK", null)
+                    .show()
+            } else {
+                val error = result.exceptionOrNull()?.message ?: "Unknown error"
+                MaterialAlertDialogBuilder(ctx, R.style.CompanionDialog)
+                    .setTitle("${config.name} — Failed")
+                    .setMessage(error)
+                    .setPositiveButton("OK", null)
+                    .show()
+            }
+        }
+    }
+
+    private fun showMcpServerFormDialog(existing: McpServerConfig?) {
+        val ctx = context ?: return
+        val mcpRepo: McpRepository by inject()
+        val d = ctx.resources.displayMetrics.density
+        val pad = (20 * d).toInt()
+        val r = 12 * d
+
+        val container = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, (12 * d).toInt(), pad, 0)
+        }
+
+        // Name field
+        val nameLayout = TextInputLayout(ctx, null,
+            com.google.android.material.R.attr.textInputOutlinedStyle).apply {
+            hint = "Server name"
+            setBoxCornerRadii(r, r, r, r)
+        }
+        val nameEdit = TextInputEditText(nameLayout.context).apply {
+            isSingleLine = true
+            setText(existing?.name ?: "")
+        }
+        nameLayout.addView(nameEdit)
+        container.addView(nameLayout)
+
+        // URL field
+        val urlLayout = TextInputLayout(ctx, null,
+            com.google.android.material.R.attr.textInputOutlinedStyle).apply {
+            hint = "Server URL (https://...)"
+            setBoxCornerRadii(r, r, r, r)
+        }
+        val urlEdit = TextInputEditText(urlLayout.context).apply {
+            isSingleLine = true
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                android.text.InputType.TYPE_TEXT_VARIATION_URI
+            setText(existing?.url ?: "")
+        }
+        urlLayout.addView(urlEdit)
+        container.addView(urlLayout)
+
+        // Auth type radio group
+        val radioGroup = RadioGroup(ctx).apply {
+            orientation = RadioGroup.VERTICAL
+            setPadding(0, (8 * d).toInt(), 0, (8 * d).toInt())
+        }
+        val radioNone = RadioButton(ctx).apply {
+            text = "No auth"
+            id = android.view.View.generateViewId()
+        }
+        val radioCredentials = RadioButton(ctx).apply {
+            text = "Client Credentials"
+            id = android.view.View.generateViewId()
+        }
+        radioGroup.addView(radioNone)
+        radioGroup.addView(radioCredentials)
+        container.addView(radioGroup)
+
+        // Client ID field
+        val clientIdLayout = TextInputLayout(ctx, null,
+            com.google.android.material.R.attr.textInputOutlinedStyle).apply {
+            hint = "Client ID"
+            setBoxCornerRadii(r, r, r, r)
+            visibility = if (existing?.authType == McpAuthType.CLIENT_CREDENTIALS)
+                android.view.View.VISIBLE else android.view.View.GONE
+        }
+        val clientIdEdit = TextInputEditText(clientIdLayout.context).apply {
+            isSingleLine = true
+            setText(existing?.clientId ?: "")
+        }
+        clientIdLayout.addView(clientIdEdit)
+        container.addView(clientIdLayout)
+
+        // Client Secret field
+        val secretLayout = TextInputLayout(ctx, null,
+            com.google.android.material.R.attr.textInputOutlinedStyle).apply {
+            hint = "Client Secret"
+            endIconMode = TextInputLayout.END_ICON_PASSWORD_TOGGLE
+            setBoxCornerRadii(r, r, r, r)
+            visibility = clientIdLayout.visibility
+        }
+        val secretEdit = TextInputEditText(secretLayout.context).apply {
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            isSingleLine = true
+        }
+        secretLayout.addView(secretEdit)
+        container.addView(secretLayout)
+
+        // Set initial radio selection and toggle credential fields
+        if (existing?.authType == McpAuthType.CLIENT_CREDENTIALS) {
+            radioGroup.check(radioCredentials.id)
+        } else {
+            radioGroup.check(radioNone.id)
+        }
+
+        radioGroup.setOnCheckedChangeListener { _, checkedId ->
+            val showCreds = checkedId == radioCredentials.id
+            val vis = if (showCreds) android.view.View.VISIBLE else android.view.View.GONE
+            clientIdLayout.visibility = vis
+            secretLayout.visibility = vis
+        }
+
+        val builder = MaterialAlertDialogBuilder(ctx, R.style.CompanionDialog)
+            .setTitle(if (existing != null) "Edit Server" else "Add MCP Server")
+            .setView(container)
+            .setPositiveButton("Save") { _, _ ->
+                val name = nameEdit.text?.toString()?.trim() ?: return@setPositiveButton
+                val url = urlEdit.text?.toString()?.trim() ?: return@setPositiveButton
+                if (name.isBlank() || url.isBlank()) return@setPositiveButton
+
+                val authType = if (radioGroup.checkedRadioButtonId == radioCredentials.id)
+                    McpAuthType.CLIENT_CREDENTIALS else McpAuthType.NONE
+
+                val config = McpServerConfig(
+                    id = existing?.id ?: java.util.UUID.randomUUID().toString(),
+                    name = name,
+                    url = url,
+                    authType = authType,
+                    clientId = clientIdEdit.text?.toString()?.trim()?.ifBlank { null },
+                    enabled = existing?.enabled ?: true
+                )
+
+                val secret = secretEdit.text?.toString()?.trim()?.ifBlank { null }
+
+                if (existing != null) {
+                    mcpRepo.updateServer(config, secret)
+                } else {
+                    mcpRepo.addServer(config, secret)
+                }
+
+                refreshMcpServersSummary()
+            }
+            .setNegativeButton("Cancel", null)
+
+        if (existing != null) {
+            builder.setNeutralButton("Delete") { _, _ ->
+                mcpRepo.removeServer(existing.id)
+                refreshMcpServersSummary()
+                Toast.makeText(ctx, "Server removed", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        builder.show()
+        nameEdit.requestFocus()
     }
 
     // ── Helpers ──

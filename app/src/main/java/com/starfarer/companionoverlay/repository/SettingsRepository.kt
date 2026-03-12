@@ -169,6 +169,14 @@ class SettingsRepository(
         set(value) = settingsPrefs.edit().putBoolean(KEY_VOICE_SCREENSHOT, value).apply()
 
     // ══════════════════════════════════════════════════════════════════════
+    // MCP
+    // ══════════════════════════════════════════════════════════════════════
+
+    var mcpEnabled: Boolean
+        get() = settingsPrefs.getBoolean(KEY_MCP_ENABLED, false)
+        set(value) = settingsPrefs.edit().putBoolean(KEY_MCP_ENABLED, value).apply()
+
+    // ══════════════════════════════════════════════════════════════════════
     // Utilities
     // ══════════════════════════════════════════════════════════════════════
 
@@ -204,5 +212,6 @@ class SettingsRepository(
         private const val KEY_VOLUME_TOGGLE = "volume_toggle_enabled"
         private const val KEY_BEEPS_ENABLED = "beeps_enabled"
         private const val KEY_VOICE_SCREENSHOT = "voice_screenshot_enabled"
+        private const val KEY_MCP_ENABLED = "mcp_enabled"
     }
 }

@@ -4,8 +4,10 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import com.starfarer.companionoverlay.api.*
+import com.starfarer.companionoverlay.mcp.McpManager
 import com.starfarer.companionoverlay.repository.SettingsRepository
 import kotlinx.coroutines.*
+import kotlinx.serialization.json.JsonObject
 import java.util.Collections
 
 /**
@@ -33,7 +35,8 @@ class ConversationManager(
     private val context: Context,
     private val claudeApi: ClaudeApi,
     private val settings: SettingsRepository,
-    private val storage: ConversationStorage
+    private val storage: ConversationStorage,
+    private val mcpManager: McpManager
 ) {
     companion object {
         private const val TAG = "Conversation"
@@ -44,6 +47,7 @@ class ConversationManager(
         fun onResponseReceived(text: String)
         fun onError(message: String)
         fun onCancelled()
+        fun onToolUseProgress(toolNames: List<String>) {}
     }
 
     var listener: Listener? = null
@@ -144,24 +148,98 @@ class ConversationManager(
                 }
                 val systemPrompt = settings.systemPrompt
                 val webSearch = settings.webSearchEnabled
+                val mcpTools = if (settings.mcpEnabled) mcpManager.getClaudeTools() else emptyList()
 
-                DebugLog.log(TAG, "Sending (${allMessages.size} messages, webSearch=$webSearch)")
+                DebugLog.log(TAG, "Sending (${allMessages.size} messages, " +
+                    "webSearch=$webSearch, mcpTools=${mcpTools.size})")
 
-                val response = withContext(Dispatchers.IO) {
-                    claudeApi.sendConversation(allMessages, systemPrompt, webSearch)
+                var messages = allMessages
+                var iterations = 0
+                val maxIterations = 10
+
+                while (iterations < maxIterations) {
+                    iterations++
+
+                    val response = withContext(Dispatchers.IO) {
+                        claudeApi.sendConversation(messages, systemPrompt, webSearch, mcpTools)
+                    }
+
+                    when {
+                        response.cancelled -> {
+                            DebugLog.log(TAG, "Request cancelled")
+                            listener?.onCancelled()
+                            return@launch
+                        }
+                        !response.success -> {
+                            DebugLog.log(TAG, "API error: ${response.error}")
+                            listener?.onError(response.error ?: "Unknown error")
+                            return@launch
+                        }
+                    }
+
+                    val fullResponse = response.fullResponse
+                    if (fullResponse != null && fullResponse.hasToolUse()) {
+                        val toolUseBlocks = fullResponse.toolUseBlocks()
+                        DebugLog.log(TAG, "Tool use: ${toolUseBlocks.size} calls " +
+                            "(iteration $iterations)")
+
+                        listener?.onToolUseProgress(toolUseBlocks.mapNotNull { it.name })
+
+                        // Build assistant message with the full response content
+                        val assistantMsg = Message(
+                            role = "assistant",
+                            content = MessageContent.Blocks(
+                                fullResponse.content.mapNotNull { block ->
+                                    when (block.type) {
+                                        "tool_use" -> ContentBlock.ToolUse(
+                                            id = block.id!!,
+                                            name = block.name!!,
+                                            input = block.input ?: JsonObject(emptyMap())
+                                        )
+                                        "text" -> ContentBlock.Text(block.text ?: "")
+                                        else -> null
+                                    }
+                                }
+                            )
+                        )
+
+                        // Execute each tool call
+                        val toolResults = mutableListOf<ContentBlock>()
+                        for (toolBlock in toolUseBlocks) {
+                            val result = mcpManager.executeTool(
+                                toolBlock.name!!,
+                                toolBlock.input
+                            )
+                            toolResults.add(ContentBlock.ToolResult(
+                                toolUseId = toolBlock.id!!,
+                                content = result.content,
+                                isError = result.isError
+                            ))
+                        }
+
+                        // Build tool_result user message
+                        val toolResultMsg = Message(
+                            role = "user",
+                            content = MessageContent.Blocks(toolResults)
+                        )
+
+                        messages = messages + assistantMsg + toolResultMsg
+                    } else {
+                        // Final response — no more tool use
+                        // Collect all new messages beyond the original history
+                        val historySize = synchronized(conversationHistory) {
+                            conversationHistory.size
+                        }
+                        val newMessages = messages.drop(historySize) +
+                            assistantMessage(response.text)
+                        handleSuccess(newMessages, response.text)
+                        return@launch
+                    }
                 }
 
-                when {
-                    response.success -> handleSuccess(userMessage, response.text)
-                    response.cancelled -> {
-                        DebugLog.log(TAG, "Request cancelled")
-                        listener?.onCancelled()
-                    }
-                    else -> {
-                        DebugLog.log(TAG, "API error: ${response.error}")
-                        listener?.onError(response.error ?: "Unknown error")
-                    }
-                }
+                DebugLog.log(TAG, "Tool use loop exceeded $maxIterations iterations")
+                listener?.onError("Tool execution limit reached")
+
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -171,14 +249,12 @@ class ConversationManager(
         }
     }
 
-    private fun handleSuccess(userMessage: Message, responseText: String) {
+    private fun handleSuccess(newMessages: List<Message>, responseText: String) {
         synchronized(conversationHistory) {
-            conversationHistory.add(userMessage)
-            conversationHistory.add(assistantMessage(responseText))
+            conversationHistory.addAll(newMessages)
 
             val maxMessages = settings.maxMessages
             while (conversationHistory.size > maxMessages) {
-                conversationHistory.removeAt(0)
                 conversationHistory.removeAt(0)
             }
         }

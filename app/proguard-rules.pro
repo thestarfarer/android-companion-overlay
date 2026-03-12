@@ -33,6 +33,9 @@
 # API models
 -keep class com.starfarer.companionoverlay.api.** { *; }
 
+# MCP models
+-keep class com.starfarer.companionoverlay.mcp.** { *; }
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Architecture Components
 # ═══════════════════════════════════════════════════════════════════════════

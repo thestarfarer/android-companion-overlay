@@ -28,7 +28,7 @@ val overlayModule = module {
     single { ConversationStorage(androidContext()) }
 
     // ConversationManager — factory scoped to each service lifecycle
-    factory { ConversationManager(androidContext(), get(), get(), get()) }
+    factory { ConversationManager(androidContext(), get(), get(), get(), get()) }
 
     // ScreenshotManager — stateless, takes only context and coordinator
     factory { ScreenshotManager(androidContext(), get()) }

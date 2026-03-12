@@ -18,6 +18,7 @@ import android.widget.ImageView
 import androidx.core.app.NotificationCompat
 import com.starfarer.companionoverlay.event.OverlayCoordinator
 import com.starfarer.companionoverlay.event.OverlayEvent
+import com.starfarer.companionoverlay.mcp.McpManager
 import com.starfarer.companionoverlay.repository.SettingsRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -61,6 +62,7 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
     private val settings: SettingsRepository by inject()
     private val beepManager: BeepManager by inject()
     private val httpClient: okhttp3.OkHttpClient by inject()
+    private val mcpManager: McpManager by inject()
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
@@ -191,6 +193,20 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
         }
 
         voiceController = VoiceInputController(this, this, settings, beepManager, httpClient)
+
+        // Initialize MCP servers if enabled
+        if (settings.mcpEnabled) {
+            serviceScope.launch {
+                val results = mcpManager.initializeAll()
+                val totalTools = results.values.sumOf {
+                    it.getOrDefault(emptyList()).size
+                }
+                val failCount = results.values.count { it.isFailure }
+                if (totalTools > 0 || failCount > 0) {
+                    DebugLog.log("Overlay", "MCP: $totalTools tools, $failCount failures")
+                }
+            }
+        }
     }
 
     private fun subscribeToEvents() {
@@ -412,6 +428,11 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
 
     override fun onCancelled() {
         pendingVoiceReply = false
+    }
+
+    override fun onToolUseProgress(toolNames: List<String>) {
+        val toolList = toolNames.joinToString(", ")
+        bubbleManager.showBrief("Using tools: $toolList...", 30000L)
     }
 
     // ══════════════════════════════════════════════════════════════════════
