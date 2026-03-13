@@ -115,7 +115,7 @@ class VoiceInputController(
     private fun startListening() {
         state = State.LISTENING
         host.stopTtsAndCancel()
-        host.showVoiceBubble("Starting...")
+        host.hideVoiceBubble()
 
         val routed = btRouter.routeToBluetoothHeadset()
         DebugLog.log(TAG, "BT audio routing: ${if (routed) "active" else "using built-in mic"}")
@@ -150,7 +150,7 @@ class VoiceInputController(
         setOnStopped: (() -> Unit) -> Unit
     ) {
         setOnReady {
-            val label = if (useGemini) "🎤 Recording..." else "Listening..."
+            val label = if (useGemini) "🎙 Recording..." else "🎙 Listening..."
             handler.post {
                 host.showVoiceBubble(label)
                 if (beepsEnabled) beepManager.play(BeepManager.Beep.READY)
@@ -160,7 +160,7 @@ class VoiceInputController(
         setOnPartial { partial ->
             handler.post {
                 host.updateVoiceBubble(partial)
-                if (partial == "Transcribing...") {
+                if (partial == "✒️ Transcribing...") {
                     btRouter.clearRouting()
                     if (beepsEnabled) handler.postDelayed({ beepManager.play(BeepManager.Beep.STEP) }, BT_CLEAR_DELAY_MS)
                 }
