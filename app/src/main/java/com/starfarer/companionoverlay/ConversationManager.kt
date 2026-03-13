@@ -115,7 +115,7 @@ class ConversationManager(
     /** Get conversation context for STT (helps Gemini understand domain terms). */
     fun getContextForStt(): String {
         val recent = synchronized(conversationHistory) {
-            conversationHistory.takeLast(6)
+            conversationHistory.takeLast(3)
         }
         if (recent.isEmpty()) return ""
 
@@ -124,7 +124,7 @@ class ConversationManager(
                 val text = msg.content.textContent()
                 if (text.isNotBlank()) {
                     val label = if (msg.role == "assistant") "Assistant" else "User"
-                    appendLine("$label: ${text.take(200)}")
+                    appendLine("$label: ${text.take(100)}")
                 }
             }
         }.trim()
@@ -256,6 +256,11 @@ class ConversationManager(
             val maxMessages = settings.maxMessages
             while (conversationHistory.size > maxMessages) {
                 conversationHistory.removeAt(0)
+                // Keep removing until first message is a user message without tool_results
+                while (conversationHistory.isNotEmpty() &&
+                    (conversationHistory.first().role != "user" || hasToolResults(conversationHistory.first()))) {
+                    conversationHistory.removeAt(0)
+                }
             }
         }
 
@@ -270,6 +275,11 @@ class ConversationManager(
         }
 
         listener?.onResponseReceived(responseText)
+    }
+
+    private fun hasToolResults(msg: Message): Boolean = when (msg.content) {
+        is MessageContent.Blocks -> msg.content.blocks.any { it is ContentBlock.ToolResult }
+        else -> false
     }
 
     // ══════════════════════════════════════════════════════════════════════
