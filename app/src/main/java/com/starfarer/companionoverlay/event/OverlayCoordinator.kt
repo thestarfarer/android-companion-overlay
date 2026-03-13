@@ -97,6 +97,12 @@ class OverlayCoordinator {
         }
     }
 
+    fun reloadSprites() {
+        if (_overlayRunning.value) {
+            _events.tryEmit(OverlayEvent.ReloadSprites)
+        }
+    }
+
     // ══════════════════════════════════════════════════════════════════════
     // Screenshot flow
     // ══════════════════════════════════════════════════════════════════════
