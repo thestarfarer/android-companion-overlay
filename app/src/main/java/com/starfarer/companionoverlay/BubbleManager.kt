@@ -57,14 +57,14 @@ class BubbleManager(
         val bubble = TextView(context).apply {
             text = message
             setTextColor(colors.text)
-            textSize = 14f
-            background = BubbleStyle.background(colors, 24f, d)
-            val pad = (12 * d).toInt()
+            textSize = 13f
+            background = BubbleStyle.toastBackground(colors, 20f, d)
+            val pad = (10 * d).toInt()
             setPadding(pad + 8, pad, pad + 8, pad)
-            gravity = Gravity.CENTER
+            gravity = Gravity.START
         }
 
-        val bubbleParams = BubbleStyle.bottomCenterParams(d)
+        val bubbleParams = BubbleStyle.topRightEdgeParams(d)
 
         try {
             bubble.alpha = 0f
@@ -231,16 +231,16 @@ class BubbleManager(
         val colors = BubbleStyle.colors(context)
 
         val bubble = TextView(context).apply {
-            this.text = "\uD83C\uDF99 $text"
+            this.text = text
             setTextColor(colors.text)
             textSize = 13f
-            background = BubbleStyle.background(colors, 20f, d)
+            background = BubbleStyle.toastBackground(colors, 20f, d)
             val pad = (10 * d).toInt()
             setPadding(pad + 8, pad, pad + 8, pad)
-            gravity = Gravity.CENTER
+            gravity = Gravity.START
         }
 
-        val params = BubbleStyle.bottomCenterParams(d)
+        val params = BubbleStyle.topRightEdgeParams(d)
 
         try {
             bubble.alpha = 0f
@@ -255,7 +255,7 @@ class BubbleManager(
     }
 
     fun updateVoice(text: String) {
-        voiceBubble?.text = "\uD83C\uDF99 $text"
+        voiceBubble?.text = text
     }
 
     fun hideVoice() {
