@@ -134,12 +134,6 @@ class SpritePreviewAnimator(
 
     /** Clear all cached frames. Call when preset list changes. */
     fun clearCache() {
-        cache.values.forEach { entry ->
-            entry.sheet.first?.recycle()
-            entry.sheet.second?.recycle()
-            entry.idleFrames.forEach { it.recycle() }
-            entry.walkFrames.forEach { it.recycle() }
-        }
         cache.clear()
         loading.clear()
     }
