@@ -147,6 +147,31 @@ class McpManager(
         }
     }
 
+    /**
+     * Call a named tool on every connected server that has it.
+     * Used for broadcast-style events like Nexus session summaries.
+     */
+    suspend fun emitEventToAll(
+        toolName: String,
+        arguments: JsonObject
+    ): List<ToolExecutionResult> = withContext(Dispatchers.IO) {
+        val matchingEntries = toolRegistry.filter {
+            it.key.endsWith("${TOOL_SEPARATOR}$toolName")
+        }
+        if (matchingEntries.isEmpty()) {
+            DebugLog.log(TAG, "No servers have tool '$toolName'")
+            return@withContext emptyList()
+        }
+
+        DebugLog.log(TAG, "Emitting '$toolName' to ${matchingEntries.size} server(s)")
+        val results = mutableListOf<ToolExecutionResult>()
+        for ((qualifiedName, _) in matchingEntries) {
+            val result = executeTool(qualifiedName, arguments)
+            results.add(result)
+        }
+        results
+    }
+
     fun disconnectAll() {
         clients.values.forEach { it.disconnect() }
         clients.clear()
