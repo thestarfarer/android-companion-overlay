@@ -40,6 +40,30 @@ object BubbleStyle {
         }
     }
 
+    /** Edge-anchored toast background: rounded on left, flat on right. */
+    fun toastBackground(colors: Colors, cornerRadiusDp: Float, density: Float): GradientDrawable {
+        val r = cornerRadiusDp * density
+        return GradientDrawable().apply {
+            setColor(colors.bgWithAlpha)
+            cornerRadii = floatArrayOf(r, r, 0f, 0f, 0f, 0f, r, r)
+        }
+    }
+
+    /** Top-right edge-anchored params for brief/voice toasts. */
+    fun topRightEdgeParams(density: Float): WindowManager.LayoutParams {
+        return WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.RIGHT
+            y = (60 * density).toInt()
+        }
+    }
+
     /** Standard bottom-center overlay params for brief/voice bubbles. */
     fun bottomCenterParams(density: Float): WindowManager.LayoutParams {
         return WindowManager.LayoutParams(
