@@ -144,6 +144,14 @@
             app:defaultValue="true"
             app:dependency="mcp_enabled"/>
 
+        <SwitchPreferenceCompat
+            app:iconSpaceReserved="false"
+            app:key="nexus_integration_enabled"
+            app:title="Nexus integration"
+            app:summary="Send session summaries to servers with nexus_emit_event"
+            app:defaultValue="false"
+            app:dependency="mcp_enabled"/>
+
         <Preference
             app:iconSpaceReserved="false"
             app:key="mcp_manage_servers"

@@ -63,7 +63,8 @@ data class Tool(
 @Serializable
 data class Message(
     val role: String,
-    val content: @Serializable(with = MessageContentSerializer::class) MessageContent
+    val content: @Serializable(with = MessageContentSerializer::class) MessageContent,
+    val timestamp: Long = 0L
 )
 
 /**
@@ -227,7 +228,8 @@ object MessageContentSerializer : KSerializer<MessageContent> {
 /** Build a text-only user message. */
 fun textMessage(text: String): Message = Message(
     role = "user",
-    content = MessageContent.Text(text)
+    content = MessageContent.Text(text),
+    timestamp = System.currentTimeMillis()
 )
 
 /** Build a user message with an image and optional text. */
@@ -236,11 +238,13 @@ fun screenshotMessage(imageBase64: String, text: String): Message = Message(
     content = MessageContent.Blocks(listOf(
         ContentBlock.Image(ImageSource(data = imageBase64)),
         ContentBlock.Text(text)
-    ))
+    )),
+    timestamp = System.currentTimeMillis()
 )
 
 /** Build an assistant message from response text. */
 fun assistantMessage(text: String): Message = Message(
     role = "assistant",
-    content = MessageContent.Text(text)
+    content = MessageContent.Text(text),
+    timestamp = System.currentTimeMillis()
 )

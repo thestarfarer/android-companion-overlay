@@ -7,7 +7,11 @@ import com.starfarer.companionoverlay.api.*
 import com.starfarer.companionoverlay.mcp.McpManager
 import com.starfarer.companionoverlay.repository.SettingsRepository
 import kotlinx.coroutines.*
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.Json
 import java.util.Collections
 
 /**
@@ -60,6 +64,8 @@ class ConversationManager(
     @Volatile
     private var activeJob: Job? = null
 
+    private var messagesSinceLastEmit = 0
+
     /** The last assistant message, for bubble reopen. */
     @Volatile
     var lastAssistantMessage: String? = null
@@ -108,6 +114,7 @@ class ConversationManager(
     fun clearHistory() {
         conversationHistory.clear()
         lastAssistantMessage = null
+        messagesSinceLastEmit = 0
         scope.launch { storage.clear() }
         DebugLog.log(TAG, "History cleared")
     }
@@ -200,7 +207,8 @@ class ConversationManager(
                                         else -> null
                                     }
                                 }
-                            )
+                            ),
+                            timestamp = System.currentTimeMillis()
                         )
 
                         // Execute each tool call
@@ -220,7 +228,8 @@ class ConversationManager(
                         // Build tool_result user message
                         val toolResultMsg = Message(
                             role = "user",
-                            content = MessageContent.Blocks(toolResults)
+                            content = MessageContent.Blocks(toolResults),
+                            timestamp = System.currentTimeMillis()
                         )
 
                         messages = messages + assistantMsg + toolResultMsg
@@ -267,6 +276,12 @@ class ConversationManager(
         lastAssistantMessage = responseText
         DebugLog.log(TAG, "Response: ${responseText.take(60)}...")
 
+        messagesSinceLastEmit += newMessages.size
+        if (messagesSinceLastEmit >= 20) {
+            messagesSinceLastEmit = 0
+            maybeEmitNexus()
+        }
+
         saveHistory()
 
         if (settings.autoCopy) {
@@ -275,6 +290,46 @@ class ConversationManager(
         }
 
         listener?.onResponseReceived(responseText)
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // Nexus integration
+    // ══════════════════════════════════════════════════════════════════════
+
+    private fun maybeEmitNexus() {
+        if (!settings.nexusIntegrationEnabled || !settings.mcpEnabled) return
+        val last20 = synchronized(conversationHistory) {
+            conversationHistory.takeLast(20)
+        }
+        scope.launch {
+            try {
+                val payload = buildNexusPayload(last20)
+                val results = mcpManager.emitEventToAll("nexus_emit_event", payload)
+                val errors = results.filter { it.isError }
+                if (errors.isNotEmpty()) {
+                    DebugLog.log(TAG, "Nexus emit errors: ${errors.map { it.content }}")
+                    listener?.onError("Nexus sync failed")
+                }
+            } catch (e: Exception) {
+                DebugLog.log(TAG, "Nexus emit failed: ${e.message}")
+                listener?.onError("Nexus sync failed: ${e.message}")
+            }
+        }
+    }
+
+    private fun buildNexusPayload(messages: List<Message>): JsonObject {
+        val messagesJson = messages.map { msg ->
+            buildJsonObject {
+                put("role", msg.role)
+                put("text", msg.content.textContent())
+                put("timestamp", msg.timestamp)
+            }
+        }
+        return buildJsonObject {
+            put("event_type", "session_summary")
+            put("category", "conversation_history")
+            put("payload", Json.encodeToString(messagesJson))
+        }
     }
 
     private fun hasToolResults(msg: Message): Boolean = when (msg.content) {

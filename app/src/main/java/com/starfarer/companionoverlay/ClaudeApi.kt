@@ -176,11 +176,12 @@ class ClaudeApi(
         }.ifEmpty { null }
 
         val hasTools = webSearch || mcpTools.isNotEmpty()
+        val cleanMessages = messages.map { it.copy(timestamp = 0L) }
         val requestBody = ClaudeRequest(
             model = model,
             maxTokens = if (hasTools) 4096 else 512,
             system = systemBlocks,
-            messages = messages,
+            messages = cleanMessages,
             tools = tools
         )
 
@@ -219,11 +220,12 @@ class ClaudeApi(
         }.ifEmpty { null }
 
         val hasTools = webSearch || mcpTools.isNotEmpty()
+        val cleanMessages = messages.map { it.copy(timestamp = 0L) }
         val requestBody = ClaudeRequest(
             model = model,
             maxTokens = if (hasTools) 4096 else 512,
             system = systemBlocks,
-            messages = messages,
+            messages = cleanMessages,
             metadata = RequestMetadata(userId = auth.buildMetadataUserId()),
             tools = tools
         )
