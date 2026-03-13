@@ -431,6 +431,7 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
     }
 
     override fun onToolUseProgress(toolNames: List<String>) {
+        if (!settings.mcpShowToolBubbles) return
         val toolList = toolNames.joinToString(", ")
         bubbleManager.showBrief("Using tools: $toolList...", 30000L)
     }

@@ -136,6 +136,14 @@
             app:summary="Connect to external tool servers using Model Context Protocol"
             app:defaultValue="false"/>
 
+        <SwitchPreferenceCompat
+            app:iconSpaceReserved="false"
+            app:key="mcp_show_tool_bubbles"
+            app:title="Show tool use bubbles"
+            app:summary="Display a notification when MCP tools are being used"
+            app:defaultValue="true"
+            app:dependency="mcp_enabled"/>
+
         <Preference
             app:iconSpaceReserved="false"
             app:key="mcp_manage_servers"
