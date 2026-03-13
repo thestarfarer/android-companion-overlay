@@ -175,6 +175,61 @@ class McpClient(
         val request = requestBuilder.build()
         val response = httpClient.newCall(request).execute()
 
+        // On 400 (invalid session) — clear session so next call re-initializes
+        if (response.code == 400) {
+            val errorBody = response.body?.string() ?: ""
+            response.close()
+            sessionId = null
+            initialized = false
+            return JsonRpcResponse(
+                id = id,
+                error = JsonRpcError(code = 400, message = "Session invalid: $errorBody")
+            )
+        }
+
+        // On 401 — clear token and session, retry once with fresh credentials
+        if (response.code == 401 && config.authType == McpAuthType.CLIENT_CREDENTIALS) {
+            response.close()
+            cachedToken = null
+            tokenExpiresAt = 0
+            sessionId = null
+            initialized = false
+
+            val freshAuth = getAuthHeader()
+            if (freshAuth != null) {
+                val retryBuilder = Request.Builder()
+                    .url(config.url)
+                    .post(bodyJson.toRequestBody("application/json".toMediaType()))
+                    .header("Content-Type", "application/json")
+                    .header("Accept", "application/json, text/event-stream")
+                    .header("Authorization", freshAuth)
+                // Don't send old session ID on retry
+
+                val retryResponse = httpClient.newCall(retryBuilder.build()).execute()
+                retryResponse.header("Mcp-Session-Id")?.let { sessionId = it }
+                val retryBody = retryResponse.body?.string() ?: ""
+
+                if (!retryResponse.isSuccessful) {
+                    return JsonRpcResponse(
+                        id = id,
+                        error = JsonRpcError(code = retryResponse.code, message = "HTTP ${retryResponse.code}: $retryBody")
+                    )
+                }
+
+                val contentType = retryResponse.header("Content-Type") ?: ""
+                return if (contentType.contains("text/event-stream")) {
+                    parseSseResponse(retryBody, id)
+                } else {
+                    json.decodeFromString<JsonRpcResponse>(retryBody)
+                }
+            }
+
+            return JsonRpcResponse(
+                id = id,
+                error = JsonRpcError(code = 401, message = "Auth failed after retry")
+            )
+        }
+
         response.header("Mcp-Session-Id")?.let { sessionId = it }
 
         val responseBody = response.body?.string() ?: ""
@@ -197,7 +252,6 @@ class McpClient(
             json.decodeFromString<JsonRpcResponse>(responseBody)
         }
     }
-
     private fun sendNotification(method: String, params: JsonObject? = null) {
         val notification = JsonRpcNotification(method = method, params = params)
         val bodyJson = json.encodeToString(notification)
