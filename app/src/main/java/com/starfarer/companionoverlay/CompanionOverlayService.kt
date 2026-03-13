@@ -377,7 +377,7 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
 
     private fun sendScreenshot(imageBase64: String, voiceText: String?) {
         audioCoordinator.playBeep(BeepManager.Beep.STEP)
-        bubbleManager.showBrief("Thinking...", 30000L)
+        bubbleManager.showBrief("🧠 Thinking...", 30000L)
         conversationManager.sendWithScreenshot(imageBase64, voiceText)
     }
 
@@ -385,7 +385,7 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
         bubbleManager.cancelPendingDismiss()
         bubbleManager.hideSpeechBubble()
         audioCoordinator.playBeep(BeepManager.Beep.STEP)
-        bubbleManager.showBrief("Thinking...", 30000L)
+        bubbleManager.showBrief("🧠 Thinking...", 30000L)
         conversationManager.sendText(text)
     }
 
@@ -433,7 +433,7 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
     override fun onToolUseProgress(toolNames: List<String>) {
         if (!settings.mcpShowToolBubbles) return
         val toolList = toolNames.joinToString(", ")
-        bubbleManager.showBrief("Using tools: $toolList...", 30000L)
+        bubbleManager.showBrief("🔧 $toolList", 30000L)
     }
 
     // ══════════════════════════════════════════════════════════════════════

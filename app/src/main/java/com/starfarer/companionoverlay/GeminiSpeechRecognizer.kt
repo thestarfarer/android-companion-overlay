@@ -242,7 +242,7 @@ class GeminiSpeechRecognizer(
         }
 
         DebugLog.log(TAG, "Captured ${pcmData.size} bytes PCM (${pcmData.size / (SAMPLE_RATE * 2.0)}s)")
-        handler.post { onPartialResult?.invoke("Transcribing...") }
+        handler.post { onPartialResult?.invoke("✒️ Transcribing...") }
 
         // Convert to WAV and send to Gemini
         transcribeWithGemini(AudioUtils.pcmToWav(pcmData))
