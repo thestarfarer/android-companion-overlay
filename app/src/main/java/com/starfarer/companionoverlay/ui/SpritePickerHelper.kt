@@ -85,36 +85,17 @@ class SpritePickerHelper(private val activity: Activity) {
         val builder = MaterialAlertDialogBuilder(activity, R.style.CompanionDialog)
             .setTitle("${type.replaceFirstChar { it.uppercase() }} Sprite")
             .setView(container)
-            .setPositiveButton("Pick Image") { _, _ ->
+            .setPositiveButton("Save") { _, _ ->
+                onResult(Result.SaveCount(frameCount))
+            }
+            .setNeutralButton("Pick Image") { _, _ ->
                 onResult(Result.PickImage(frameCount))
             }
-            .setNegativeButton("Cancel") { _, _ ->
-                onResult(Result.Cancelled)
+            .setNegativeButton(if (hasCustomSprite) "Reset" else "Cancel") { _, _ ->
+                if (hasCustomSprite) onResult(Result.Reset)
+                else onResult(Result.Cancelled)
             }
 
-        // Only show Save if count changed
-        if (hasCustomSprite) {
-            builder.setNeutralButton("Reset") { _, _ ->
-                onResult(Result.Reset)
-            }
-        }
-
-        val dialog = builder.create()
-
-        // Add "Save Count" action if frame count changes
-        dialog.setOnShowListener {
-            seekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
-                    frameCount = progress.coerceAtLeast(1)
-                    frameLabel.text = "Frames: $frameCount"
-                }
-                override fun onStartTrackingTouch(sb: SeekBar?) {}
-                override fun onStopTrackingTouch(sb: SeekBar?) {
-                    // Could update button text here if needed
-                }
-            })
-        }
-
-        dialog.show()
+        builder.show()
     }
 }
