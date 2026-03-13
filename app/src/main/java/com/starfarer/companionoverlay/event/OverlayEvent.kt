@@ -54,4 +54,11 @@ sealed class OverlayEvent {
 
     /** Request overlay dismissal with animation. */
     data object DismissOverlay : OverlayEvent()
+
+    // ══════════════════════════════════════════════════════════════════════
+    // Sprite
+    // ══════════════════════════════════════════════════════════════════════
+
+    /** Sprite sheets changed — overlay service should reload. */
+    data object ReloadSprites : OverlayEvent()
 }

@@ -181,6 +181,7 @@ class MainActivity : AppCompatActivity() {
             override fun onPageSelected(position: Int) {
                 viewModel.selectPreset(position)
                 spriteAnimator.setCurrentPosition(position)
+                coordinator.reloadSprites()
             }
         })
     }
@@ -383,6 +384,7 @@ class MainActivity : AppCompatActivity() {
     private fun createPreset() {
         viewModel.createPreset()
         spriteAnimator.clearCache()
+        coordinator.reloadSprites()
         renameActivePreset()
     }
 
@@ -398,6 +400,7 @@ class MainActivity : AppCompatActivity() {
         presetDialogHelper.showDeleteConfirmation(preset.name) {
             viewModel.deleteActivePreset()
             spriteAnimator.clearCache()
+            coordinator.reloadSprites()
         }
     }
 
@@ -426,6 +429,7 @@ class MainActivity : AppCompatActivity() {
                         else p.copy(walkFrameCount = result.frameCount)
                     }
                     spriteAnimator.clearCache()
+                    coordinator.reloadSprites()
                     Toast.makeText(this, "Saved~", Toast.LENGTH_SHORT).show()
                 }
                 is SpritePickerHelper.Result.Reset -> {
@@ -437,6 +441,7 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
                     spriteAnimator.clearCache()
+                    coordinator.reloadSprites()
                     Toast.makeText(this, "Reset to default~", Toast.LENGTH_SHORT).show()
                 }
                 is SpritePickerHelper.Result.Cancelled -> { /* Do nothing */ }
@@ -460,6 +465,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         spriteAnimator.clearCache()
+        coordinator.reloadSprites()
         Toast.makeText(this, "Sprite updated~", Toast.LENGTH_SHORT).show()
     }
 
