@@ -160,8 +160,9 @@ class VoiceInputController(
         setOnPartial { partial ->
             handler.post {
                 host.updateVoiceBubble(partial)
-                if (partial == "Transcribing..." && beepsEnabled) {
-                    beepManager.play(BeepManager.Beep.STEP)
+                if (partial == "Transcribing...") {
+                    btRouter.clearRouting()
+                    if (beepsEnabled) handler.postDelayed({ beepManager.play(BeepManager.Beep.STEP) }, BT_CLEAR_DELAY_MS)
                 }
             }
         }
@@ -173,7 +174,7 @@ class VoiceInputController(
                 host.hideVoiceBubble()
                 startSafetyTimeout()
                 host.sendVoiceInput(text)
-                handler.postDelayed({ btRouter.clearRouting() }, BT_CLEAR_DELAY_MS)
+                btRouter.clearRouting()
             }
         }
 
