@@ -235,12 +235,9 @@ class ConversationManager(
                         messages = messages + assistantMsg + toolResultMsg
                     } else {
                         // Final response — no more tool use
-                        // Collect all new messages beyond the original history
-                        val historySize = synchronized(conversationHistory) {
-                            conversationHistory.size
-                        }
-                        val newMessages = messages.drop(historySize) +
-                            assistantMessage(response.text)
+                        // Only persist user message + final text, not tool intermediates
+                        val userMsg = allMessages.last()
+                        val newMessages = listOf(userMsg, assistantMessage(response.text))
                         handleSuccess(newMessages, response.text)
                         return@launch
                     }
