@@ -160,7 +160,7 @@ class ConversationManager(
                 DebugLog.log(TAG, "Sending (${allMessages.size} messages, " +
                     "webSearch=$webSearch, mcpTools=${mcpTools.size})")
 
-                var messages = allMessages
+                var messages = sanitizeToolMessages(allMessages)
                 var iterations = 0
                 val maxIterations = 10
 
@@ -332,6 +332,59 @@ class ConversationManager(
     private fun hasToolResults(msg: Message): Boolean = when (msg.content) {
         is MessageContent.Blocks -> msg.content.blocks.any { it is ContentBlock.ToolResult }
         else -> false
+    }
+
+
+    // ══════════════════════════════════════════════════════════════════════
+    // Message Sanitization
+    // ══════════════════════════════════════════════════════════════════════
+
+    /**
+     * Strip orphaned tool_use and tool_result blocks from the message list.
+     * A tool_use is orphaned if no user message has a matching tool_result.
+     * A tool_result is orphaned if no assistant message has a matching tool_use.
+     * Messages left empty after stripping are removed entirely.
+     */
+    private fun sanitizeToolMessages(messages: List<Message>): List<Message> {
+        val toolUseIds = mutableSetOf<String>()
+        val toolResultIds = mutableSetOf<String>()
+
+        for (msg in messages) {
+            val blocks = (msg.content as? MessageContent.Blocks)?.blocks ?: continue
+            for (block in blocks) {
+                when (block) {
+                    is ContentBlock.ToolUse -> toolUseIds.add(block.id)
+                    is ContentBlock.ToolResult -> toolResultIds.add(block.toolUseId)
+                    else -> {}
+                }
+            }
+        }
+
+        val matched = toolUseIds.intersect(toolResultIds)
+
+        if (matched.size == toolUseIds.size && matched.size == toolResultIds.size) {
+            return messages
+        }
+
+        val orphanCount = (toolUseIds.size - matched.size) + (toolResultIds.size - matched.size)
+        DebugLog.log(TAG, "Sanitizing: $orphanCount orphaned tool blocks removed")
+
+        return messages.mapNotNull { msg ->
+            when (val content = msg.content) {
+                is MessageContent.Blocks -> {
+                    val cleaned = content.blocks.filter { block ->
+                        when (block) {
+                            is ContentBlock.ToolUse -> block.id in matched
+                            is ContentBlock.ToolResult -> block.toolUseId in matched
+                            else -> true
+                        }
+                    }
+                    if (cleaned.isEmpty()) null
+                    else msg.copy(content = MessageContent.Blocks(cleaned))
+                }
+                else -> msg
+            }
+        }
     }
 
     // ══════════════════════════════════════════════════════════════════════
