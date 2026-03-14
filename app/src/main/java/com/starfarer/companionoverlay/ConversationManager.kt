@@ -14,6 +14,8 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.Json
 import java.util.Collections
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 
 class ConversationManager(
     private val context: Context,
@@ -196,7 +198,8 @@ class ConversationManager(
                 val allMessages = synchronized(conversationHistory) {
                     conversationHistory.toList() + userMessage
                 }
-                val basePrompt = settings.systemPrompt
+                val now = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm (EEEE)"))
+                val basePrompt = "[Current time: $now]\n\n" + settings.systemPrompt
                 val asyncResults = if (settings.mcpEnabled && settings.nexusIntegrationEnabled) asyncPoller?.drainResults() ?: emptyList() else emptyList()
                 val systemPrompt = if (asyncResults.isNotEmpty()) {
                     val resultText = asyncResults.joinToString("\n\n") { it.content }
