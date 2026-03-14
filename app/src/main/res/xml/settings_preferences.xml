@@ -148,7 +148,7 @@
             app:iconSpaceReserved="false"
             app:key="nexus_integration_enabled"
             app:title="Nexus integration"
-            app:summary="Send session summaries to servers with nexus_emit_event"
+            app:summary="Use nexus_emit_event and nexus_poll_results if available on servers"
             app:defaultValue="false"
             app:dependency="mcp_enabled"/>
 

@@ -205,6 +205,7 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
                 if (totalTools > 0 || failCount > 0) {
                     DebugLog.log("Overlay", "MCP: $totalTools tools, $failCount failures")
                 }
+                conversationManager.startAsyncPolling()
             }
         }
     }
@@ -434,6 +435,10 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
         if (!settings.mcpShowToolBubbles) return
         val toolList = toolNames.joinToString(", ")
         bubbleManager.showBrief("🔧 $toolList", 30000L)
+    }
+
+    override fun onAsyncResultsInjecting() {
+        bubbleManager.showBrief("📨 Queue results...", 30000L)
     }
 
     // ══════════════════════════════════════════════════════════════════════

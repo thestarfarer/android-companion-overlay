@@ -5,6 +5,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import com.starfarer.companionoverlay.api.*
 import com.starfarer.companionoverlay.mcp.McpManager
+import com.starfarer.companionoverlay.mcp.AsyncResultPoller
 import com.starfarer.companionoverlay.repository.SettingsRepository
 import kotlinx.coroutines.*
 import kotlinx.serialization.encodeToString
@@ -14,27 +15,6 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.Json
 import java.util.Collections
 
-/**
- * Manages conversation state and Claude API interactions.
- *
- * Responsibilities:
- * - Conversation history (in-memory + file-based persistence via [ConversationStorage])
- * - Building API requests (text-only and with images)
- * - Sending to Claude and parsing responses
- * - Auto-copy to clipboard
- *
- * Messages are stored as typed [Message] objects from [ClaudeModels],
- * serialized to disk via kotlinx.serialization.
- *
- * Threading: The conversation history is wrapped in [Collections.synchronizedList]
- * so access is safe from any thread. All public methods are safe to call from
- * any thread. Callbacks are always dispatched to the main thread.
- *
- * Lifecycle: Created fresh by the overlay module each time the service starts.
- * Call [destroy] in the service's onDestroy to cancel in-flight work and
- * release the coroutine scope. The scope is not resurrected — a new instance
- * is created on the next service start.
- */
 class ConversationManager(
     private val context: Context,
     private val claudeApi: ClaudeApi,
@@ -44,14 +24,16 @@ class ConversationManager(
 ) {
     companion object {
         private const val TAG = "Conversation"
+        private const val SILENCE_TIMEOUT_MS = 60_000L
+        private const val WATCHER_INTERVAL_MS = 10_000L
     }
 
-    /** Callback interface for conversation events. */
     interface Listener {
         fun onResponseReceived(text: String)
         fun onError(message: String)
         fun onCancelled()
         fun onToolUseProgress(toolNames: List<String>) {}
+        fun onAsyncResultsInjecting() {}
     }
 
     var listener: Listener? = null
@@ -64,41 +46,38 @@ class ConversationManager(
     @Volatile
     private var activeJob: Job? = null
 
-    private var messagesSinceLastEmit = 0
+    @Volatile
+    private var lastUserMessageTime: Long = System.currentTimeMillis()
 
-    /** The last assistant message, for bubble reopen. */
+    private var resultWatcherJob: Job? = null
+    private var messagesSinceLastEmit = 0
+    private var asyncPoller: AsyncResultPoller? = null
+
     @Volatile
     var lastAssistantMessage: String? = null
         private set
 
     init {
         restoreHistory()
+        startResultWatcher()
     }
 
     // ══════════════════════════════════════════════════════════════════════
     // Public API
     // ══════════════════════════════════════════════════════════════════════
 
-    /**
-     * Send a text-only message to Claude.
-     * Cancels any in-flight request.
-     */
     fun sendText(text: String) {
+        lastUserMessageTime = System.currentTimeMillis()
         cancelPending()
         sendMessage(textMessage(text))
     }
 
-    /**
-     * Send a message with an attached screenshot.
-     * @param imageBase64 JPEG image data, base64 encoded
-     * @param text Optional voice/text overlay on the image context
-     */
     fun sendWithScreenshot(imageBase64: String, text: String? = null) {
+        lastUserMessageTime = System.currentTimeMillis()
         cancelPending()
         sendMessage(screenshotMessage(imageBase64, text ?: settings.userMessage))
     }
 
-    /** Cancel any in-flight API request. */
     fun cancelPending() {
         activeJob?.let { job ->
             if (job.isActive) {
@@ -110,7 +89,6 @@ class ConversationManager(
         activeJob = null
     }
 
-    /** Clear conversation history (both in-memory and persisted). */
     fun clearHistory() {
         conversationHistory.clear()
         lastAssistantMessage = null
@@ -119,7 +97,14 @@ class ConversationManager(
         DebugLog.log(TAG, "History cleared")
     }
 
-    /** Get conversation context for STT (helps Gemini understand domain terms). */
+    /** Called by the service after MCP initialization. Creates and starts the async result poller. */
+    fun startAsyncPolling() {
+        asyncPoller?.destroy()
+        asyncPoller = null
+        if (!settings.nexusIntegrationEnabled) return
+        asyncPoller = AsyncResultPoller(mcpManager).also { it.start() }
+    }
+
     fun getContextForStt(): String {
         val recent = synchronized(conversationHistory) {
             conversationHistory.takeLast(3)
@@ -139,8 +124,66 @@ class ConversationManager(
 
     fun destroy() {
         cancelPending()
+        resultWatcherJob?.cancel()
+        asyncPoller?.destroy()
+        asyncPoller = null
+        resultWatcherJob = null
         listener = null
         supervisorJob.cancel()
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // Async Result Watcher
+    // ══════════════════════════════════════════════════════════════════════
+
+    /**
+     * Watches for pending async results (agent, round table) and injects them
+     * into the conversation after a silence period. If the user hasn't sent
+     * a message in [SILENCE_TIMEOUT_MS] and results are waiting, Senni speaks
+     * up unprompted.
+     */
+    private fun startResultWatcher() {
+        resultWatcherJob = scope.launch {
+            while (isActive) {
+                delay(WATCHER_INTERVAL_MS)
+                try {
+                    if (!settings.mcpEnabled || !settings.nexusIntegrationEnabled) continue
+                    if (asyncPoller?.hasPendingResults() != true) continue
+                    if (activeJob?.isActive == true) continue
+
+                    val silence = System.currentTimeMillis() - lastUserMessageTime
+                    if (silence < SILENCE_TIMEOUT_MS) continue
+
+                    injectPendingResults()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    DebugLog.log(TAG, "Result watcher error: ${e.message}")
+                }
+            }
+        }
+    }
+
+    /**
+     * Drain pending results and send them as a synthetic turn.
+     * The model sees the results as context arriving between conversation
+     * turns and responds naturally — Senni sharing news she just received.
+     */
+    private fun injectPendingResults() {
+        val results = asyncPoller?.drainResults() ?: emptyList()
+        if (results.isEmpty()) return
+
+        val resultText = results.joinToString("\n\n") { it.content }
+        DebugLog.log(TAG, "Injecting ${results.size} async result(s) after silence")
+        listener?.onAsyncResultsInjecting()
+
+        // Send as a synthetic user message that the model understands
+        // is system-initiated, not human-typed
+        val synthetic = textMessage(
+            "[System: Async job results arrived]\n$resultText\n[React to these results naturally. The user didn't type this — it arrived from a background task you dispatched earlier.]"
+        )
+        lastUserMessageTime = System.currentTimeMillis()
+        sendMessage(synthetic)
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -153,7 +196,13 @@ class ConversationManager(
                 val allMessages = synchronized(conversationHistory) {
                     conversationHistory.toList() + userMessage
                 }
-                val systemPrompt = settings.systemPrompt
+                val basePrompt = settings.systemPrompt
+                val asyncResults = if (settings.mcpEnabled && settings.nexusIntegrationEnabled) asyncPoller?.drainResults() ?: emptyList() else emptyList()
+                val systemPrompt = if (asyncResults.isNotEmpty()) {
+                    val resultText = asyncResults.joinToString("\n\n") { it.content }
+                    DebugLog.log(TAG, "Injecting ${asyncResults.size} async result(s) into context")
+                    basePrompt + "\n\n[Async results arrived while you were talking]\n" + resultText
+                } else basePrompt
                 val webSearch = settings.webSearchEnabled
                 val mcpTools = if (settings.mcpEnabled) mcpManager.getClaudeTools() else emptyList()
 
@@ -192,7 +241,6 @@ class ConversationManager(
 
                         listener?.onToolUseProgress(toolUseBlocks.mapNotNull { it.name })
 
-                        // Build assistant message with the full response content
                         val assistantMsg = Message(
                             role = "assistant",
                             content = MessageContent.Blocks(
@@ -207,11 +255,9 @@ class ConversationManager(
                                         else -> null
                                     }
                                 }
-                            ),
-                            timestamp = System.currentTimeMillis()
+                            )
                         )
 
-                        // Execute each tool call
                         val toolResults = mutableListOf<ContentBlock>()
                         for (toolBlock in toolUseBlocks) {
                             val result = mcpManager.executeTool(
@@ -225,16 +271,13 @@ class ConversationManager(
                             ))
                         }
 
-                        // Build tool_result user message
                         val toolResultMsg = Message(
                             role = "user",
-                            content = MessageContent.Blocks(toolResults),
-                            timestamp = System.currentTimeMillis()
+                            content = MessageContent.Blocks(toolResults)
                         )
 
                         messages = messages + assistantMsg + toolResultMsg
                     } else {
-                        // Final response — no more tool use
                         // Only persist user message + final text, not tool intermediates
                         val userMsg = allMessages.last()
                         val newMessages = listOf(userMsg, assistantMessage(response.text))
@@ -262,11 +305,6 @@ class ConversationManager(
             val maxMessages = settings.maxMessages
             while (conversationHistory.size > maxMessages) {
                 conversationHistory.removeAt(0)
-                // Keep removing until first message is a user message without tool_results
-                while (conversationHistory.isNotEmpty() &&
-                    (conversationHistory.first().role != "user" || hasToolResults(conversationHistory.first()))) {
-                    conversationHistory.removeAt(0)
-                }
             }
         }
 
@@ -305,11 +343,9 @@ class ConversationManager(
                 val errors = results.filter { it.isError }
                 if (errors.isNotEmpty()) {
                     DebugLog.log(TAG, "Nexus emit errors: ${errors.map { it.content }}")
-                    listener?.onError("Nexus sync failed")
                 }
             } catch (e: Exception) {
                 DebugLog.log(TAG, "Nexus emit failed: ${e.message}")
-                listener?.onError("Nexus sync failed: ${e.message}")
             }
         }
     }
@@ -329,11 +365,6 @@ class ConversationManager(
         }
     }
 
-    private fun hasToolResults(msg: Message): Boolean = when (msg.content) {
-        is MessageContent.Blocks -> msg.content.blocks.any { it is ContentBlock.ToolResult }
-        else -> false
-    }
-
 
     // ══════════════════════════════════════════════════════════════════════
     // Message Sanitization
@@ -341,12 +372,15 @@ class ConversationManager(
 
     /**
      * Strip orphaned tool_use and tool_result blocks from the message list.
-     * A tool_use is orphaned if no user message has a matching tool_result.
-     * A tool_result is orphaned if no assistant message has a matching tool_use.
-     * Messages left empty after stripping are removed entirely.
+     * A tool_use is orphaned if no subsequent user message has a tool_result
+     * referencing its ID. A tool_result is orphaned if no prior assistant
+     * message has a tool_use with that ID. Messages left empty after
+     * stripping are removed entirely.
      */
     private fun sanitizeToolMessages(messages: List<Message>): List<Message> {
+        // Collect all tool_use IDs from assistant messages
         val toolUseIds = mutableSetOf<String>()
+        // Collect all tool_result IDs from user messages
         val toolResultIds = mutableSetOf<String>()
 
         for (msg in messages) {
@@ -360,10 +394,11 @@ class ConversationManager(
             }
         }
 
+        // Matched = present in both sets
         val matched = toolUseIds.intersect(toolResultIds)
 
         if (matched.size == toolUseIds.size && matched.size == toolResultIds.size) {
-            return messages
+            return messages  // nothing to strip
         }
 
         val orphanCount = (toolUseIds.size - matched.size) + (toolResultIds.size - matched.size)

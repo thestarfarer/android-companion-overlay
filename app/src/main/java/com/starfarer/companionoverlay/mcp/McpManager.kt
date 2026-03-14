@@ -2,19 +2,17 @@ package com.starfarer.companionoverlay.mcp
 
 import com.starfarer.companionoverlay.DebugLog
 import com.starfarer.companionoverlay.api.Tool
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.*
 import kotlinx.serialization.json.*
 import okhttp3.OkHttpClient
 
 /**
- * Central orchestrator for all MCP server connections.
+ * Transport layer for MCP server connections.
  *
  * Manages [McpClient] instances, aggregates tool definitions from all
  * connected servers, and routes tool_use calls to the correct server.
- *
- * Tool names are qualified as `serverId__toolName` to avoid collisions
- * when multiple servers expose tools with the same name.
+ * Does not decide when to call tools or what to do with results —
+ * that's the caller's concern.
  */
 class McpManager(
     private val baseClient: OkHttpClient,
@@ -25,21 +23,9 @@ class McpManager(
         private const val TOOL_SEPARATOR = "__"
     }
 
-    // Active clients keyed by server config ID
     private val clients = java.util.concurrent.ConcurrentHashMap<String, McpClient>()
-
-    // Aggregated tool definitions: qualified name -> (serverId, McpToolDefinition)
     private val toolRegistry = java.util.concurrent.ConcurrentHashMap<String, Pair<String, McpToolDefinition>>()
 
-    // ══════════════════════════════════════════════════════════════════════
-    // Public API
-    // ══════════════════════════════════════════════════════════════════════
-
-    /**
-     * Initialize all enabled MCP servers.
-     * Call when the overlay service starts or after config changes.
-     * Safe to call multiple times — disconnects stale clients first.
-     */
     suspend fun initializeAll(): Map<String, Result<List<McpToolDefinition>>> =
         withContext(Dispatchers.IO) {
             disconnectAll()
@@ -81,11 +67,6 @@ class McpManager(
             results
         }
 
-    /**
-     * Get all discovered MCP tools in Claude API Tool format.
-     * Returns tools with qualified names so they can be routed back
-     * to the correct MCP server.
-     */
     fun getClaudeTools(): List<Tool> {
         return toolRegistry.map { (qualifiedName, entry) ->
             val (_, mcpTool) = entry
@@ -97,16 +78,8 @@ class McpManager(
         }
     }
 
-    /** Check if any MCP tools are available. */
     fun hasTools(): Boolean = toolRegistry.isNotEmpty()
 
-    /**
-     * Execute a tool call from Claude's tool_use response.
-     *
-     * @param qualifiedToolName The tool name as returned by Claude (serverId__toolName)
-     * @param arguments The tool arguments as a JSON object
-     * @return Text result to send back to Claude as tool_result
-     */
     suspend fun executeTool(
         qualifiedToolName: String,
         arguments: JsonObject?
@@ -147,10 +120,6 @@ class McpManager(
         }
     }
 
-    /**
-     * Call a named tool on every connected server that has it.
-     * Used for broadcast-style events like Nexus session summaries.
-     */
     suspend fun emitEventToAll(
         toolName: String,
         arguments: JsonObject
@@ -177,7 +146,6 @@ class McpManager(
         clients.clear()
     }
 
-    /** Get human-readable status for each server (for settings UI). */
     fun getServerStatuses(): Map<String, ServerStatus> {
         val configs = repository.loadServers()
         return configs.associate { config ->
