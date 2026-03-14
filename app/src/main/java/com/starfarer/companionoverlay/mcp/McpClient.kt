@@ -109,8 +109,15 @@ class McpClient(
         toolName: String,
         arguments: JsonObject?
     ): Result<McpToolCallResult> = withContext(Dispatchers.IO) {
+        // Auto-reinitialize if session was lost
         if (!initialized) {
-            return@withContext Result.failure(McpException("Client not initialized"))
+            DebugLog.log(TAG, "Session lost, reinitializing before tool call...")
+            val reinit = initialize()
+            if (reinit.isFailure) {
+                return@withContext Result.failure(
+                    McpException("Reinit failed: ${reinit.exceptionOrNull()?.message}")
+                )
+            }
         }
 
         try {
@@ -120,6 +127,28 @@ class McpClient(
             }
 
             val response = sendRequest("tools/call", params)
+
+            // If we got a session error during the call, reinit and retry once
+            if (response.error != null && response.error.code == 400 && !initialized) {
+                DebugLog.log(TAG, "Session died mid-call, reinitializing and retrying...")
+                val reinit = initialize()
+                if (reinit.isFailure) {
+                    return@withContext Result.failure(
+                        McpException("Reinit failed on retry: ${reinit.exceptionOrNull()?.message}")
+                    )
+                }
+                val retryResponse = sendRequest("tools/call", params)
+                if (retryResponse.error != null) {
+                    return@withContext Result.failure(
+                        McpException("tools/call error after retry: ${retryResponse.error.message}")
+                    )
+                }
+                val retryResult = retryResponse.result?.let {
+                    json.decodeFromJsonElement<McpToolCallResult>(it)
+                } ?: McpToolCallResult()
+                return@withContext Result.success(retryResult)
+            }
+
             if (response.error != null) {
                 return@withContext Result.failure(
                     McpException("tools/call error: ${response.error.message}")
@@ -139,7 +168,6 @@ class McpClient(
             Result.failure(e)
         }
     }
-
     fun disconnect() {
         sessionId = null
         initialized = false
