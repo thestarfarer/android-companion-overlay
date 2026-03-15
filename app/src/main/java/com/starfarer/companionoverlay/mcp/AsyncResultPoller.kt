@@ -5,12 +5,12 @@ import kotlinx.coroutines.*
 import java.util.concurrent.ConcurrentLinkedQueue
 
 /**
- * Polls the Nexus for completed async job results (agent, round table)
+ * Polls all connected MCP servers for completed async job results
  * and queues them for conversation injection.
  *
- * Exists separately from [McpManager] because polling is a feature that
- * uses transport, not a property of it. McpManager routes tool calls.
- * This class decides when to check and holds what comes back.
+ * Results are consumed non-destructively via [peekResults] and only
+ * removed from the queue via [drainResults] after the caller confirms
+ * they were successfully delivered.
  */
 class AsyncResultPoller(
     private val mcpManager: McpManager
@@ -28,31 +28,32 @@ class AsyncResultPoller(
     fun start() {
         stop()
 
-        // Only start if the poll tool exists on a connected server
-        val hasToolTool = mcpManager.getClaudeTools().any { it.name.endsWith("__$TOOL_NAME") }
-        if (!hasToolTool) {
+        val pollTools = mcpManager.getClaudeTools()
+            .filter { it.name.endsWith("__$TOOL_NAME") }
+            .map { it.name }
+
+        if (pollTools.isEmpty()) {
             DebugLog.log(TAG, "No $TOOL_NAME tool found, polling disabled")
             return
         }
 
-        val qualifiedName = mcpManager.getClaudeTools()
-            .first { it.name.endsWith("__$TOOL_NAME") }.name
-
-        DebugLog.log(TAG, "Starting (${POLL_INTERVAL_MS / 1000}s interval)")
+        DebugLog.log(TAG, "Starting (${POLL_INTERVAL_MS / 1000}s interval, ${pollTools.size} server(s))")
 
         pollJob = scope.launch {
             while (isActive) {
                 delay(POLL_INTERVAL_MS)
-                try {
-                    val result = mcpManager.executeTool(qualifiedName, null)
-                    if (!result.isError && result.content != "No pending results.") {
-                        DebugLog.log(TAG, "Got async results")
-                        pendingResults.add(JobResult(content = result.content))
+                for (qualifiedName in pollTools) {
+                    try {
+                        val result = mcpManager.executeTool(qualifiedName, null)
+                        if (!result.isError && result.content != "No pending results.") {
+                            DebugLog.log(TAG, "Got async results from ${qualifiedName.substringBefore("__")}")
+                            pendingResults.add(JobResult(content = result.content))
+                        }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        DebugLog.log(TAG, "Poll error on $qualifiedName: ${e.message}")
                     }
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    DebugLog.log(TAG, "Poll error: ${e.message}")
                 }
             }
         }
@@ -64,6 +65,8 @@ class AsyncResultPoller(
     }
 
     fun hasPendingResults(): Boolean = pendingResults.isNotEmpty()
+
+    fun peekResults(): List<JobResult> = pendingResults.toList()
 
     fun drainResults(): List<JobResult> {
         val results = mutableListOf<JobResult>()

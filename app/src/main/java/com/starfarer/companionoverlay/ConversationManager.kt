@@ -40,6 +40,9 @@ class ConversationManager(
 
     var listener: Listener? = null
 
+    /** Set by the service to let the watcher know whether TTS is active. */
+    var isTtsSpeaking: () -> Boolean = { false }
+
     private val supervisorJob = SupervisorJob()
     private val scope = CoroutineScope(supervisorJob + Dispatchers.Main)
     private val conversationHistory: MutableList<Message> =
@@ -50,6 +53,10 @@ class ConversationManager(
 
     @Volatile
     private var lastUserMessageTime: Long = System.currentTimeMillis()
+
+    /** True when a synthetic injection is in flight and results haven't been consumed yet. */
+    @Volatile
+    private var syntheticInjectionInFlight = false
 
     private var resultWatcherJob: Job? = null
     private var messagesSinceLastEmit = 0
@@ -89,6 +96,9 @@ class ConversationManager(
             }
         }
         activeJob = null
+        // If a synthetic injection was in flight, the results are still in the queue.
+        // They weren't consumed because handleSuccess never ran.
+        syntheticInjectionInFlight = false
     }
 
     fun clearHistory() {
@@ -99,12 +109,23 @@ class ConversationManager(
         DebugLog.log(TAG, "History cleared")
     }
 
-    /** Called by the service after MCP initialization. Creates and starts the async result poller. */
     fun startAsyncPolling() {
         asyncPoller?.destroy()
         asyncPoller = null
         if (!settings.nexusIntegrationEnabled) return
         asyncPoller = AsyncResultPoller(mcpManager).also { it.start() }
+    }
+
+    /**
+     * Called by the service when TTS finishes speaking.
+     * If async results are waiting, this is the ideal moment to inject them —
+     * the room just went quiet and there's news to share.
+     */
+    fun onTtsDone() {
+        if (!settings.mcpEnabled || !settings.nexusIntegrationEnabled) return
+        if (asyncPoller?.hasPendingResults() != true) return
+        if (activeJob?.isActive == true) return
+        injectPendingResults()
     }
 
     fun getContextForStt(): String {
@@ -139,10 +160,10 @@ class ConversationManager(
     // ══════════════════════════════════════════════════════════════════════
 
     /**
-     * Watches for pending async results (agent, round table) and injects them
-     * into the conversation after a silence period. If the user hasn't sent
-     * a message in [SILENCE_TIMEOUT_MS] and results are waiting, Senni speaks
-     * up unprompted.
+     * Fallback timer that checks for pending results during silence.
+     * The primary injection path is [onTtsDone], which fires at the exact
+     * moment speech ends. This watcher covers cases where TTS is off or
+     * the conversation is text-only.
      */
     private fun startResultWatcher() {
         resultWatcherJob = scope.launch {
@@ -152,6 +173,7 @@ class ConversationManager(
                     if (!settings.mcpEnabled || !settings.nexusIntegrationEnabled) continue
                     if (asyncPoller?.hasPendingResults() != true) continue
                     if (activeJob?.isActive == true) continue
+                    if (isTtsSpeaking()) continue
 
                     val silence = System.currentTimeMillis() - lastUserMessageTime
                     if (silence < SILENCE_TIMEOUT_MS) continue
@@ -167,20 +189,22 @@ class ConversationManager(
     }
 
     /**
-     * Drain pending results and send them as a synthetic turn.
-     * The model sees the results as context arriving between conversation
-     * turns and responds naturally — Senni sharing news she just received.
+     * Peek at pending results and send them as a synthetic turn.
+     * Results are NOT consumed from the queue here — they are only
+     * consumed in [handleSuccess] after Claude's response arrives.
+     * If the call is cancelled (user starts speaking), the results
+     * remain in the queue for the next opportunity.
      */
     private fun injectPendingResults() {
-        val results = asyncPoller?.drainResults() ?: emptyList()
+        val results = asyncPoller?.peekResults() ?: emptyList()
         if (results.isEmpty()) return
 
         val resultText = results.joinToString("\n\n") { it.content }
-        DebugLog.log(TAG, "Injecting ${results.size} async result(s) after silence")
+        DebugLog.log(TAG, "Injecting ${results.size} async result(s)")
         listener?.onAsyncResultsInjecting()
 
-        // Send as a synthetic user message that the model understands
-        // is system-initiated, not human-typed
+        syntheticInjectionInFlight = true
+
         val synthetic = textMessage(
             "[System: Async job results arrived]\n$resultText\n[React to these results naturally. The user didn't type this — it arrived from a background task you dispatched earlier.]"
         )
@@ -200,7 +224,15 @@ class ConversationManager(
                 }
                 val now = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm (EEEE)"))
                 val basePrompt = "[Current time: $now]\n\n" + settings.systemPrompt
-                val asyncResults = if (settings.mcpEnabled && settings.nexusIntegrationEnabled) asyncPoller?.drainResults() ?: emptyList() else emptyList()
+
+                // For user-initiated messages (not synthetic injections), drain any
+                // pending results into the system prompt as bonus context.
+                val asyncResults = if (!syntheticInjectionInFlight &&
+                    settings.mcpEnabled && settings.nexusIntegrationEnabled
+                ) {
+                    asyncPoller?.drainResults() ?: emptyList()
+                } else emptyList()
+
                 val systemPrompt = if (asyncResults.isNotEmpty()) {
                     val resultText = asyncResults.joinToString("\n\n") { it.content }
                     DebugLog.log(TAG, "Injecting ${asyncResults.size} async result(s) into context")
@@ -281,7 +313,6 @@ class ConversationManager(
 
                         messages = messages + assistantMsg + toolResultMsg
                     } else {
-                        // Only persist user message + final text, not tool intermediates
                         val userMsg = allMessages.last()
                         val newMessages = listOf(userMsg, assistantMessage(response.text))
                         handleSuccess(newMessages, response.text)
@@ -302,6 +333,14 @@ class ConversationManager(
     }
 
     private fun handleSuccess(newMessages: List<Message>, responseText: String) {
+        // If this was a synthetic injection, NOW we consume the results.
+        // They survived the full round trip — peek to API call to response.
+        if (syntheticInjectionInFlight) {
+            asyncPoller?.drainResults()
+            syntheticInjectionInFlight = false
+            DebugLog.log(TAG, "Async results delivered successfully")
+        }
+
         synchronized(conversationHistory) {
             conversationHistory.addAll(newMessages)
 
@@ -368,22 +407,12 @@ class ConversationManager(
         }
     }
 
-
     // ══════════════════════════════════════════════════════════════════════
     // Message Sanitization
     // ══════════════════════════════════════════════════════════════════════
 
-    /**
-     * Strip orphaned tool_use and tool_result blocks from the message list.
-     * A tool_use is orphaned if no subsequent user message has a tool_result
-     * referencing its ID. A tool_result is orphaned if no prior assistant
-     * message has a tool_use with that ID. Messages left empty after
-     * stripping are removed entirely.
-     */
     private fun sanitizeToolMessages(messages: List<Message>): List<Message> {
-        // Collect all tool_use IDs from assistant messages
         val toolUseIds = mutableSetOf<String>()
-        // Collect all tool_result IDs from user messages
         val toolResultIds = mutableSetOf<String>()
 
         for (msg in messages) {
@@ -397,11 +426,10 @@ class ConversationManager(
             }
         }
 
-        // Matched = present in both sets
         val matched = toolUseIds.intersect(toolResultIds)
 
         if (matched.size == toolUseIds.size && matched.size == toolResultIds.size) {
-            return messages  // nothing to strip
+            return messages
         }
 
         val orphanCount = (toolUseIds.size - matched.size) + (toolResultIds.size - matched.size)
