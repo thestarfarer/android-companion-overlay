@@ -20,7 +20,7 @@ import org.koin.dsl.module
  * [ConversationStorage] remains a singleton — it's stateless (just wraps
  * a File path) and safe to share across service restarts.
  *
- * [ScreenshotManager] and [BeepManager] are factories — stateless/lightweight.
+ * [ScreenshotManager] is a factory — stateless. [BeepManager] is a singleton — persistent SoundPool.
  */
 val overlayModule = module {
 
@@ -33,6 +33,6 @@ val overlayModule = module {
     // ScreenshotManager — stateless, takes only context and coordinator
     factory { ScreenshotManager(androidContext(), get()) }
 
-    // BeepManager — lightweight audio feedback, factory scoped
-    factory { BeepManager() }
+    // BeepManager — persistent SoundPool for consistent Bluetooth audio
+    single { BeepManager(androidContext()) }
 }

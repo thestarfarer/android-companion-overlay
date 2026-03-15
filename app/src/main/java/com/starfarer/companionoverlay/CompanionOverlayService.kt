@@ -193,6 +193,7 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
             }
         }
 
+        audioCoordinator.warmUp()
         voiceController = VoiceInputController(this, this, settings, beepManager, httpClient)
 
         // Initialize MCP servers if enabled

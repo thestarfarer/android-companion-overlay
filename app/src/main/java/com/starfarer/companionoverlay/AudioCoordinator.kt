@@ -12,32 +12,25 @@ class AudioCoordinator(
     private val settings: SettingsRepository,
     private val beepManager: BeepManager
 ) {
-
-    companion object {
-        private const val TAG = "Audio"
-    }
+    companion object { private const val TAG = "Audio" }
 
     var onSpeechComplete: (() -> Unit)? = null
     var onStatusUpdate: ((String) -> Unit)? = null
 
     private val handler = Handler(Looper.getMainLooper())
+    private val keepAlive = SilenceKeepAlive()
 
     init {
         geminiTtsManager.onStatusUpdate = { status ->
             handler.post { onStatusUpdate?.invoke(status) }
         }
-
         geminiTtsManager.onSpeechError = { failedText ->
             DebugLog.log(TAG, "Gemini TTS failed, falling back to on-device")
             handler.post {
                 playBeep(BeepManager.Beep.ERROR)
                 onStatusUpdate?.invoke("")
-
                 ttsManager.ensureReady()
-                ttsManager.onSpeechDone = {
-                    onSpeechComplete?.invoke()
-                    ttsManager.onSpeechDone = null
-                }
+                ttsManager.onSpeechDone = { onSpeechComplete?.invoke(); ttsManager.onSpeechDone = null }
                 ttsManager.speak(failedText)
             }
         }
@@ -46,21 +39,16 @@ class AudioCoordinator(
     val isSpeaking: Boolean
         get() = ttsManager.isSpeaking || geminiTtsManager.isSpeaking
 
+    fun warmUp() = keepAlive.start()
+
     fun speak(text: String) {
         val useGemini = settings.geminiTtsEnabled && !settings.geminiApiKey.isNullOrBlank()
-
         if (useGemini) {
-            geminiTtsManager.onSpeechDone = {
-                onSpeechComplete?.invoke()
-                geminiTtsManager.onSpeechDone = null
-            }
+            geminiTtsManager.onSpeechDone = { onSpeechComplete?.invoke(); geminiTtsManager.onSpeechDone = null }
             geminiTtsManager.speak(text)
         } else {
             ttsManager.ensureReady()
-            ttsManager.onSpeechDone = {
-                onSpeechComplete?.invoke()
-                ttsManager.onSpeechDone = null
-            }
+            ttsManager.onSpeechDone = { onSpeechComplete?.invoke(); ttsManager.onSpeechDone = null }
             ttsManager.speak(text)
         }
     }
@@ -72,13 +60,13 @@ class AudioCoordinator(
     }
 
     fun playBeep(beep: BeepManager.Beep) {
-        if (settings.beepsEnabled) {
-            beepManager.play(beep)
-        }
+        if (settings.beepsEnabled) beepManager.play(beep)
     }
 
     fun release() {
+        keepAlive.stop()
         ttsManager.release()
         geminiTtsManager.release()
+        beepManager.release()
     }
 }
