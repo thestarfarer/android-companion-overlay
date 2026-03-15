@@ -183,6 +183,7 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
         bubbleManager = BubbleManager(this, windowManager, handler, bubbleHost)
 
         conversationManager.listener = this
+        conversationManager.isTtsSpeaking = { audioCoordinator.isSpeaking }
 
         audioCoordinator.onStatusUpdate = { status ->
             if (status.isNotEmpty()) {
@@ -411,6 +412,7 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
                 if (wasVoice) {
                     handler.post { voiceController.onVoiceResponseComplete() }
                 }
+                conversationManager.onTtsDone()
                 audioCoordinator.onSpeechComplete = null
             }
             audioCoordinator.speak(text)
