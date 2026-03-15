@@ -59,7 +59,6 @@ class ConversationManager(
     private var syntheticInjectionInFlight = false
 
     private var resultWatcherJob: Job? = null
-    private var messagesSinceLastEmit = 0
     private var asyncPoller: AsyncResultPoller? = null
 
     @Volatile
@@ -104,7 +103,7 @@ class ConversationManager(
     fun clearHistory() {
         conversationHistory.clear()
         lastAssistantMessage = null
-        messagesSinceLastEmit = 0
+        settings.nexusEmitCounter = 0
         scope.launch { storage.clear() }
         DebugLog.log(TAG, "History cleared")
     }
@@ -353,9 +352,9 @@ class ConversationManager(
         lastAssistantMessage = responseText
         DebugLog.log(TAG, "Response: ${responseText.take(60)}...")
 
-        messagesSinceLastEmit += newMessages.size
-        if (messagesSinceLastEmit >= 20) {
-            messagesSinceLastEmit = 0
+        settings.nexusEmitCounter += newMessages.size
+        if (settings.nexusEmitCounter >= 20) {
+            settings.nexusEmitCounter = 0
             maybeEmitNexus()
         }
 
@@ -476,7 +475,7 @@ class ConversationManager(
             synchronized(conversationHistory) {
                 conversationHistory.addAll(messages)
             }
-            DebugLog.log(TAG, "Restored ${conversationHistory.size} messages")
+            DebugLog.log(TAG, "Restored ${conversationHistory.size} messages (emit counter: ${settings.nexusEmitCounter})")
 
             for (msg in messages.asReversed()) {
                 if (msg.role == "assistant") {
