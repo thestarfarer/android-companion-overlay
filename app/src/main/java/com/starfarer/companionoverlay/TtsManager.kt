@@ -99,6 +99,9 @@ class TtsManager(
             return
         }
 
+        // Apply voice/rate/pitch in case settings changed since init
+        applyCurrentSettings()
+
         val cleaned = text
             .replace(Regex("\\*+"), "")
             .replace(Regex("~+"), "")
@@ -197,6 +200,21 @@ class TtsManager(
         tts?.shutdown()
         tts = null
         isReady = false
+    }
+
+    private fun applyCurrentSettings() {
+        val savedName = settings.ttsVoice
+        if (savedName != null && tts?.voice?.name != savedName) {
+            val voice = availableVoices.find { it.name == savedName }
+            if (voice != null) {
+                tts?.voice = voice
+                DebugLog.log(TAG, "Voice updated: $savedName")
+            }
+        }
+        val rate = settings.ttsSpeechRate
+        if (rate > 0f) tts?.setSpeechRate(rate)
+        val pitch = settings.ttsPitch
+        if (pitch > 0f) tts?.setPitch(pitch)
     }
 
     private fun loadVoices() {
