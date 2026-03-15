@@ -1,163 +1,120 @@
 package com.starfarer.companionoverlay
 
+import android.content.Context
 import android.media.AudioAttributes
-import android.media.AudioFormat
-import android.media.AudioTrack
-import android.os.Handler
-import android.os.Looper
+import android.media.SoundPool
+import java.io.File
+import java.io.RandomAccessFile
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 
 /**
- * Generates and plays cozy synthesized beep tones for voice pipeline feedback.
- * Pure sine waves, no media files. Subtle and warm.
+ * Synthesized beep tones played through a persistent SoundPool.
+ *
+ * Uses USAGE_ASSISTANCE_SONIFICATION — routes through A2DP like media
+ * but on its own mixer lane, so TTS QUEUE_FLUSH can't stomp it.
  */
-class BeepManager {
+class BeepManager(private val context: Context) {
 
     companion object {
         private const val TAG = "BeepMgr"
         private const val SAMPLE_RATE = 44100
-        private const val AMPLITUDE = 1.0f  // full amplitude
+        private const val AMPLITUDE = 1.0f
     }
 
-    enum class Beep {
-        /** Single high tone — "I'm listening" */
-        READY,
-        /** Ascending double-blip — "Got it, moving on" */
-        STEP,
-        /** Satisfying triple-rise — "All done" */
-        DONE,
-        /** Descending tone — sad but not jarring */
-        ERROR
-    }
+    enum class Beep { READY, STEP, DONE, ERROR }
 
-    // Pre-generated PCM buffers
-    private val buffers = mutableMapOf<Beep, ShortArray>()
+    private val soundPool: SoundPool
+    private val soundIds = mutableMapOf<Beep, Int>()
+    private var loaded = 0
 
     init {
-        // Ready: single 880Hz, 80ms
-        buffers[Beep.READY] = generateTone(880f, 80)
+        soundPool = SoundPool.Builder()
+            .setMaxStreams(4)
+            .setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build()
+            )
+            .build()
 
-        // Step: 660Hz 50ms → 880Hz 50ms with tiny 10ms gap
-        buffers[Beep.STEP] = concatenate(
-            generateTone(660f, 50),
-            generateSilence(10),
-            generateTone(880f, 50)
-        )
+        soundPool.setOnLoadCompleteListener { _, _, status ->
+            if (status == 0 && ++loaded == Beep.entries.size) {
+                DebugLog.log(TAG, "All beeps loaded")
+                Beep.entries.forEach { File(context.cacheDir, "beep_${it.name.lowercase()}.wav").delete() }
+            }
+        }
 
-        // Done: 660→880→1100Hz, 50ms each with 10ms gaps
-        buffers[Beep.DONE] = concatenate(
-            generateTone(660f, 50),
-            generateSilence(10),
-            generateTone(880f, 50),
-            generateSilence(10),
-            generateTone(1100f, 50)
-        )
-
-        // Error: 440Hz→330Hz descending, 100ms total (smooth sweep)
-        buffers[Beep.ERROR] = generateSweep(440f, 330f, 120)
+        mapOf(
+            Beep.READY to generateTone(880f, 80),
+            Beep.STEP to concatenate(generateTone(660f, 50), generateSilence(10), generateTone(880f, 50)),
+            Beep.DONE to concatenate(generateTone(660f, 50), generateSilence(10), generateTone(880f, 50), generateSilence(10), generateTone(1100f, 50)),
+            Beep.ERROR to generateSweep(440f, 330f, 120)
+        ).forEach { (beep, pcm) ->
+            soundIds[beep] = soundPool.load(writeWav(pcm, "beep_${beep.name.lowercase()}.wav").absolutePath, 1)
+        }
     }
 
     fun play(beep: Beep) {
-        val pcm = buffers[beep] ?: return
-        DebugLog.log(TAG, "Playing beep: $beep (${pcm.size} samples)")
-        try {
-            val bufferSize = pcm.size * 2  // 16-bit = 2 bytes per sample
-            val track = AudioTrack.Builder()
-                .setAudioAttributes(
-                    AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_NOTIFICATION)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                        .build()
-                )
-                .setAudioFormat(
-                    AudioFormat.Builder()
-                        .setSampleRate(SAMPLE_RATE)
-                        .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
-                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                        .build()
-                )
-                .setBufferSizeInBytes(bufferSize)
-                .setTransferMode(AudioTrack.MODE_STATIC)
-                .build()
-
-            track.write(pcm, 0, pcm.size)
-            val markerResult = track.setNotificationMarkerPosition(pcm.size)
-            if (markerResult == AudioTrack.SUCCESS) {
-                track.setPlaybackPositionUpdateListener(object : AudioTrack.OnPlaybackPositionUpdateListener {
-                    override fun onMarkerReached(t: AudioTrack?) {
-                        t?.release()
-                    }
-                    override fun onPeriodicNotification(t: AudioTrack?) {}
-                })
-            } else {
-                val durationMs = (pcm.size * 1000L) / SAMPLE_RATE + 100
-                Handler(Looper.getMainLooper()).postDelayed({
-                    try { track.release() } catch (_: Exception) {}
-                }, durationMs)
-            }
-            track.play()
-        } catch (e: Exception) {
-            DebugLog.log(TAG, "Beep failed: ${e.message}")
-        }
+        val id = soundIds[beep] ?: return
+        soundPool.play(id, 1.0f, 1.0f, 1, 0, 1.0f)
     }
 
-    /** Generate a sine wave tone at given frequency and duration. Applies fade in/out to avoid clicks. */
+    fun release() = soundPool.release()
+
+    // ── WAV bridge ──
+
+    private fun writeWav(pcm: ShortArray, filename: String): File {
+        val file = File(context.cacheDir, filename)
+        val dataLen = pcm.size * 2
+        RandomAccessFile(file, "rw").use { raf ->
+            raf.writeBytes("RIFF"); raf.writeIntLE(36 + dataLen); raf.writeBytes("WAVE")
+            raf.writeBytes("fmt "); raf.writeIntLE(16); raf.writeShortLE(1); raf.writeShortLE(1)
+            raf.writeIntLE(SAMPLE_RATE); raf.writeIntLE(SAMPLE_RATE * 2); raf.writeShortLE(2); raf.writeShortLE(16)
+            raf.writeBytes("data"); raf.writeIntLE(dataLen)
+            val buf = ByteBuffer.allocate(dataLen).order(ByteOrder.LITTLE_ENDIAN)
+            for (s in pcm) buf.putShort(s)
+            raf.write(buf.array())
+        }
+        return file
+    }
+
+    private fun RandomAccessFile.writeIntLE(v: Int) { write(v and 0xFF); write((v shr 8) and 0xFF); write((v shr 16) and 0xFF); write((v shr 24) and 0xFF) }
+    private fun RandomAccessFile.writeShortLE(v: Int) { write(v and 0xFF); write((v shr 8) and 0xFF) }
+
+    // ── Tone generation ──
+
     private fun generateTone(freqHz: Float, durationMs: Int): ShortArray {
-        val numSamples = (SAMPLE_RATE * durationMs / 1000f).toInt()
-        val samples = ShortArray(numSamples)
-        val fadeLen = minOf(numSamples / 4, (SAMPLE_RATE * 0.005f).toInt()) // 5ms fade or 1/4 of tone
-
-        for (i in 0 until numSamples) {
-            val t = i.toFloat() / SAMPLE_RATE
-            var value = Math.sin(2.0 * Math.PI * freqHz * t).toFloat() * AMPLITUDE
-
-            // Fade envelope
-            if (i < fadeLen) {
-                value *= i.toFloat() / fadeLen
-            } else if (i > numSamples - fadeLen) {
-                value *= (numSamples - i).toFloat() / fadeLen
-            }
-
-            samples[i] = (value * Short.MAX_VALUE).toInt().toShort()
+        val n = (SAMPLE_RATE * durationMs / 1000f).toInt()
+        val fade = minOf(n / 4, (SAMPLE_RATE * 0.005f).toInt())
+        return ShortArray(n) { i ->
+            var v = Math.sin(2.0 * Math.PI * freqHz * i / SAMPLE_RATE).toFloat() * AMPLITUDE
+            if (i < fade) v *= i.toFloat() / fade
+            else if (i > n - fade) v *= (n - i).toFloat() / fade
+            (v * Short.MAX_VALUE).toInt().toShort()
         }
-        return samples
     }
 
-    /** Generate a frequency sweep (for the sad error beep). */
     private fun generateSweep(startHz: Float, endHz: Float, durationMs: Int): ShortArray {
-        val numSamples = (SAMPLE_RATE * durationMs / 1000f).toInt()
-        val samples = ShortArray(numSamples)
-        val fadeLen = minOf(numSamples / 4, (SAMPLE_RATE * 0.005f).toInt())
-
+        val n = (SAMPLE_RATE * durationMs / 1000f).toInt()
+        val fade = minOf(n / 4, (SAMPLE_RATE * 0.005f).toInt())
         var phase = 0.0
-        for (i in 0 until numSamples) {
-            val frac = i.toFloat() / numSamples
-            val freq = startHz + (endHz - startHz) * frac
+        return ShortArray(n) { i ->
+            val freq = startHz + (endHz - startHz) * i.toFloat() / n
             phase += 2.0 * Math.PI * freq / SAMPLE_RATE
-            var value = Math.sin(phase).toFloat() * AMPLITUDE
-
-            if (i < fadeLen) {
-                value *= i.toFloat() / fadeLen
-            } else if (i > numSamples - fadeLen) {
-                value *= (numSamples - i).toFloat() / fadeLen
-            }
-
-            samples[i] = (value * Short.MAX_VALUE).toInt().toShort()
+            var v = Math.sin(phase).toFloat() * AMPLITUDE
+            if (i < fade) v *= i.toFloat() / fade
+            else if (i > n - fade) v *= (n - i).toFloat() / fade
+            (v * Short.MAX_VALUE).toInt().toShort()
         }
-        return samples
     }
 
-    private fun generateSilence(durationMs: Int): ShortArray {
-        return ShortArray((SAMPLE_RATE * durationMs / 1000f).toInt())
-    }
+    private fun generateSilence(ms: Int) = ShortArray((SAMPLE_RATE * ms / 1000f).toInt())
 
-    private fun concatenate(vararg arrays: ShortArray): ShortArray {
-        val total = arrays.sumOf { it.size }
-        val result = ShortArray(total)
-        var offset = 0
-        for (arr in arrays) {
-            arr.copyInto(result, offset)
-            offset += arr.size
-        }
-        return result
+    private fun concatenate(vararg a: ShortArray): ShortArray {
+        val r = ShortArray(a.sumOf { it.size }); var o = 0
+        for (arr in a) { arr.copyInto(r, o); o += arr.size }
+        return r
     }
 }
