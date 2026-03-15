@@ -180,6 +180,10 @@ class SettingsRepository(
         get() = settingsPrefs.getBoolean(KEY_MCP_SHOW_TOOL_BUBBLES, true)
         set(value) = settingsPrefs.edit().putBoolean(KEY_MCP_SHOW_TOOL_BUBBLES, value).apply()
 
+    var nexusEmitCounter: Int
+        get() = settingsPrefs.getInt(KEY_NEXUS_EMIT_COUNTER, 0)
+        set(value) = settingsPrefs.edit().putInt(KEY_NEXUS_EMIT_COUNTER, value).apply()
+
     var nexusIntegrationEnabled: Boolean
         get() = settingsPrefs.getBoolean(KEY_NEXUS_INTEGRATION, false)
         set(value) = settingsPrefs.edit().putBoolean(KEY_NEXUS_INTEGRATION, value).apply()
@@ -222,6 +226,7 @@ class SettingsRepository(
         private const val KEY_VOICE_SCREENSHOT = "voice_screenshot_enabled"
         private const val KEY_MCP_ENABLED = "mcp_enabled"
         private const val KEY_MCP_SHOW_TOOL_BUBBLES = "mcp_show_tool_bubbles"
+        private const val KEY_NEXUS_EMIT_COUNTER = "nexus_emit_counter"
         private const val KEY_NEXUS_INTEGRATION = "nexus_integration_enabled"
     }
 }
