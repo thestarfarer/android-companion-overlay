@@ -67,6 +67,6 @@ class AudioCoordinator(
         keepAlive.stop()
         ttsManager.release()
         geminiTtsManager.release()
-        beepManager.release()
+        // BeepManager is a singleton — outlives the service. Don't release it here.
     }
 }
