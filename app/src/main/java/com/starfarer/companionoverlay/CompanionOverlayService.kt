@@ -441,6 +441,7 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
     }
 
     override fun onAsyncResultsInjecting() {
+        audioCoordinator.playBeep(BeepManager.Beep.QUEUE)
         bubbleManager.showBrief("📨 Queue results...", 30000L)
     }
 

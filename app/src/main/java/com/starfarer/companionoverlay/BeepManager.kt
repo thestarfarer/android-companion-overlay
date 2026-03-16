@@ -22,7 +22,7 @@ class BeepManager(private val context: Context) {
         private const val AMPLITUDE = 1.0f
     }
 
-    enum class Beep { READY, STEP, DONE, ERROR }
+    enum class Beep { READY, STEP, DONE, ERROR, QUEUE }
 
     private val soundPool: SoundPool
     private val soundIds = mutableMapOf<Beep, Int>()
@@ -50,7 +50,8 @@ class BeepManager(private val context: Context) {
             Beep.READY to generateTone(880f, 80),
             Beep.STEP to concatenate(generateTone(660f, 50), generateSilence(10), generateTone(880f, 50)),
             Beep.DONE to concatenate(generateTone(660f, 50), generateSilence(10), generateTone(880f, 50), generateSilence(10), generateTone(1100f, 50)),
-            Beep.ERROR to generateSweep(440f, 330f, 120)
+            Beep.ERROR to generateSweep(440f, 330f, 120),
+            Beep.QUEUE to concatenate(generateTone(1047f, 45), generateSilence(15), generateTone(784f, 55))
         ).forEach { (beep, pcm) ->
             soundIds[beep] = soundPool.load(writeWav(pcm, "beep_${beep.name.lowercase()}.wav").absolutePath, 1)
         }
