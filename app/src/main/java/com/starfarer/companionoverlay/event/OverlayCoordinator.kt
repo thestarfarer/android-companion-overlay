@@ -97,6 +97,10 @@ class OverlayCoordinator {
         }
     }
 
+    fun reloadMcp() {
+        _events.tryEmit(OverlayEvent.ReloadMcp)
+    }
+
     fun reloadSprites() {
         if (_overlayRunning.value) {
             _events.tryEmit(OverlayEvent.ReloadSprites)

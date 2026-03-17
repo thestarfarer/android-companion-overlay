@@ -61,4 +61,11 @@ sealed class OverlayEvent {
 
     /** Sprite sheets changed — overlay service should reload. */
     data object ReloadSprites : OverlayEvent()
+
+    // ══════════════════════════════════════════════════════════════════════
+    // MCP
+    // ══════════════════════════════════════════════════════════════════════
+
+    /** MCP credentials changed — service should reinitialize connections and poller. */
+    data object ReloadMcp : OverlayEvent()
 }

@@ -847,6 +847,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
                 }
 
                 refreshMcpServersSummary()
+                coordinator.reloadMcp()
             }
             .setNegativeButton("Cancel", null)
 
@@ -854,6 +855,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
             builder.setNeutralButton("Delete") { _, _ ->
                 mcpRepo.removeServer(existing.id)
                 refreshMcpServersSummary()
+                coordinator.reloadMcp()
                 Toast.makeText(ctx, "Server removed", Toast.LENGTH_SHORT).show()
             }
         }
