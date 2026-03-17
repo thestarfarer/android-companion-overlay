@@ -20,13 +20,13 @@ def keyPass = localProperties.getProperty('RELEASE_KEY_PASSWORD')
     ?: 'changeme'
 
 android {
-    namespace 'com.starfarer.companionoverlay'
-    compileSdk 35
+    namespace = 'com.starfarer.companionoverlay'
+    compileSdk = 35
 
     defaultConfig {
         applicationId "com.starfarer.companionoverlay"
-        minSdk 31
-        targetSdk 34
+        minSdk = 31
+        targetSdk = 34
         versionCode 5
         versionName "2.1"
         ndk {
@@ -46,8 +46,8 @@ android {
     buildTypes {
         release {
             minifyEnabled true
-            shrinkResources true
-            signingConfig signingConfigs.release
+            shrinkResources = true
+            signingConfig = signingConfigs.release
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
         debug {
@@ -65,7 +65,7 @@ android {
     }
 
     buildFeatures {
-        viewBinding true
+        viewBinding = true
     }
 }
 
