@@ -219,9 +219,24 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
                     is OverlayEvent.ToggleVoice -> voiceController.toggle()
                     is OverlayEvent.DismissOverlay -> dismissAnimated()
                     is OverlayEvent.KeyboardVisibility -> setGhostMode(event.visible)
+                    is OverlayEvent.ReloadMcp -> reloadMcp()
                     else -> { /* Handled elsewhere */ }
                 }
             }
+        }
+    }
+
+    private fun reloadMcp() {
+        DebugLog.log("Overlay", "MCP credentials changed, reinitializing...")
+        mcpManager.disconnectAll()
+        serviceScope.launch {
+            val results = mcpManager.initializeAll()
+            val totalTools = results.values.sumOf {
+                it.getOrDefault(emptyList()).size
+            }
+            val failCount = results.values.count { it.isFailure }
+            DebugLog.log("Overlay", "MCP reinit: $totalTools tools, $failCount failures")
+            conversationManager.startAsyncPolling()
         }
     }
 
