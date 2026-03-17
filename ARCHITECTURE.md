@@ -28,7 +28,7 @@ All dependencies are wired through **Koin** DI. Cross-component communication go
                          │
 ┌────────────────────────┴─────────────────────────────┐
 │  Integration                                         │
-│  ClaudeApi · TtsManager                              │
+│  ClaudeApi · TtsManager · McpManager                  │
 │  GeminiSpeechRecognizer · GeminiTtsManager           │
 │  SpeechRecognitionManager · BluetoothAudioRouter     │
 └────────────────────────┬─────────────────────────────┘
@@ -55,9 +55,20 @@ All dependencies are wired through **Koin** DI. Cross-component communication go
 
 | Class | Role |
 |---|---|
-| `ClaudeApi` | Anthropic Messages API client — multi-turn conversation, web search, image attachments, cancellable requests |
-| `api/ClaudeModels` | kotlinx.serialization models for Claude API — polymorphic content blocks, request/response types |
-| `ConversationManager` | In-memory conversation history (thread-safe). Builds API requests, parses responses, auto-copies to clipboard |
+| `ClaudeApi` | Anthropic Messages API client — multi-turn conversation, web search, image attachments, MCP tools parameter, cancellable requests |
+| `api/ClaudeModels` | kotlinx.serialization models for Claude API — polymorphic content blocks (text, image, tool_use, tool_result), `Message.timestamp`, request/response types |
+| `api/ClaudeBilling` | Billing header computation for Claude API requests, client version tracking |
+| `ConversationManager` | In-memory conversation history (thread-safe). Builds API requests, MCP tool use loop (up to 10 iterations), Nexus session summary emission, timestamp tracking, auto-copy |
+
+### MCP subsystem
+
+| Class | Role |
+|---|---|
+| `mcp/McpClient` | Single MCP server connection via Streamable HTTP transport — initialization handshake, tool discovery, tool execution, session management, optional client credentials auth |
+| `mcp/McpManager` | Aggregates tool definitions from all connected servers, routes tool_use calls to the correct server, broadcast `emitEventToAll` for Nexus |
+| `mcp/McpModels` | kotlinx.serialization models for JSON-RPC 2.0, MCP initialize params, tool definitions, server configs |
+| `mcp/McpRepository` | Server config persistence (SharedPreferences) and client secrets (EncryptedSharedPreferences) |
+| `mcp/AsyncResultPoller` | Polls MCP servers for completed async job results (`nexus_poll_results`), queues for conversation injection |
 
 ### Voice pipeline
 
@@ -73,10 +84,11 @@ All dependencies are wired through **Koin** DI. Cross-component communication go
 
 | Class | Role |
 |---|---|
-| `AudioCoordinator` | Routes audio to the active TTS engine. Gemini → on-device fallback on error. Beep playback, speech completion callbacks |
+| `AudioCoordinator` | Routes audio to the active TTS engine. Gemini → on-device fallback on error. Beep playback, speech completion callbacks. Integrates `SilenceKeepAlive` for BT A2DP keep-alive |
 | `TtsManager` | Android `TextToSpeech` wrapper — lazy init, voice selection, text chunking at sentence boundaries, utterance tracking |
 | `GeminiTtsManager` | Gemini TTS API → base64 PCM → `AudioTrack` playback. Markdown cleanup, background synthesis, on-device fallback |
-| `BeepManager` | Synthesized sine wave tones via `AudioTrack MODE_STATIC` — ready, step, done, error |
+| `BeepManager` | Synthesized sine wave tones via persistent `SoundPool` (`USAGE_ASSISTANCE_SONIFICATION`) — ready, step, done, error, queue |
+| `SilenceKeepAlive` | Near-silent audio stream keeping BT A2DP codec warm — prevents power-down and leading-edge clipping |
 | `BluetoothAudioRouter` | BT headset mic routing via `setCommunicationDevice` (API 31+). mSBC wideband codec negotiation |
 | `AudioUtils` | Audio format conversion utilities |
 
@@ -133,10 +145,10 @@ All dependencies are wired through **Koin** DI. Cross-component communication go
 
 | Module | Provides |
 |---|---|
-| `di/AppModule` | `OkHttpClient`, `OverlayCoordinator`, `SettingsRepository`, `ClaudeApi` |
-| `di/AudioModule` | `TtsManager`, `GeminiTtsManager`, `BeepManager`, `AudioCoordinator` |
-| `di/StorageModule` | `SettingsRepository`, `PresetRepository`, `ConversationStorage` |
-| `di/OverlayModule` | `ConversationManager`, `ScreenshotManager`, `VoiceInputController` |
+| `di/AppModule` | `OkHttpClient`, `OverlayCoordinator`, `SettingsRepository`, `ClaudeAuth`, `ClaudeApi`, `McpRepository`, `McpManager` |
+| `di/AudioModule` | `TtsManager`, `GeminiTtsManager`, `AudioCoordinator` |
+| `di/StorageModule` | `SharedPreferences` (settings + auth), `PresetRepository` |
+| `di/OverlayModule` | `ConversationStorage`, `ConversationManager` (factory), `ScreenshotManager`, `BeepManager` |
 | `di/ViewModelModule` | `MainViewModel` |
 
 ### Debug
@@ -167,6 +179,7 @@ app/src/main/
 │   ├── CompanionOverlayService.kt
 │   ├── CompanionAccessibilityService.kt
 │   ├── ClaudeApi.kt
+│   ├── ClaudeAuth.kt
 │   ├── ConversationManager.kt
 │   ├── ConversationStorage.kt
 │   ├── VoiceInputController.kt
@@ -180,6 +193,7 @@ app/src/main/
 │   ├── GeminiTtsManager.kt
 │   ├── BeepManager.kt
 │   ├── BluetoothAudioRouter.kt
+│   ├── SilenceKeepAlive.kt
 │   ├── SpriteAnimator.kt
 │   ├── BubbleManager.kt
 │   ├── BubbleStyle.kt
@@ -194,7 +208,14 @@ app/src/main/
 │   ├── CompanionResponseScreen.kt
 │   ├── CarVoiceRecorder.kt
 │   ├── api/
+│   │   ├── ClaudeBilling.kt
 │   │   └── ClaudeModels.kt
+│   ├── mcp/
+│   │   ├── AsyncResultPoller.kt
+│   │   ├── McpClient.kt
+│   │   ├── McpManager.kt
+│   │   ├── McpModels.kt
+│   │   └── McpRepository.kt
 │   ├── di/
 │   │   ├── AppModule.kt
 │   │   ├── AudioModule.kt
@@ -245,7 +266,7 @@ Thread-safety primitives: `AtomicReference` (API call cancellation), `AtomicBool
 
 ## API integration
 
-**Claude API** — API key authentication. Models: Sonnet 4.5, Opus 4.1, Opus 4.6. Max tokens: 512 (4096 with web search). Streaming not used — single response. Read timeout 300s.
+**Claude API** — API key authentication (OAuth fallback). Models: Sonnet 4.5, Opus 4.1, Opus 4.6. Max tokens: 512 (4096 with tools/web search). Streaming not used — single response. Read timeout 300s.
 
 **Gemini STT** — `gemini-2.5-flash-lite` via REST. 16kHz mono PCM → WAV → base64. Conversation context injected as `systemInstruction` for better name/term recognition. Free tier: 15 RPM, 1000 RPD.
 
@@ -255,9 +276,10 @@ Thread-safety primitives: `AtomicReference` (API call cancellation), `AtomicBool
 
 | Setting | Value |
 |---|---|
-| Compile/Target SDK | 34 (Android 14) |
+| Compile SDK | 35 (Android 15) |
+| Target SDK | 34 (Android 14) |
 | Min SDK | 31 (Android 12) |
-| Kotlin | 1.9.21 |
+| Kotlin | 2.1.0 |
 | JDK | 17 |
 | ABI filter | `arm64-v8a` only |
 | Release | ProGuard minification + resource shrinking |
