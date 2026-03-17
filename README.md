@@ -15,6 +15,8 @@ An animated sprite companion powered by Claude AI that lives on your Android scr
 - **Reply input** — type replies directly in the speech bubble
 - **Conversation memory** — configurable history length up to 30 turns, optionally persists across restarts
 - **Web search** — let Claude search the web for current information
+- **MCP tool servers** — connect external servers via Model Context Protocol; Claude can call their tools automatically (up to 10 iterations per turn)
+- **Nexus integration** — periodic session summary emission to connected MCP servers
 - **Custom sprites** — replace idle/walk sprite sheets with your own PNGs
 - **Character presets** — multiple characters with independent prompts and sprites
 
@@ -25,11 +27,15 @@ An animated sprite companion powered by Claude AI that lives on your Android scr
 - **Bluetooth headset support** — registered as digital assistant; records via BT headset mic
 - **Beep feedback** — synthesized tones for each voice pipeline stage
 
+### Android Auto
+- **Car app integration** — voice conversation with Claude through Android Auto
+
 ### Controls
 - **Volume down button shortcut** — double-press: show/hide overlay, triple-press: voice input (off by default, interjects with long press for volume down functionality)
 - **Headset button** — long-press triggers voice input
 - **Ghost mode** — semi-transparent and click-through when keyboard is visible
 - **Auto-copy** — optionally copy responses to clipboard
+- **Edge-anchored toasts** — top-right notifications for tool use progress and voice status
 - **Screen lock awareness** — pauses on lock, fades in on unlock
 
 ## Install
@@ -54,6 +60,10 @@ Enter your `sk-ant-...` API key in Settings.
 
 For Gemini STT/TTS: get a free/paid API key from [Google AI Studio](https://aistudio.google.com/apikey) and paste it in Settings. Same key powers both STT and TTS.
 
+### MCP Servers (optional)
+
+Connect external tool servers via the Model Context Protocol. In Settings > MCP Servers, add a server URL and optionally configure client credentials authentication. Servers are initialized when the overlay starts and their tools become available to Claude automatically.
+
 ## Building
 
 ```bash
@@ -66,7 +76,7 @@ For Gemini STT/TTS: get a free/paid API key from [Google AI Studio](https://aist
 | Min SDK | 31 (Android 12) |
 | Target SDK | 34 (Android 14) |
 | JDK | 17 |
-| Kotlin | 1.9.21 |
+| Kotlin | 2.1.0 |
 
 ## Known Limitations
 
