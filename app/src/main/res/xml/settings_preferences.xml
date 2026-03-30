@@ -175,7 +175,7 @@
             app:summary="Tap to edit the prompt sent to Sable"
             app:dependency="nexus_integration_enabled"/>
 
-        <Preference
+        <com.starfarer.companionoverlay.ui.LongClickPreference
             app:iconSpaceReserved="false"
             app:key="nexus_fetch_context"
             app:title="Fetch Nexus context"

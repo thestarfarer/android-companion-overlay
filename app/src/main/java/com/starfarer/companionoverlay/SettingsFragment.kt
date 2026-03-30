@@ -28,6 +28,7 @@ import com.starfarer.companionoverlay.mcp.McpManager
 import com.starfarer.companionoverlay.mcp.McpRepository
 import com.starfarer.companionoverlay.mcp.McpServerConfig
 import com.starfarer.companionoverlay.mcp.NexusContextFetcher
+import com.starfarer.companionoverlay.ui.LongClickPreference
 import com.starfarer.companionoverlay.repository.SettingsRepository
 import kotlinx.coroutines.launch
 import org.koin.android.ext.android.inject
@@ -137,7 +138,6 @@ class SettingsFragment : PreferenceFragmentCompat() {
         refreshAccount()
         refreshDebugTest()
 
-        applyNexusLongPress()
 
         val key = pendingHighlightKey ?: return
         pendingHighlightKey = null
@@ -619,12 +619,13 @@ class SettingsFragment : PreferenceFragmentCompat() {
             }
         }
 
-        findPreference<Preference>("nexus_fetch_context")?.apply {
+        findPreference<LongClickPreference>("nexus_fetch_context")?.apply {
             refreshNexusContextSummary(this)
             setOnPreferenceClickListener {
                 fetchNexusContext(this)
                 true
             }
+            onLongClick = { showCachedNexusContext() }
         }
 
         findPreference<SwitchPreferenceCompat>("nexus_context_append_to_prompt")?.apply {
@@ -636,25 +637,6 @@ class SettingsFragment : PreferenceFragmentCompat() {
         }
     }
 
-    private fun applyNexusLongPress() {
-        val rv = listView ?: return
-        rv.post {
-            val adapter = rv.adapter ?: return@post
-            for (i in 0 until adapter.itemCount) {
-                val holder = rv.findViewHolderForAdapterPosition(i) ?: continue
-                val pref = (holder as? PreferenceViewHolder)
-                // Match by checking the preference at this position
-                val prefAdapter = adapter as? PreferenceGroupAdapter ?: return@post
-                if (i < prefAdapter.itemCount && prefAdapter.getItem(i)?.key == "nexus_fetch_context") {
-                    holder.itemView.setOnLongClickListener {
-                        showCachedNexusContext()
-                        true
-                    }
-                    return@post
-                }
-            }
-        }
-    }
 
         private fun showNexusPromptEditor(pref: Preference) {
         val ctx = context ?: return
