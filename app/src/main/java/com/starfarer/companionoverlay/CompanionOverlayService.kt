@@ -16,6 +16,7 @@ import android.view.Choreographer
 import android.view.*
 import android.widget.ImageView
 import androidx.core.app.NotificationCompat
+import com.starfarer.companionoverlay.avatar3d.FilamentAvatarRenderer
 import com.starfarer.companionoverlay.event.OverlayCoordinator
 import com.starfarer.companionoverlay.event.OverlayEvent
 import com.starfarer.companionoverlay.mcp.McpManager
@@ -74,12 +75,13 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
     private lateinit var spriteAnimator: SpriteAnimator
     private lateinit var bubbleManager: BubbleManager
     private lateinit var voiceController: VoiceInputController
+    private var filamentRenderer: FilamentAvatarRenderer? = null
 
     // ══════════════════════════════════════════════════════════════════════
     // View state
     // ══════════════════════════════════════════════════════════════════════
 
-    private lateinit var overlayView: ImageView
+    private lateinit var overlayView: View
     private lateinit var params: WindowManager.LayoutParams
     private val handler = Handler(Looper.getMainLooper())
 
@@ -142,6 +144,7 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
         conversationManager.destroy()
         bubbleManager.hideVoice()
         bubbleManager.hideSpeechBubble()
+        filamentRenderer?.destroy()
         spriteAnimator.release()
 
         if (::overlayView.isInitialized) {
@@ -241,6 +244,55 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
     }
 
     private fun initializeOverlayView() {
+        if (settings.is3dMode) {
+            initializeFilamentOverlay()
+            return
+        }
+        initializeSpriteOverlay()
+    }
+
+    private fun initializeFilamentOverlay() {
+        try {
+            val renderer = FilamentAvatarRenderer(this)
+            filamentRenderer = renderer
+            val textureView = renderer.createTextureView()
+            overlayView = textureView
+
+            val heightPx = spriteAnimator.viewHeight
+            val widthPx = (heightPx * 0.55).toInt()
+
+            params = WindowManager.LayoutParams(
+                widthPx,
+                heightPx,
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                PixelFormat.TRANSLUCENT
+            ).apply {
+                gravity = Gravity.TOP or Gravity.START
+                x = screenWidth - widthPx - spriteAnimator.marginRightPx - spriteAnimator.walkDistancePx
+                y = screenHeight - heightPx - spriteAnimator.marginBottomPx
+            }
+
+            restorePosition()
+            setupTouchHandling()
+            spriteAnimator.attach(overlayView, params, windowManager)
+            windowManager.addView(overlayView, params)
+            overlayView.alpha = 0f
+            overlayView.animate().alpha(1f).setDuration(300).start()
+            renderer.start()
+            DebugLog.log("Overlay", "Filament 3D overlay active")
+        } catch (e: Exception) {
+            DebugLog.log("Overlay", "Filament FAILED: ${e.message}")
+            android.util.Log.e("Overlay", "Filament failed", e)
+            settings.overlayMode = "sprite"
+            filamentRenderer = null
+            initializeSpriteOverlay()
+        }
+    }
+
+    private fun initializeSpriteOverlay() {
         overlayView = ImageView(this).apply {
             scaleType = ImageView.ScaleType.FIT_CENTER
         }

@@ -32,6 +32,7 @@ android {
         ndk {
             abiFilters "arm64-v8a"
         }
+
     }
 
     signingConfigs {
@@ -58,6 +59,12 @@ android {
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
+    }
+
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true  // Compress native libs instead of page-aligning
+        }
     }
 
     kotlinOptions {
@@ -90,7 +97,13 @@ dependencies {
     implementation 'androidx.car.app:app:1.7.0'
     implementation 'androidx.car.app:app-projected:1.7.0'
 
+    // Filament 3D rendering (avatar overlay)
+    implementation 'com.google.android.filament:filament-android:1.57.1'
+    implementation 'com.google.android.filament:gltfio-android:1.57.1'
+    implementation 'com.google.android.filament:filament-utils-android:1.57.1'
+
     // ML inference (Silero VAD)
+
     implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.20.0'
 
     // Koin DI (all-in-one Android module includes ViewModel support)

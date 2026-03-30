@@ -214,6 +214,13 @@ class SettingsRepository(
         // Don't clear secure prefs — that would wipe auth tokens too
     }
 
+    var overlayMode: String
+        get() = settingsPrefs.getString(KEY_OVERLAY_MODE, "sprite") ?: "sprite"
+        set(value) = settingsPrefs.edit().putString(KEY_OVERLAY_MODE, value).apply()
+
+    val is3dMode: Boolean
+        get() = overlayMode == "godot_3d"
+
     companion object {
         const val CONNECTION_API_KEY = "api_key"
         const val CONNECTION_OAUTH = "oauth"
@@ -248,5 +255,6 @@ class SettingsRepository(
         private const val KEY_NEXUS_CONTEXT_CACHE = "nexus_context_cache"
         private const val KEY_NEXUS_CONTEXT_TIMESTAMP = "nexus_context_timestamp"
         private const val KEY_NEXUS_CONTEXT_APPEND = "nexus_context_append_to_prompt"
+        private const val KEY_OVERLAY_MODE = "overlay_mode"
     }
 }

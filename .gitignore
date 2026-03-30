@@ -13,3 +13,5 @@ app/src/main/assets/custom_walk_sheet.png
 
 # Release keystore
 senni-release.jks
+godot-avatar/
+*.hprof

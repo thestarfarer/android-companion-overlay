@@ -26,6 +26,22 @@
 
     </PreferenceCategory>
 
+
+    <!-- ════════ DISPLAY ════════ -->
+    <PreferenceCategory app:iconSpaceReserved="false" app:title="Display">
+
+        <ListPreference
+            app:iconSpaceReserved="false"
+            app:key="overlay_mode"
+            app:title="Overlay mode"
+            app:summary="Choose between 2D sprite or 3D avatar"
+            app:entries="@array/overlay_mode_entries"
+            app:entryValues="@array/overlay_mode_values"
+            app:defaultValue="sprite"
+            app:persistent="true"/>
+
+    </PreferenceCategory>
+
     <!-- ════════ VOICE INPUT ════════ -->
     <PreferenceCategory app:iconSpaceReserved="false" app:title="Voice Input">
 
