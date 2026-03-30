@@ -222,7 +222,9 @@ class ConversationManager(
                     conversationHistory.toList() + userMessage
                 }
                 val now = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm (EEEE)"))
-                val basePrompt = "[Current time: $now]\n\n" + settings.systemPrompt
+                val nexusContext = if (settings.nexusContextAppendToPrompt) settings.nexusContextCache else null
+                val basePrompt = "[Current time: $now]\n\n" + settings.systemPrompt +
+                    (nexusContext?.let { "\n\n[Nexus context]\n$it\n[/Nexus context]" } ?: "")
 
                 // For user-initiated messages (not synthetic injections), drain any
                 // pending results into the system prompt as bonus context.

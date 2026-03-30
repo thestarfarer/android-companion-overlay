@@ -188,6 +188,23 @@ class SettingsRepository(
         get() = settingsPrefs.getBoolean(KEY_NEXUS_INTEGRATION, false)
         set(value) = settingsPrefs.edit().putBoolean(KEY_NEXUS_INTEGRATION, value).apply()
 
+    var nexusContextCache: String?
+        get() = settingsPrefs.getString(KEY_NEXUS_CONTEXT_CACHE, null)
+        set(value) {
+            val editor = settingsPrefs.edit()
+            if (value == null) editor.remove(KEY_NEXUS_CONTEXT_CACHE)
+            else editor.putString(KEY_NEXUS_CONTEXT_CACHE, value)
+            editor.apply()
+        }
+
+    var nexusContextTimestamp: Long
+        get() = settingsPrefs.getLong(KEY_NEXUS_CONTEXT_TIMESTAMP, 0)
+        set(value) = settingsPrefs.edit().putLong(KEY_NEXUS_CONTEXT_TIMESTAMP, value).apply()
+
+    var nexusContextAppendToPrompt: Boolean
+        get() = settingsPrefs.getBoolean(KEY_NEXUS_CONTEXT_APPEND, true)
+        set(value) = settingsPrefs.edit().putBoolean(KEY_NEXUS_CONTEXT_APPEND, value).apply()
+
     // ══════════════════════════════════════════════════════════════════════
     // Utilities
     // ══════════════════════════════════════════════════════════════════════
@@ -228,5 +245,8 @@ class SettingsRepository(
         private const val KEY_MCP_SHOW_TOOL_BUBBLES = "mcp_show_tool_bubbles"
         private const val KEY_NEXUS_EMIT_COUNTER = "nexus_emit_counter"
         private const val KEY_NEXUS_INTEGRATION = "nexus_integration_enabled"
+        private const val KEY_NEXUS_CONTEXT_CACHE = "nexus_context_cache"
+        private const val KEY_NEXUS_CONTEXT_TIMESTAMP = "nexus_context_timestamp"
+        private const val KEY_NEXUS_CONTEXT_APPEND = "nexus_context_append_to_prompt"
     }
 }

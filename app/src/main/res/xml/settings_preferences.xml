@@ -154,6 +154,21 @@
 
         <Preference
             app:iconSpaceReserved="false"
+            app:key="nexus_fetch_context"
+            app:title="Fetch Nexus context"
+            app:summary="Never fetched"
+            app:dependency="nexus_integration_enabled"/>
+
+        <SwitchPreferenceCompat
+            app:iconSpaceReserved="false"
+            app:key="nexus_context_append_to_prompt"
+            app:title="Include context in system prompt"
+            app:summary="Append cached Nexus context to the system prompt for every message"
+            app:defaultValue="true"
+            app:dependency="nexus_integration_enabled"/>
+
+        <Preference
+            app:iconSpaceReserved="false"
             app:key="mcp_manage_servers"
             app:title="Manage servers"
             app:summary="No servers configured"

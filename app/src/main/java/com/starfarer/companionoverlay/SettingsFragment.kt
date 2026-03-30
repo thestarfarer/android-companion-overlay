@@ -27,6 +27,7 @@ import com.starfarer.companionoverlay.mcp.McpClient
 import com.starfarer.companionoverlay.mcp.McpManager
 import com.starfarer.companionoverlay.mcp.McpRepository
 import com.starfarer.companionoverlay.mcp.McpServerConfig
+import com.starfarer.companionoverlay.mcp.NexusContextFetcher
 import com.starfarer.companionoverlay.repository.SettingsRepository
 import kotlinx.coroutines.launch
 import org.koin.android.ext.android.inject
@@ -604,6 +605,60 @@ class SettingsFragment : PreferenceFragmentCompat() {
                 showMcpServersDialog()
                 true
             }
+        }
+
+        findPreference<Preference>("nexus_fetch_context")?.apply {
+            refreshNexusContextSummary(this)
+            setOnPreferenceClickListener {
+                fetchNexusContext(this)
+                true
+            }
+        }
+
+        findPreference<SwitchPreferenceCompat>("nexus_context_append_to_prompt")?.apply {
+            isChecked = settings.nexusContextAppendToPrompt
+            setOnPreferenceChangeListener { _, newValue ->
+                settings.nexusContextAppendToPrompt = newValue as Boolean
+                true
+            }
+        }
+    }
+
+    private fun refreshNexusContextSummary(pref: Preference? = findPreference("nexus_fetch_context")) {
+        pref ?: return
+        val ts = settings.nexusContextTimestamp
+        val cache = settings.nexusContextCache
+        pref.summary = when {
+            ts == 0L || cache == null -> "Never fetched"
+            else -> {
+                val date = SimpleDateFormat("EEE, MMM d HH:mm", Locale.getDefault())
+                    .format(Date(ts))
+                val chars = cache.length
+                "Last fetched: $date (${chars} chars)"
+            }
+        }
+    }
+
+    private fun fetchNexusContext(pref: Preference) {
+        val mcpManager: McpManager by inject()
+        val fetcher = NexusContextFetcher(mcpManager, settings)
+
+        pref.summary = "Fetching..."
+        pref.isEnabled = false
+
+        lifecycleScope.launch {
+            val result = fetcher.fetch()
+            pref.isEnabled = true
+            result.fold(
+                onSuccess = { context ->
+                    refreshNexusContextSummary(pref)
+                    Toast.makeText(requireContext(), "Context fetched (${context.length} chars)", Toast.LENGTH_SHORT).show()
+                },
+                onFailure = { error ->
+                    pref.summary = "Error: ${error.message?.take(60)}"
+                    Toast.makeText(requireContext(), "Fetch failed: ${error.message}", Toast.LENGTH_LONG).show()
+                }
+            )
         }
     }
 
