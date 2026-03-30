@@ -15,6 +15,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.preference.*
+import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
@@ -129,6 +130,23 @@ class SettingsFragment : PreferenceFragmentCompat() {
         super.onViewCreated(view, savedInstanceState)
         pendingHighlightKey = arguments?.getString(SettingsActivity.EXTRA_HIGHLIGHT_KEY)
         arguments?.remove(SettingsActivity.EXTRA_HIGHLIGHT_KEY)
+
+        listView.addOnChildAttachStateChangeListener(object : RecyclerView.OnChildAttachStateChangeListener {
+            override fun onChildViewAttachedToWindow(child: View) {
+                val holder = listView.getChildViewHolder(child) as? PreferenceViewHolder ?: return
+                val pos = holder.bindingAdapterPosition
+                if (pos < 0) return
+                val adapter = listView.adapter as? PreferenceGroupAdapter ?: return
+                val pref = adapter.getItem(pos)
+                if (pref?.key == "nexus_fetch_context") {
+                    child.setOnLongClickListener {
+                        showCachedNexusContext()
+                        true
+                    }
+                }
+            }
+            override fun onChildViewDetachedFromWindow(child: View) {}
+        })
     }
 
     override fun onResume() {
@@ -624,7 +642,37 @@ class SettingsFragment : PreferenceFragmentCompat() {
         }
     }
 
-    private fun refreshNexusContextSummary(pref: Preference? = findPreference("nexus_fetch_context")) {
+    private fun showCachedNexusContext() {
+        val cache = settings.nexusContextCache
+        if (cache == null) {
+            Toast.makeText(requireContext(), "No cached context", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val scrollView = android.widget.ScrollView(requireContext()).apply {
+            setPadding(48, 32, 48, 32)
+        }
+        val textView = android.widget.TextView(requireContext()).apply {
+            text = cache
+            textSize = 13f
+            setTextIsSelectable(true)
+        }
+        scrollView.addView(textView)
+
+        MaterialAlertDialogBuilder(requireContext())
+            .setTitle("Nexus Context")
+            .setView(scrollView)
+            .setPositiveButton("OK", null)
+            .setNeutralButton("Clear") { _, _ ->
+                settings.nexusContextCache = null
+                settings.nexusContextTimestamp = 0
+                refreshNexusContextSummary()
+                Toast.makeText(requireContext(), "Context cleared", Toast.LENGTH_SHORT).show()
+            }
+            .show()
+    }
+
+        private fun refreshNexusContextSummary(pref: Preference? = findPreference("nexus_fetch_context")) {
         pref ?: return
         val ts = settings.nexusContextTimestamp
         val cache = settings.nexusContextCache
