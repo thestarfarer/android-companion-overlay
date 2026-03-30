@@ -15,7 +15,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.preference.*
-import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
@@ -130,23 +129,6 @@ class SettingsFragment : PreferenceFragmentCompat() {
         super.onViewCreated(view, savedInstanceState)
         pendingHighlightKey = arguments?.getString(SettingsActivity.EXTRA_HIGHLIGHT_KEY)
         arguments?.remove(SettingsActivity.EXTRA_HIGHLIGHT_KEY)
-
-        listView.addOnChildAttachStateChangeListener(object : RecyclerView.OnChildAttachStateChangeListener {
-            override fun onChildViewAttachedToWindow(child: View) {
-                val holder = listView.getChildViewHolder(child) as? PreferenceViewHolder ?: return
-                val pos = holder.bindingAdapterPosition
-                if (pos < 0) return
-                val adapter = listView.adapter as? PreferenceGroupAdapter ?: return
-                val pref = adapter.getItem(pos)
-                if (pref?.key == "nexus_fetch_context") {
-                    child.setOnLongClickListener {
-                        showCachedNexusContext()
-                        true
-                    }
-                }
-            }
-            override fun onChildViewDetachedFromWindow(child: View) {}
-        })
     }
 
     override fun onResume() {
@@ -154,6 +136,8 @@ class SettingsFragment : PreferenceFragmentCompat() {
         refreshPermissions()
         refreshAccount()
         refreshDebugTest()
+
+        applyNexusLongPress()
 
         val key = pendingHighlightKey ?: return
         pendingHighlightKey = null
@@ -642,7 +626,27 @@ class SettingsFragment : PreferenceFragmentCompat() {
         }
     }
 
-    private fun showCachedNexusContext() {
+    private fun applyNexusLongPress() {
+        val rv = listView ?: return
+        rv.post {
+            val adapter = rv.adapter ?: return@post
+            for (i in 0 until adapter.itemCount) {
+                val holder = rv.findViewHolderForAdapterPosition(i) ?: continue
+                val pref = (holder as? PreferenceViewHolder)
+                // Match by checking the preference at this position
+                val prefAdapter = adapter as? PreferenceGroupAdapter ?: return@post
+                if (i < prefAdapter.itemCount && prefAdapter.getItem(i)?.key == "nexus_fetch_context") {
+                    holder.itemView.setOnLongClickListener {
+                        showCachedNexusContext()
+                        true
+                    }
+                    return@post
+                }
+            }
+        }
+    }
+
+        private fun showCachedNexusContext() {
         val cache = settings.nexusContextCache
         if (cache == null) {
             Toast.makeText(requireContext(), "No cached context", Toast.LENGTH_SHORT).show()
