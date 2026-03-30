@@ -44,7 +44,7 @@ class SpriteAnimator(
      * Mutable view references, set via [attach] after the overlay view
      * is created and added to the window manager.
      */
-    private var overlayView: ImageView? = null
+    private var overlayView: android.view.View? = null
     private var params: WindowManager.LayoutParams? = null
     private var windowManager: WindowManager? = null
 
@@ -116,7 +116,7 @@ class SpriteAnimator(
      * Bind the overlay view and its layout params after creation.
      * Must be called before the first [update].
      */
-    fun attach(view: ImageView, layoutParams: WindowManager.LayoutParams, wm: WindowManager) {
+    fun attach(view: android.view.View, layoutParams: WindowManager.LayoutParams, wm: WindowManager) {
         overlayView = view
         params = layoutParams
         windowManager = wm
@@ -405,7 +405,7 @@ class SpriteAnimator(
     // ══════════════════════════════════════════════════════════════════════
 
     private fun drawIdle(t: Double) {
-        val view = overlayView ?: return
+        val view = (overlayView as? ImageView) ?: return
         val p = params ?: return
         val idleSheet = idleSpriteSheet ?: return
         val renderBitmap = idleRenderBitmap ?: return
@@ -437,7 +437,7 @@ class SpriteAnimator(
     }
 
     private fun drawWalking(now: Long) {
-        val view = overlayView ?: return
+        val view = (overlayView as? ImageView) ?: return
         val walkElapsed = now - walkStartTime
         val frame = ((walkElapsed / WALK_FRAME_DURATION_MS).toInt()) % walkFrameCount
 

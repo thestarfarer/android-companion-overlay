@@ -59,7 +59,8 @@ class BeepManager(private val context: Context) {
 
     fun play(beep: Beep) {
         val id = soundIds[beep] ?: return
-        soundPool.play(id, 1.0f, 1.0f, 1, 0, 1.0f)
+        val stream = soundPool.play(id, 1.0f, 1.0f, 1, 0, 1.0f)
+        DebugLog.log(TAG, "Playing $beep (soundId=$id, stream=$stream)")
     }
 
     fun release() = soundPool.release()

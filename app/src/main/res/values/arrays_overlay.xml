@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="overlay_mode_entries">
+        <item>2D Sprite</item>
+        <item>3D Avatar</item>
+    </string-array>
+    <string-array name="overlay_mode_values">
+        <item>sprite</item>
+        <item>godot_3d</item>
+    </string-array>
+</resources>
