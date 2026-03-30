@@ -201,6 +201,11 @@ class SettingsRepository(
         get() = settingsPrefs.getLong(KEY_NEXUS_CONTEXT_TIMESTAMP, 0)
         set(value) = settingsPrefs.edit().putLong(KEY_NEXUS_CONTEXT_TIMESTAMP, value).apply()
 
+    var nexusContextPrompt: String
+        get() = settingsPrefs.getString(KEY_NEXUS_CONTEXT_PROMPT, DEFAULT_CONTEXT_PROMPT)
+            ?: DEFAULT_CONTEXT_PROMPT
+        set(value) = settingsPrefs.edit().putString(KEY_NEXUS_CONTEXT_PROMPT, value).apply()
+
     var nexusContextAppendToPrompt: Boolean
         get() = settingsPrefs.getBoolean(KEY_NEXUS_CONTEXT_APPEND, true)
         set(value) = settingsPrefs.edit().putBoolean(KEY_NEXUS_CONTEXT_APPEND, value).apply()
@@ -255,6 +260,8 @@ class SettingsRepository(
         private const val KEY_NEXUS_CONTEXT_CACHE = "nexus_context_cache"
         private const val KEY_NEXUS_CONTEXT_TIMESTAMP = "nexus_context_timestamp"
         private const val KEY_NEXUS_CONTEXT_APPEND = "nexus_context_append_to_prompt"
+        private const val KEY_NEXUS_CONTEXT_PROMPT = "nexus_context_prompt"
+        private const val DEFAULT_CONTEXT_PROMPT = "What happened recently? What are we up to? What should I know?"
         private const val KEY_OVERLAY_MODE = "overlay_mode"
     }
 }

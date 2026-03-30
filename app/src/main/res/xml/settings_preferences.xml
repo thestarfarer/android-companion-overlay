@@ -170,6 +170,13 @@
 
         <Preference
             app:iconSpaceReserved="false"
+            app:key="nexus_context_prompt"
+            app:title="Context prompt"
+            app:summary="Tap to edit the prompt sent to Sable"
+            app:dependency="nexus_integration_enabled"/>
+
+        <Preference
+            app:iconSpaceReserved="false"
             app:key="nexus_fetch_context"
             app:title="Fetch Nexus context"
             app:summary="Never fetched"

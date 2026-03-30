@@ -52,7 +52,7 @@ class NexusContextFetcher(
         val presetName = settings.systemPrompt.take(80)
             .let { if (it.contains("\n")) it.substringBefore("\n") else it }
 
-        val stateText = state ?: "Waking up. Time: $now. What happened recently? What should I know?"
+        val stateText = state ?: "What happened recently? What are we up to? What should I know?"
 
         val arguments = buildJsonObject {
             put("state", stateText)
