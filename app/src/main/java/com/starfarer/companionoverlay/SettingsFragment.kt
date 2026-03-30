@@ -609,6 +609,16 @@ class SettingsFragment : PreferenceFragmentCompat() {
             }
         }
 
+        findPreference<Preference>("nexus_context_prompt")?.apply {
+            summary = settings.nexusContextPrompt.take(80).let {
+                if (settings.nexusContextPrompt.length > 80) "$it..." else it
+            }
+            setOnPreferenceClickListener {
+                showNexusPromptEditor(this)
+                true
+            }
+        }
+
         findPreference<Preference>("nexus_fetch_context")?.apply {
             refreshNexusContextSummary(this)
             setOnPreferenceClickListener {
@@ -644,6 +654,42 @@ class SettingsFragment : PreferenceFragmentCompat() {
                 }
             }
         }
+    }
+
+        private fun showNexusPromptEditor(pref: Preference) {
+        val ctx = context ?: return
+        val inputLayout = com.google.android.material.textfield.TextInputLayout(ctx).apply {
+            setPadding(48, 16, 48, 0)
+        }
+        val editText = com.google.android.material.textfield.TextInputEditText(inputLayout.context).apply {
+            setText(settings.nexusContextPrompt)
+            minLines = 3
+            maxLines = 6
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE
+        }
+        inputLayout.addView(editText)
+
+        MaterialAlertDialogBuilder(ctx)
+            .setTitle("Context Prompt")
+            .setView(inputLayout)
+            .setPositiveButton("Save") { _, _ ->
+                val text = editText.text?.toString()?.trim()
+                if (!text.isNullOrEmpty()) {
+                    settings.nexusContextPrompt = text
+                    pref.summary = text.take(80).let {
+                        if (text.length > 80) "$it..." else it
+                    }
+                }
+            }
+            .setNeutralButton("Reset") { _, _ ->
+                settings.nexusContextPrompt = "What happened recently? What are we up to? What should I know?"
+                pref.summary = settings.nexusContextPrompt.take(80)
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+
+        editText.requestFocus()
     }
 
         private fun showCachedNexusContext() {
