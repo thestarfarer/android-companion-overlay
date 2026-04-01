@@ -53,14 +53,14 @@ class ClaudeAuth(
         private const val TAG = "Auth"
 
         // OAuth endpoints
-        private const val OAUTH_AUTHORIZE_URL = "https://claude.ai/oauth/authorize"
+        private const val OAUTH_AUTHORIZE_URL = "https://claude.com/cai/oauth/authorize"
         private const val OAUTH_TOKEN_URL = "https://platform.claude.com/v1/oauth/token"
         private const val PROFILE_URL = "https://api.anthropic.com/api/oauth/profile"
 
         // OAuth client config
         private const val OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
-        private const val OAUTH_AUTHORIZE_SCOPES = "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers"
-        private const val OAUTH_REFRESH_SCOPES = "user:profile user:inference user:sessions:claude_code user:mcp_servers"
+        private const val OAUTH_AUTHORIZE_SCOPES = "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload"
+        private const val OAUTH_REFRESH_SCOPES = "user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload"
         private const val OAUTH_BETA = "oauth-2025-04-20"
 
         // Callback server
@@ -73,6 +73,7 @@ class ClaudeAuth(
         private const val KEY_EXPIRES_AT = "expires_at"
         private const val KEY_USER_ID = "user_id"
         private const val KEY_ACCOUNT_UUID = "account_uuid"
+        private const val KEY_SESSION_ID = "session_id"
 
         // DNS fallback IPs (updated 2026-02)
         private val FALLBACK_IPS = mapOf(
@@ -445,11 +446,25 @@ class ClaudeAuth(
         }
     }
 
+    fun getOrCreateSessionId(): String {
+        val existing = prefs.getString(KEY_SESSION_ID, null)
+        if (existing != null) return existing
+
+        val sessionId = UUID.randomUUID().toString()
+        prefs.edit().putString(KEY_SESSION_ID, sessionId).commit()
+        log("Generated sessionId: $sessionId")
+        return sessionId
+    }
+
     fun buildMetadataUserId(): String {
         val userId = getOrCreateUserId()
         val accountUuid = getAccountUuid() ?: ""
-        val sessionId = UUID.randomUUID().toString()
-        return "user_${userId}_account_${accountUuid}_session_${sessionId}"
+        val sessionId = getOrCreateSessionId()
+        return JSONObject().apply {
+            put("device_id", userId)
+            put("account_uuid", accountUuid)
+            put("session_id", sessionId)
+        }.toString()
     }
 
     // ══════════════════════════════════════════════════════════════════════

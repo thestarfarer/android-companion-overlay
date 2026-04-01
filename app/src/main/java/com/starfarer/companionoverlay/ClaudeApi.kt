@@ -242,6 +242,7 @@ class ClaudeApi(
             .header("anthropic-beta", OAUTH_BETA)
             .header("User-Agent", USER_AGENT)
             .header("x-app", "cli")
+            .header("X-Claude-Code-Session-Id", auth.getOrCreateSessionId())
             .build()
     }
 

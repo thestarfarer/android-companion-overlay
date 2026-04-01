@@ -11,7 +11,7 @@ import java.security.MessageDigest
 object ClaudeBilling {
     
     private const val BILLING_SALT = "59cf53e54c78"
-    const val CLIENT_VERSION = "2.1.72"
+    const val CLIENT_VERSION = "2.1.89"
     
     /**
      * Compute the billing header based on the first user message content.
