@@ -168,6 +168,16 @@ class SettingsRepository(
         get() = settingsPrefs.getBoolean(KEY_VOICE_SCREENSHOT, false)
         set(value) = settingsPrefs.edit().putBoolean(KEY_VOICE_SCREENSHOT, value).apply()
 
+    /** When true, long-pressing the avatar snaps a back-camera photo instead of a screenshot. */
+    var cameraCaptureEnabled: Boolean
+        get() = settingsPrefs.getBoolean(KEY_CAMERA_CAPTURE, false)
+        set(value) = settingsPrefs.edit().putBoolean(KEY_CAMERA_CAPTURE, value).apply()
+
+    /** Debug: persist a copy of every image sent to Claude for inspection. */
+    var saveSentImages: Boolean
+        get() = settingsPrefs.getBoolean(KEY_SAVE_SENT_IMAGES, false)
+        set(value) = settingsPrefs.edit().putBoolean(KEY_SAVE_SENT_IMAGES, value).apply()
+
     // ══════════════════════════════════════════════════════════════════════
     // MCP
     // ══════════════════════════════════════════════════════════════════════
@@ -253,6 +263,8 @@ class SettingsRepository(
         private const val KEY_VOLUME_TOGGLE = "volume_toggle_enabled"
         private const val KEY_BEEPS_ENABLED = "beeps_enabled"
         private const val KEY_VOICE_SCREENSHOT = "voice_screenshot_enabled"
+        private const val KEY_CAMERA_CAPTURE = "camera_capture_enabled"
+        private const val KEY_SAVE_SENT_IMAGES = "save_sent_images"
         private const val KEY_MCP_ENABLED = "mcp_enabled"
         private const val KEY_MCP_SHOW_TOOL_BUBBLES = "mcp_show_tool_bubbles"
         private const val KEY_NEXUS_EMIT_COUNTER = "nexus_emit_counter"

@@ -106,6 +106,18 @@ class SettingsFragment : PreferenceFragmentCompat() {
         refreshPermissions()
     }
 
+    private val cameraPermLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        val ctx = context ?: return@registerForActivityResult
+        if (granted) {
+            Toast.makeText(ctx, "Camera ready~", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(ctx, "Camera capture needs camera permission", Toast.LENGTH_LONG).show()
+        }
+        refreshPermissions()
+    }
+
     override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
         // Point at the same SharedPreferences file PromptSettings uses
         preferenceManager.sharedPreferencesName = "companion_prompts"
@@ -392,7 +404,20 @@ class SettingsFragment : PreferenceFragmentCompat() {
             }
             true
         }
+
+        findPreference<Preference>("perm_camera")?.setOnPreferenceClickListener {
+            if (hasCameraPerm()) {
+                Toast.makeText(requireContext(), "Already granted~", Toast.LENGTH_SHORT).show()
+            } else {
+                cameraPermLauncher.launch(Manifest.permission.CAMERA)
+            }
+            true
+        }
     }
+
+    private fun hasCameraPerm(): Boolean =
+        ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.CAMERA) ==
+            PackageManager.PERMISSION_GRANTED
 
     private fun refreshPermissions() {
         val ctx = context ?: return
@@ -403,6 +428,10 @@ class SettingsFragment : PreferenceFragmentCompat() {
         findPreference<Preference>("perm_voice")?.summary =
             if (hasVoicePerms()) "✓ Granted"
             else "Microphone and Bluetooth permissions for voice recording"
+
+        findPreference<Preference>("perm_camera")?.summary =
+            if (hasCameraPerm()) "✓ Granted"
+            else "Required for camera capture instead of screenshots"
     }
 
     // ── Account ──
@@ -555,6 +584,36 @@ class SettingsFragment : PreferenceFragmentCompat() {
                 pref.summary = if (response.success) response.text
                     else "Error: ${response.error}"
                 pref.isEnabled = true
+            }
+            true
+        }
+
+        findPreference<SwitchPreferenceCompat>("save_sent_images")?.apply {
+            isChecked = settings.saveSentImages
+            setOnPreferenceChangeListener { _, newValue ->
+                settings.saveSentImages = newValue as Boolean
+                true
+            }
+        }
+
+        findPreference<Preference>("debug_view_image")?.setOnPreferenceClickListener {
+            val ctx = requireContext()
+            val file = ImageAudit.latest(ctx)
+            if (file == null) {
+                Toast.makeText(ctx, "No saved images yet — enable 'Save sent images' and send one", Toast.LENGTH_LONG).show()
+            } else {
+                val uri = androidx.core.content.FileProvider.getUriForFile(
+                    ctx, "${ctx.packageName}.fileprovider", file
+                )
+                val intent = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(uri, "image/jpeg")
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                try {
+                    startActivity(intent)
+                } catch (e: Exception) {
+                    Toast.makeText(ctx, "No image viewer found", Toast.LENGTH_SHORT).show()
+                }
             }
             true
         }

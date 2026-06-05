@@ -40,6 +40,13 @@
             app:defaultValue="sprite"
             app:persistent="true"/>
 
+        <SwitchPreferenceCompat
+            app:iconSpaceReserved="false"
+            app:key="camera_capture_enabled"
+            app:title="Camera instead of screenshot"
+            app:summary="Long-press the avatar to snap a back-camera photo instead of capturing the screen"
+            app:defaultValue="false"/>
+
     </PreferenceCategory>
 
     <!-- ════════ VOICE INPUT ════════ -->
@@ -214,6 +221,12 @@
             app:title="Voice input"
             app:summary="Microphone and Bluetooth permissions for voice recording"/>
 
+        <Preference
+            app:iconSpaceReserved="false"
+            app:key="perm_camera"
+            app:title="Camera"
+            app:summary="Required for camera capture instead of screenshots"/>
+
     </PreferenceCategory>
 
     <!-- ════════ CLAUDE API ════════ -->
@@ -258,6 +271,19 @@
             app:key="debug_test"
             app:title="Send test message"
             app:summary="Send a test prompt to verify the connection"/>
+
+        <SwitchPreferenceCompat
+            app:iconSpaceReserved="false"
+            app:key="save_sent_images"
+            app:title="Save sent images"
+            app:summary="Keep a copy of every screenshot/photo sent to Claude for inspection"
+            app:defaultValue="false"/>
+
+        <Preference
+            app:iconSpaceReserved="false"
+            app:key="debug_view_image"
+            app:title="View last sent image"
+            app:summary="Open the most recent image sent to Claude"/>
 
         <Preference
             app:iconSpaceReserved="false"
