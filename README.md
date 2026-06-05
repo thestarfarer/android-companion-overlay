@@ -12,7 +12,8 @@ An animated sprite companion powered by Claude AI that lives on your Android scr
 ### Core
 - **Animated sprite overlay** — idle breathing, walks when tapped, escapes when tapped repeatedly
 - **Screenshot + AI commentary** — long-press the sprite to capture the screen and get a response in a speech bubble
-- **Camera capture** — optionally switch long-press to snap a back-camera photo instead of a screenshot ("look at this"), sent through the same pipeline
+- **Camera capture** — set long-press to snap a back-camera photo instead of a screenshot ("look at this"), sent through the same pipeline
+- **Radial quick menu** — swipe up on the avatar for a small quick-settings disk; swipe down (or tap away) to hide
 - **Reply input** — type replies directly in the speech bubble
 - **Conversation memory** — configurable history length up to 30 turns, optionally persists across restarts
 - **Web search** — let Claude search the web for current information
@@ -32,6 +33,8 @@ An animated sprite companion powered by Claude AI that lives on your Android scr
 - **Car app integration** — voice conversation with Claude through Android Auto
 
 ### Controls
+- **Swipe gestures** — swipe up on the avatar to open the radial quick menu, swipe down to close (tap still walks her, long-press still captures — no added tap delay)
+- **Radial quick menu** — three toggles you can flip without opening Settings: capture mode (off / screenshot / camera), volume-button shortcut on/off, and Gemini voice (Gemini ↔ on-device, both STT+TTS at once). Changes apply live
 - **Volume down button shortcut** — double-press: show/hide overlay, triple-press: voice input (off by default, interjects with long press for volume down functionality)
 - **Headset button** — long-press triggers voice input
 - **Ghost mode** — semi-transparent and click-through when keyboard is visible
@@ -56,7 +59,7 @@ Optional: **Digital assistant** — Settings > Apps > Default Apps > Digital ass
 
 ### Camera capture (optional)
 
-Enable **Settings > Display > "Camera instead of screenshot"** to make long-pressing the avatar take a back-camera photo instead of a screenshot. Grant the camera permission under **Settings > Permissions > Camera** first. Capture is headless (no viewfinder) — point the phone, then long-press. There's a brief pause while the lens focuses before the shot is taken.
+Set **Settings > Display > "Long-press capture"** to **Camera** (the options are Off / Screenshot / Camera) — or flip it from the radial quick menu — to make an upper-body long-press take a back-camera photo. Grant the camera permission under **Settings > Permissions > Camera** first. Capture is headless (no viewfinder) — point the phone, then long-press. There's a brief pause while the lens focuses before the shot is taken. When set to **Off**, an upper-body long-press reopens the last response bubble instead.
 
 ### Claude API
 

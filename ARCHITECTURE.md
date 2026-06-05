@@ -114,6 +114,7 @@ The service also self-guards: if "Display over other apps" is missing, `onCreate
 | `BubbleStyle` | Centralized bubble styling — Monet Material You colors (API 31+), fallback warm cream, rounded backgrounds |
 | `ScreenshotManager` | Screenshot request API — delegates to accessibility service via `OverlayCoordinator` |
 | `CameraManager` | Headless back-camera still capture via CameraX — binds `ImageCapture` to a throwaway `LifecycleOwner`, waits for focus, returns a downscaled (1568px), EXIF-uprighted base64 JPEG. Same artifact as `ScreenshotManager`, so the send pipeline is shared |
+| `RadialMenuManager` / `RadialMenuView` | Quick-access settings disk — a material-styled sector overlay (center-right edge) opened by swipe-up / closed by swipe-down or tap-away. Three emoji toggles (capture mode, volume shortcut, Gemini voice) write straight to `SettingsRepository`; live reads mean changes apply with no restart. `RadialMenuManager` owns the window lifecycle (mirrors `BubbleManager`); `RadialMenuView` draws the sector + glyphs and hit-tests by angle |
 
 ### Settings and storage
 
@@ -216,6 +217,8 @@ app/src/main/
 │   ├── CameraManager.kt
 │   ├── ImageAudit.kt
 │   ├── OverlayController.kt
+│   ├── RadialMenuManager.kt
+│   ├── RadialMenuView.kt
 │   ├── CharacterPreset.kt
 │   ├── PromptSettings.kt
 │   ├── DebugLog.kt

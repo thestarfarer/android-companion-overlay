@@ -4,6 +4,20 @@ import android.content.SharedPreferences
 import com.starfarer.companionoverlay.CharacterPreset
 import com.starfarer.companionoverlay.PromptSettings
 
+/** What an upper-body long-press on the avatar does. */
+enum class CaptureMode(val key: String) {
+    OFF("off"),
+    SCREENSHOT("screenshot"),
+    CAMERA("camera");
+
+    /** The next mode when cycling Off → Screenshot → Camera → Off. */
+    fun next(): CaptureMode = entries[(ordinal + 1) % entries.size]
+
+    companion object {
+        fun fromKey(key: String?): CaptureMode = entries.firstOrNull { it.key == key } ?: SCREENSHOT
+    }
+}
+
 /**
  * Repository layer for application settings.
  *
@@ -168,10 +182,10 @@ class SettingsRepository(
         get() = settingsPrefs.getBoolean(KEY_VOICE_SCREENSHOT, false)
         set(value) = settingsPrefs.edit().putBoolean(KEY_VOICE_SCREENSHOT, value).apply()
 
-    /** When true, long-pressing the avatar snaps a back-camera photo instead of a screenshot. */
-    var cameraCaptureEnabled: Boolean
-        get() = settingsPrefs.getBoolean(KEY_CAMERA_CAPTURE, false)
-        set(value) = settingsPrefs.edit().putBoolean(KEY_CAMERA_CAPTURE, value).apply()
+    /** What an upper-body long-press does: Off (reopen last bubble), Screenshot, or Camera. */
+    var captureMode: CaptureMode
+        get() = CaptureMode.fromKey(settingsPrefs.getString(KEY_CAPTURE_MODE, null))
+        set(value) = settingsPrefs.edit().putString(KEY_CAPTURE_MODE, value.key).apply()
 
     /** Debug: persist a copy of every image sent to Claude for inspection. */
     var saveSentImages: Boolean
@@ -263,7 +277,7 @@ class SettingsRepository(
         private const val KEY_VOLUME_TOGGLE = "volume_toggle_enabled"
         private const val KEY_BEEPS_ENABLED = "beeps_enabled"
         private const val KEY_VOICE_SCREENSHOT = "voice_screenshot_enabled"
-        private const val KEY_CAMERA_CAPTURE = "camera_capture_enabled"
+        private const val KEY_CAPTURE_MODE = "capture_mode"
         private const val KEY_SAVE_SENT_IMAGES = "save_sent_images"
         private const val KEY_MCP_ENABLED = "mcp_enabled"
         private const val KEY_MCP_SHOW_TOOL_BUBBLES = "mcp_show_tool_bubbles"

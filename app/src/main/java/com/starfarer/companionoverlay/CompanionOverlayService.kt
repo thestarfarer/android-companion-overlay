@@ -26,6 +26,7 @@ import com.starfarer.companionoverlay.avatar3d.FilamentAvatarRenderer
 import com.starfarer.companionoverlay.event.OverlayCoordinator
 import com.starfarer.companionoverlay.event.OverlayEvent
 import com.starfarer.companionoverlay.mcp.McpManager
+import com.starfarer.companionoverlay.repository.CaptureMode
 import com.starfarer.companionoverlay.repository.SettingsRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -56,6 +57,8 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
     companion object {
         const val CHANNEL_ID = CompanionApplication.NOTIFICATION_CHANNEL_ID
         private const val LONG_PRESS_TIMEOUT_MS = 500L
+        // Vertical travel (dp) that commits a swipe — opens/closes the radial menu.
+        private const val SWIPE_MIN_DISTANCE_DP = 56f
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -82,6 +85,7 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
     private lateinit var spriteAnimator: SpriteAnimator
     private lateinit var bubbleManager: BubbleManager
     private lateinit var voiceController: VoiceInputController
+    private lateinit var radialMenuManager: RadialMenuManager
     private var filamentRenderer: FilamentAvatarRenderer? = null
 
     // ══════════════════════════════════════════════════════════════════════
@@ -105,7 +109,9 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
 
     private val longPressHandler = Handler(Looper.getMainLooper())
     private var isLongPress = false
+    private var touchDownX = 0f
     private var touchDownY = 0f
+    private var swipeConsumed = false   // a swipe already opened/closed the menu this gesture
 
     // ══════════════════════════════════════════════════════════════════════
     // Lifecycle
@@ -168,6 +174,7 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
         conversationManager.destroy()
         bubbleManager.hideVoice()
         bubbleManager.hideSpeechBubble()
+        if (::radialMenuManager.isInitialized) radialMenuManager.close()
         filamentRenderer?.destroy()
         spriteAnimator.release()
 
@@ -208,6 +215,7 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
         }
 
         bubbleManager = BubbleManager(this, windowManager, handler, bubbleHost)
+        radialMenuManager = RadialMenuManager(this, windowManager, settings)
 
         conversationManager.listener = this
         conversationManager.isTtsSpeaking = { audioCoordinator.isSpeaking }
@@ -357,10 +365,14 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
 
     private fun setupTouchHandling() {
         overlayView.isClickable = true
+        val touchSlop = android.view.ViewConfiguration.get(this).scaledTouchSlop
+        val swipeThreshold = SWIPE_MIN_DISTANCE_DP * density
         overlayView.setOnTouchListener { _, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
                     isLongPress = false
+                    swipeConsumed = false
+                    touchDownX = event.x
                     touchDownY = event.y
                     longPressHandler.postDelayed({
                         isLongPress = true
@@ -368,9 +380,26 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
                     }, LONG_PRESS_TIMEOUT_MS)
                     true
                 }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = event.x - touchDownX
+                    val dy = event.y - touchDownY
+                    // Any real movement cancels the long-press (it's a gesture, not a hold).
+                    if (kotlin.math.hypot(dx, dy) > touchSlop) {
+                        longPressHandler.removeCallbacksAndMessages(null)
+                    }
+                    // Commit a vertical-dominant swipe once — up opens the menu, down closes it.
+                    if (!swipeConsumed && kotlin.math.abs(dy) > swipeThreshold &&
+                        kotlin.math.abs(dy) > kotlin.math.abs(dx)
+                    ) {
+                        swipeConsumed = true
+                        if (dy < 0) radialMenuManager.open() else radialMenuManager.close()
+                    }
+                    true
+                }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     longPressHandler.removeCallbacksAndMessages(null)
-                    if (!isLongPress) {
+                    // Plain tap (no long-press, no swipe) → walk. Fires immediately on UP.
+                    if (!isLongPress && !swipeConsumed && event.action == MotionEvent.ACTION_UP) {
                         spriteAnimator.handleTouch()
                     }
                     true
@@ -437,9 +466,16 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
     }
 
     private fun handleScreenshotRequest() {
-        if (settings.cameraCaptureEnabled) {
-            handleCameraRequest()
-            return
+        when (settings.captureMode) {
+            CaptureMode.OFF -> {
+                handleBubbleReopen()
+                return
+            }
+            CaptureMode.CAMERA -> {
+                handleCameraRequest()
+                return
+            }
+            CaptureMode.SCREENSHOT -> { /* fall through to screenshot below */ }
         }
 
         if (!coordinator.accessibilityRunning.value) {
@@ -553,7 +589,7 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
 
     private fun sendScreenshot(imageBase64: String, voiceText: String?) {
         if (settings.saveSentImages) {
-            val source = if (settings.cameraCaptureEnabled) "cam" else "screen"
+            val source = if (settings.captureMode == CaptureMode.CAMERA) "cam" else "screen"
             ImageAudit.save(this, imageBase64, source)
         }
         audioCoordinator.playBeep(BeepManager.Beep.STEP)
