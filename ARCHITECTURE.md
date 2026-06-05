@@ -46,10 +46,23 @@ All dependencies are wired through **Koin** DI. Cross-component communication go
 
 | Class | Role |
 |---|---|
-| `CompanionOverlayService` | Foreground service — sprite rendering, touch handling, speech bubbles, conversation orchestration, TTS routing. Implements `VoiceInputHost` |
+| `CompanionOverlayService` | Foreground service — sprite rendering, touch handling, speech bubbles, conversation orchestration, TTS routing. Implements `VoiceInputHost`. Runs as a `specialUse` FGS and promotes to the `microphone`/`camera` types only while recording/capturing (see below) |
 | `CompanionAccessibilityService` | Screenshot capture via accessibility API, volume button interception (double/triple-tap detection), keyboard visibility detection |
 | `AssistActivity` | Transparent trampoline for `ACTION_VOICE_COMMAND` from headset buttons — starts overlay and toggles voice |
+| `OverlayController` | Single entry point for starting the overlay service — permission check (`canStart`) plus the start-then-optionally-toggle-voice ceremony. Every surface (main button, volume gestures, assistant) routes through it so the start logic can't drift |
 | `CompanionApplication` | App entry point — initializes Koin, creates notification channel |
+
+#### Foreground service types (Android 14+/17 compatibility)
+
+`microphone` and `camera` are **while-in-use** FGS types: Android only permits a service to hold them when the app is in an eligible (foreground/visible) state. Claiming them at every service start crashes with `SecurityException: Starting FGS with type microphone … must be in the eligible state` when the overlay is started from a non-foreground surface (wake button, assistant) — strictly enforced on Android 17.
+
+So the service starts as `specialUse` only and dynamically promotes:
+- `setMicrophoneActive(true/false)` — driven by `VoiceInputController` state; the `microphone` type is added on entering `LISTENING` and dropped on every exit.
+- `setCameraForeground(true/false)` — wraps a camera capture.
+
+Promotion is permitted because the companion's visible overlay window is the while-in-use exemption. All type changes go through `applyForegroundType()`, which is wrapped so a rejected promotion degrades (logs) instead of crashing. The types remain declared in the manifest so they can be promoted into.
+
+The service also self-guards: if "Display over other apps" is missing, `onCreate` shows a message and stops cleanly rather than throwing `BadTokenException` from `addView`.
 
 ### AI and API
 

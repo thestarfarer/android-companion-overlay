@@ -40,7 +40,13 @@ class VoiceInputController(
     enum class State { IDLE, LISTENING, PROCESSING }
 
     var state: State = State.IDLE
-        private set
+        private set(value) {
+            field = value
+            // The mic is live only while LISTENING. Promote/drop the service's
+            // microphone FGS type to match, so it's never claimed at idle — claiming
+            // it unconditionally crashed the service start on Android 14+/17.
+            host.setMicrophoneActive(value == State.LISTENING)
+        }
 
     private val handler = Handler(Looper.getMainLooper())
     private var speechManager: SpeechRecognitionManager? = null

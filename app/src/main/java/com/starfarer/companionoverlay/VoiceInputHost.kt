@@ -32,7 +32,14 @@ interface VoiceInputHost {
     
     /** Stop any TTS playback and cancel pending API requests. */
     fun stopTtsAndCancel()
-    
+
+    /**
+     * Add or drop the microphone foreground-service type around active recording.
+     * Called with true when recording starts and false when it stops, so the
+     * service only claims the while-in-use mic type while it's genuinely needed.
+     */
+    fun setMicrophoneActive(active: Boolean)
+
     // ══════════════════════════════════════════════════════════════════════
     // Input Handling
     // ══════════════════════════════════════════════════════════════════════
