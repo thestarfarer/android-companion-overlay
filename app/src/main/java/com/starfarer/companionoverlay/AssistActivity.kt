@@ -2,7 +2,10 @@ package com.starfarer.companionoverlay
 
 import android.app.Activity
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
+import android.provider.Settings
+import android.widget.Toast
 import com.starfarer.companionoverlay.event.OverlayCoordinator
 import org.koin.android.ext.android.inject
 
@@ -27,21 +30,20 @@ class AssistActivity : Activity() {
         super.onCreate(savedInstanceState)
         DebugLog.log("Assist", "AssistActivity launched, action=${intent?.action}")
 
-        // Start overlay if not running
-        if (!coordinator.overlayRunning.value) {
-            DebugLog.log("Assist", "Overlay not running, starting it")
-            val svcIntent = Intent(this, CompanionOverlayService::class.java)
-            startForegroundService(svcIntent)
-            // Delay for service init, then toggle voice
-            android.os.Handler(mainLooper).postDelayed({
-                coordinator.toggleVoice()
-                DebugLog.log("Assist", "Voice toggled (delayed)")
-            }, 800)
-        } else {
-            coordinator.toggleVoice()
-            DebugLog.log("Assist", "Voice toggled (overlay was running)")
+        // Without overlay permission the service would crash adding its window.
+        // Send the user to grant it instead.
+        if (!OverlayController.canStart(this)) {
+            DebugLog.log("Assist", "No overlay permission — opening settings")
+            Toast.makeText(this, "Grant 'Display over other apps' to use the companion~", Toast.LENGTH_LONG).show()
+            startActivity(
+                Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+            finish()
+            return
         }
 
+        OverlayController.ensureRunning(this, coordinator, thenStartVoice = true)
         finish()
     }
 }
