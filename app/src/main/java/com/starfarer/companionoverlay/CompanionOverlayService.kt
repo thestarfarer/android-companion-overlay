@@ -214,7 +214,7 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
             loadSprites()
         }
 
-        bubbleManager = BubbleManager(this, windowManager, handler, bubbleHost)
+        bubbleManager = BubbleManager(this, OverlayBubbleSurface(windowManager, density), handler, bubbleHost)
         radialMenuManager = RadialMenuManager(this, windowManager, settings)
 
         conversationManager.listener = this

@@ -1,27 +1,26 @@
 package com.starfarer.companionoverlay
 
 import android.content.Context
-import android.graphics.PixelFormat
 import android.os.Handler
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
-import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.TextView
 
 /**
- * Manages the overlay speech bubbles — brief notifications, full response
- * dialogs with reply input, and voice status indicators.
+ * Manages the speech bubbles — brief notifications, full response dialogs with reply
+ * input, and voice status indicators.
  *
- * Owns the bubble views and their lifecycle. Calls back to the service
- * through [Host] for actions it can't handle itself (TTS, ghost mode,
- * sending replies, voice toggle).
+ * Owns the bubble views and their lifecycle. Where each bubble is placed and removed is
+ * delegated to a [BubbleSurface] (real overlay window vs. in-app view group), so this class
+ * never touches `WindowManager` directly. Calls back to the service through [Host] for
+ * actions it can't handle itself (TTS, ghost mode, sending replies, voice toggle).
  */
 class BubbleManager(
     private val context: Context,
-    private val windowManager: WindowManager,
+    private val surface: BubbleSurface,
     private val handler: Handler,
     private val host: Host
 ) {
@@ -37,13 +36,11 @@ class BubbleManager(
 
     // --- Speech bubble (main response dialog + brief notifications) ---
     private var speechBubble: View? = null
-    private var speechParams: WindowManager.LayoutParams? = null
     var pendingDismiss: Runnable? = null
         private set
 
     // --- Voice bubble (recording indicator) ---
     private var voiceBubble: TextView? = null
-    private var voiceBubbleParams: WindowManager.LayoutParams? = null
 
     // --- Brief bubble ---
 
@@ -64,14 +61,11 @@ class BubbleManager(
             gravity = Gravity.START
         }
 
-        val bubbleParams = BubbleStyle.topRightEdgeParams(d)
-
         try {
             bubble.alpha = 0f
-            windowManager.addView(bubble, bubbleParams)
+            surface.attach(bubble, BubblePlacement.TOP_RIGHT_TOAST)
             bubble.animate().alpha(1f).setDuration(200).start()
             speechBubble = bubble
-            speechParams = bubbleParams
 
             bubble.setOnClickListener { host.onTtsStop(); hideSpeechBubble() }
             scheduleDismiss(durationMs)
@@ -169,14 +163,11 @@ class BubbleManager(
             ))
         }
 
-        val bubbleParams = BubbleStyle.centeredParams(maxW)
-
         try {
             container.alpha = 0f
-            windowManager.addView(container, bubbleParams)
+            surface.attach(container, BubblePlacement.CENTERED_DIALOG, maxW)
             container.animate().alpha(1f).setDuration(300).start()
             speechBubble = container
-            speechParams = bubbleParams
 
             val maxResponseH = (host.screenHeight * 0.6).toInt()
             responseScroll.post {
@@ -189,12 +180,7 @@ class BubbleManager(
             responseText.setOnClickListener { host.onTtsStop(); hideSpeechBubble() }
 
             replyInput.setOnTouchListener { _, event ->
-                if (event.action == MotionEvent.ACTION_DOWN &&
-                    bubbleParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE != 0
-                ) {
-                    bubbleParams.flags = bubbleParams.flags and
-                            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
-                    try { windowManager.updateViewLayout(container, bubbleParams) } catch (_: Exception) {}
+                if (event.action == MotionEvent.ACTION_DOWN && surface.makeFocusable(container)) {
                     replyInput.requestFocus()
                     val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
                     replyInput.post { imm.showSoftInput(replyInput, InputMethodManager.SHOW_IMPLICIT) }
@@ -240,14 +226,11 @@ class BubbleManager(
             gravity = Gravity.START
         }
 
-        val params = BubbleStyle.topRightEdgeParams(d)
-
         try {
             bubble.alpha = 0f
-            windowManager.addView(bubble, params)
+            surface.attach(bubble, BubblePlacement.TOP_RIGHT_TOAST)
             bubble.animate().alpha(1f).setDuration(200).start()
             voiceBubble = bubble
-            voiceBubbleParams = params
             bubble.setOnClickListener { host.onVoiceToggle() }
         } catch (e: Exception) {
             DebugLog.log("Bubble", "Failed to show voice bubble: ${e.message}")
@@ -261,11 +244,10 @@ class BubbleManager(
     fun hideVoice() {
         voiceBubble?.let { bubble ->
             bubble.animate().alpha(0f).setDuration(150).withEndAction {
-                try { windowManager.removeView(bubble) } catch (_: Exception) {}
+                surface.detach(bubble)
             }.start()
         }
         voiceBubble = null
-        voiceBubbleParams = null
     }
 
     // --- Speech bubble lifecycle ---
@@ -277,13 +259,12 @@ class BubbleManager(
 
         if (animate) {
             bubble.animate().alpha(0f).setDuration(250).withEndAction {
-                try { windowManager.removeView(bubble) } catch (_: Exception) {}
+                surface.detach(bubble)
             }.start()
         } else {
-            try { windowManager.removeView(bubble) } catch (_: Exception) {}
+            surface.detach(bubble)
         }
         speechBubble = null
-        speechParams = null
     }
 
     fun cancelPendingDismiss() {
