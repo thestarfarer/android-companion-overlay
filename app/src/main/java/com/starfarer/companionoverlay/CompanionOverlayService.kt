@@ -502,19 +502,40 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
         }
     }
 
-    private fun baseForegroundType(): Int =
-        ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+    @Volatile private var micFgsActive = false
+    @Volatile private var cameraFgsActive = false
 
-    /** Add or drop the camera foreground-service type around a capture. */
-    private fun setCameraForeground(enabled: Boolean) {
-        val type = if (enabled) baseForegroundType() or ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
-        else baseForegroundType()
+    // The overlay runs as a plain specialUse foreground service. The while-in-use
+    // types (microphone, camera) are added ONLY while actually recording/capturing.
+    // Claiming microphone at every start is what crashed on Android 14+/17 with
+    // "Starting FGS with type microphone ... must be in the eligible state" — the
+    // service is often started while the app isn't foreground (wake button, assistant).
+    // The types stay declared in the manifest so we can promote into them on demand.
+    private fun baseForegroundType(): Int = ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+
+    private fun applyForegroundType() {
+        var type = baseForegroundType()
+        if (micFgsActive) type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+        if (cameraFgsActive) type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
         try {
             startForeground(1, createNotification(), type)
         } catch (e: Exception) {
-            DebugLog.log("Overlay", "FGS camera type change failed: ${e.message}")
+            DebugLog.log("Overlay", "FGS type change failed: ${e.message}")
         }
+    }
+
+    /** Add or drop the camera foreground-service type around a capture. */
+    private fun setCameraForeground(enabled: Boolean) {
+        if (cameraFgsActive == enabled) return
+        cameraFgsActive = enabled
+        applyForegroundType()
+    }
+
+    /** Add or drop the microphone FGS type around active voice recording (VoiceInputHost). */
+    override fun setMicrophoneActive(active: Boolean) {
+        if (micFgsActive == active) return
+        micFgsActive = active
+        applyForegroundType()
     }
 
     private fun handleBubbleReopen() {
