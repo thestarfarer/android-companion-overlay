@@ -5,6 +5,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.provider.Settings
@@ -144,8 +145,29 @@ class SettingsFragment : PreferenceFragmentCompat() {
         arguments?.remove(SettingsActivity.EXTRA_HIGHLIGHT_KEY)
     }
 
+    /**
+     * Keep visible widgets in sync when settings are changed elsewhere (the radial quick menu
+     * writes to the same prefs while this screen is still resumed behind the overlay).
+     * PreferenceFragmentCompat only reads widget state at bind time, so we push live updates.
+     */
+    private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        activity?.runOnUiThread {
+            when (key) {
+                "capture_mode" ->
+                    findPreference<ListPreference>("capture_mode")?.value = settings.captureMode.key
+                "volume_toggle_enabled" ->
+                    findPreference<SwitchPreferenceCompat>("volume_toggle_enabled")?.isChecked = settings.volumeToggleEnabled
+                "gemini_stt_enabled" ->
+                    findPreference<SwitchPreferenceCompat>("gemini_stt_enabled")?.isChecked = settings.geminiSttEnabled
+                "gemini_tts_enabled" ->
+                    findPreference<SwitchPreferenceCompat>("gemini_tts_enabled")?.isChecked = settings.geminiTtsEnabled
+            }
+        }
+    }
+
     override fun onResume() {
         super.onResume()
+        preferenceManager.sharedPreferences?.registerOnSharedPreferenceChangeListener(prefsListener)
         refreshPermissions()
         refreshAccount()
         refreshDebugTest()
@@ -157,6 +179,11 @@ class SettingsFragment : PreferenceFragmentCompat() {
         listView.post {
             findPreference<Preference>(key)?.performClick()
         }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        preferenceManager.sharedPreferences?.unregisterOnSharedPreferenceChangeListener(prefsListener)
     }
 
     // ── Claude API Key ──
