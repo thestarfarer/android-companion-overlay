@@ -12,6 +12,7 @@ An animated sprite companion powered by Claude AI that lives on your Android scr
 ### Core
 - **Animated sprite overlay** — idle breathing, walks when tapped, escapes when tapped repeatedly
 - **Screenshot + AI commentary** — long-press the sprite to capture the screen and get a response in a speech bubble
+- **Camera capture** — optionally switch long-press to snap a back-camera photo instead of a screenshot ("look at this"), sent through the same pipeline
 - **Reply input** — type replies directly in the speech bubble
 - **Conversation memory** — configurable history length up to 30 turns, optionally persists across restarts
 - **Web search** — let Claude search the web for current information
@@ -49,8 +50,13 @@ An animated sprite companion powered by Claude AI that lives on your Android scr
 1. **Overlay** — Settings > Apps > Special Access > Display over other apps
 2. **Accessibility service** — Settings > Accessibility > enable the service (for screenshots and volume button detection)
 3. **Microphone** — prompted on first voice input
+4. **Camera** (optional) — only needed for camera capture; grant via Settings > Permissions > Camera in the app
 
 Optional: **Digital assistant** — Settings > Apps > Default Apps > Digital assistant app > Companion Overlay (enables headset button support and dedicated assistant button support if present on device)
+
+### Camera capture (optional)
+
+Enable **Settings > Display > "Camera instead of screenshot"** to make long-pressing the avatar take a back-camera photo instead of a screenshot. Grant the camera permission under **Settings > Permissions > Camera** first. Capture is headless (no viewfinder) — point the phone, then long-press. There's a brief pause while the lens focuses before the shot is taken.
 
 ### Claude API
 
@@ -82,6 +88,7 @@ Connect external tool servers via the Model Context Protocol. In Settings > MCP 
 
 - **Headset button + fullscreen video** — long-pressing the headset button steals foreground focus, causing YouTube to enter PiP. Use volume button triple-press instead
 - **Gemini TTS voice drift** — voice can change mid-utterance on long responses, once in a lifetime might prepend 5 minutes of silence to response as a bonus
+- **Camera capture is headless** — no viewfinder, so framing is blind; the lens needs a moment to focus before the shot. On Android 14+ capture relies on the overlay's foreground service holding the camera type while another app is visible
 
 ## Architecture
 
