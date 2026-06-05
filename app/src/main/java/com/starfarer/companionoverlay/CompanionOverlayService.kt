@@ -15,9 +15,11 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.SystemClock
+import android.provider.Settings
 import android.view.Choreographer
 import android.view.*
 import android.widget.ImageView
+import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.starfarer.companionoverlay.avatar3d.FilamentAvatarRenderer
@@ -117,6 +119,19 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
 
     override fun onCreate() {
         super.onCreate()
+
+        // Some entry points (assistant trigger, volume triple-press) can start the
+        // service without a permission pre-check. Adding the overlay window without
+        // "Display over other apps" throws BadTokenException, so bail cleanly here —
+        // but still satisfy the foreground-service contract before stopping.
+        if (!Settings.canDrawOverlays(this)) {
+            DebugLog.log("Overlay", "Overlay permission missing — aborting service start")
+            Toast.makeText(this, "Grant 'Display over other apps' to show the companion~", Toast.LENGTH_LONG).show()
+            startForeground(1, createNotification(), baseForegroundType())
+            stopSelf()
+            return
+        }
+
         coordinator.onOverlayServiceStarted()
 
         initializeScreen()
@@ -326,7 +341,15 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
         // Bind view references to the animator
         spriteAnimator.attach(overlayView, params, windowManager)
 
-        windowManager.addView(overlayView, params)
+        // Backstop: the onCreate guard should prevent this, but if the window token
+        // is ever rejected (e.g. permission revoked mid-flight) stop instead of crashing.
+        try {
+            windowManager.addView(overlayView, params)
+        } catch (e: Exception) {
+            DebugLog.log("Overlay", "addView failed (${e.message}) — stopping service")
+            stopSelf()
+            return
+        }
 
         overlayView.alpha = 0f
         overlayView.animate().alpha(1f).setDuration(300).start()
