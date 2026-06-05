@@ -40,12 +40,15 @@
             app:defaultValue="sprite"
             app:persistent="true"/>
 
-        <SwitchPreferenceCompat
+        <ListPreference
             app:iconSpaceReserved="false"
-            app:key="camera_capture_enabled"
-            app:title="Camera instead of screenshot"
-            app:summary="Long-press the avatar to snap a back-camera photo instead of capturing the screen"
-            app:defaultValue="false"/>
+            app:key="capture_mode"
+            app:title="Long-press capture"
+            app:summary="%s"
+            app:entries="@array/capture_mode_entries"
+            app:entryValues="@array/capture_mode_values"
+            app:defaultValue="screenshot"
+            app:persistent="true"/>
 
     </PreferenceCategory>
 
