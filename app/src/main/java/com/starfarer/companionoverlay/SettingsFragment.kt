@@ -585,6 +585,10 @@ class SettingsFragment : PreferenceFragmentCompat() {
     // ── About ──
 
     private fun setupAbout() {
+        findPreference<Preference>("tutorial")?.setOnPreferenceClickListener {
+            startActivity(Intent(requireContext(), TutorialActivity::class.java))
+            true
+        }
         findPreference<Preference>("open_source_licenses")?.setOnPreferenceClickListener {
             val ctx = context ?: return@setOnPreferenceClickListener true
             MaterialAlertDialogBuilder(ctx, R.style.CompanionDialog)

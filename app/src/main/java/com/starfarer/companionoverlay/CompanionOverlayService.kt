@@ -309,7 +309,7 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
 
             restorePosition()
             setupTouchHandling()
-            spriteAnimator.attach(overlayView, params, windowManager)
+            spriteAnimator.attach(OverlaySpriteSurface(windowManager, overlayView, params))
             windowManager.addView(overlayView, params)
             overlayView.alpha = 0f
             overlayView.animate().alpha(1f).setDuration(300).start()
@@ -346,8 +346,8 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
         restorePosition()
         setupTouchHandling()
 
-        // Bind view references to the animator
-        spriteAnimator.attach(overlayView, params, windowManager)
+        // Bind the overlay surface to the animator
+        spriteAnimator.attach(OverlaySpriteSurface(windowManager, overlayView, params))
 
         // Backstop: the onCreate guard should prevent this, but if the window token
         // is ever rejected (e.g. permission revoked mid-flight) stop instead of crashing.

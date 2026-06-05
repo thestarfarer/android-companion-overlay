@@ -51,6 +51,11 @@
             android:name=".SettingsActivity"
             android:exported="false"/>
 
+        <activity
+            android:name=".TutorialActivity"
+            android:exported="false"
+            android:theme="@style/Theme.CompanionOverlay"/>
+
         <service
             android:name=".CompanionOverlayService"
             android:enabled="true"

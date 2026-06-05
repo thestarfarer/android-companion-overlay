@@ -260,6 +260,12 @@
 
         <Preference
             app:iconSpaceReserved="false"
+            app:key="tutorial"
+            app:title="Tutorial"
+            app:summary="Replay the interactive walkthrough"/>
+
+        <Preference
+            app:iconSpaceReserved="false"
             app:key="open_source_licenses"
             app:title="Open source licenses"
             app:summary="Third-party software used in this app"/>
