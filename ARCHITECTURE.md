@@ -100,6 +100,7 @@ All dependencies are wired through **Koin** DI. Cross-component communication go
 | `BubbleManager` | Manages overlay speech bubbles — main response dialog, brief notifications, voice indicator. Touch and keyboard handling |
 | `BubbleStyle` | Centralized bubble styling — Monet Material You colors (API 31+), fallback warm cream, rounded backgrounds |
 | `ScreenshotManager` | Screenshot request API — delegates to accessibility service via `OverlayCoordinator` |
+| `CameraManager` | Headless back-camera still capture via CameraX — binds `ImageCapture` to a throwaway `LifecycleOwner`, waits for focus, returns a downscaled (1568px), EXIF-uprighted base64 JPEG. Same artifact as `ScreenshotManager`, so the send pipeline is shared |
 
 ### Settings and storage
 
@@ -148,7 +149,7 @@ All dependencies are wired through **Koin** DI. Cross-component communication go
 | `di/AppModule` | `OkHttpClient`, `OverlayCoordinator`, `SettingsRepository`, `ClaudeAuth`, `ClaudeApi`, `McpRepository`, `McpManager` |
 | `di/AudioModule` | `TtsManager`, `GeminiTtsManager`, `AudioCoordinator` |
 | `di/StorageModule` | `SharedPreferences` (settings + auth), `PresetRepository` |
-| `di/OverlayModule` | `ConversationStorage`, `ConversationManager` (factory), `ScreenshotManager`, `BeepManager` |
+| `di/OverlayModule` | `ConversationStorage`, `ConversationManager` (factory), `ScreenshotManager`, `CameraManager`, `BeepManager` |
 | `di/ViewModelModule` | `MainViewModel` |
 
 ### Debug
@@ -156,6 +157,7 @@ All dependencies are wired through **Koin** DI. Cross-component communication go
 | Class | Role |
 |---|---|
 | `DebugLog` | In-memory ring buffer (50 KB), logcat output, copyable from settings UI |
+| `ImageAudit` | Debug-gated — saves the exact JPEG sent to Claude (screenshot or camera) to external files, logs resolution/size, viewable on-device via `FileProvider` |
 
 ## Project structure
 
@@ -198,6 +200,8 @@ app/src/main/
 │   ├── BubbleManager.kt
 │   ├── BubbleStyle.kt
 │   ├── ScreenshotManager.kt
+│   ├── CameraManager.kt
+│   ├── ImageAudit.kt
 │   ├── CharacterPreset.kt
 │   ├── PromptSettings.kt
 │   ├── DebugLog.kt
