@@ -9,6 +9,9 @@ import android.os.Looper
 import android.util.Base64
 import androidx.browser.customtabs.CustomTabsIntent
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import okhttp3.Dns
 import okhttp3.MediaType.Companion.toMediaType
@@ -48,6 +51,16 @@ class ClaudeAuth(
     baseClient: OkHttpClient,
     private val prefs: SharedPreferences
 ) {
+
+    /**
+     * Emits the OAuth token's expiry timestamp whenever tokens are persisted —
+     * on initial login and on every refresh, including the silent auto-refresh
+     * inside [getValidToken] triggered by sending a message. Observers (e.g.
+     * MainViewModel) re-derive displayed auth state from this so a token that
+     * refreshes mid-session no longer leaves the UI stuck on "Expired".
+     */
+    private val _tokenExpiry = MutableStateFlow(prefs.getLong(KEY_EXPIRES_AT, 0L))
+    val tokenExpiry: StateFlow<Long> = _tokenExpiry.asStateFlow()
 
     companion object {
         private const val TAG = "Auth"
@@ -320,6 +333,7 @@ class ClaudeAuth(
                 .putString(KEY_REFRESH_TOKEN, refreshToken)
                 .putLong(KEY_EXPIRES_AT, expiresAt)
                 .commit()
+            _tokenExpiry.value = expiresAt
 
             Result.success(Unit)
         } catch (e: Exception) {
@@ -367,6 +381,7 @@ class ClaudeAuth(
                     .putString(KEY_REFRESH_TOKEN, newRefreshToken)
                     .putLong(KEY_EXPIRES_AT, expiresAt)
                     .commit()
+                _tokenExpiry.value = expiresAt
 
                 log("Token refreshed")
                 return@withContext Result.success(Unit)

@@ -75,6 +75,19 @@ class MainViewModel(
     init {
         loadPresets()
         observeOverlayState()
+        observeTokenExpiry()
+    }
+
+    /**
+     * Re-derive auth state whenever ClaudeAuth persists new tokens — including
+     * the silent auto-refresh on the first message after launch. Without this,
+     * a token that expired before launch and refreshed mid-session left the UI
+     * stuck showing "Expired".
+     */
+    private fun observeTokenExpiry() {
+        viewModelScope.launch {
+            claudeAuth.tokenExpiry.collect { refreshAuthState() }
+        }
     }
     
     // ══════════════════════════════════════════════════════════════════════
