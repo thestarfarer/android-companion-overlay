@@ -37,6 +37,8 @@ class CompanionAccessibilityService : AccessibilityService() {
     companion object {
         private const val TAG = "A11y"
         private const val DOUBLE_TAP_WINDOW_MS = 400L
+        // Time for the overlay service to init before toggling voice (matches AssistActivity).
+        private const val OVERLAY_START_DELAY_MS = 800L
     }
 
     private val coordinator: OverlayCoordinator by inject()
@@ -100,11 +102,18 @@ class CompanionAccessibilityService : AccessibilityService() {
                 pendingVolumeDown = null
 
                 if (tapCount >= 3) {
-                    // Triple-tap — toggle voice input
+                    // Triple-tap — toggle voice input.
+                    // Mirror AssistActivity: hiding the overlay calls stopSelf(), so the
+                    // service may be down. Start it first if needed, then toggle voice once
+                    // it's up — otherwise the toggleVoice guard silently swallows the press.
                     DebugLog.log(TAG, "Triple-tap volume down → toggle voice")
                     tapCount = 0
                     if (coordinator.overlayRunning.value) {
                         coordinator.toggleVoice()
+                    } else {
+                        DebugLog.log(TAG, "Overlay not running — starting it, then toggling voice")
+                        startForegroundService(Intent(this, CompanionOverlayService::class.java))
+                        handler.postDelayed({ coordinator.toggleVoice() }, OVERLAY_START_DELAY_MS)
                     }
                 } else {
                     // Wait to see if more taps are coming
