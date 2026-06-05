@@ -1,6 +1,7 @@
 package com.starfarer.companionoverlay.di
 
 import com.starfarer.companionoverlay.BeepManager
+import com.starfarer.companionoverlay.CameraManager
 import com.starfarer.companionoverlay.ConversationManager
 import com.starfarer.companionoverlay.ConversationStorage
 import com.starfarer.companionoverlay.ScreenshotManager
@@ -32,6 +33,9 @@ val overlayModule = module {
 
     // ScreenshotManager — stateless, takes only context and coordinator
     factory { ScreenshotManager(androidContext(), get()) }
+
+    // CameraManager — stateless headless capture; spins up its own short-lived camera binding
+    factory { CameraManager(androidContext()) }
 
     // BeepManager — persistent SoundPool for consistent Bluetooth audio
     single { BeepManager(androidContext()) }

@@ -1,5 +1,6 @@
 package com.starfarer.companionoverlay
 
+import android.Manifest
 import android.app.Notification
 import android.app.PendingIntent
 import android.app.Service
@@ -7,6 +8,8 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
 import android.graphics.PixelFormat
 import android.os.Handler
 import android.os.IBinder
@@ -16,6 +19,7 @@ import android.view.Choreographer
 import android.view.*
 import android.widget.ImageView
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import com.starfarer.companionoverlay.avatar3d.FilamentAvatarRenderer
 import com.starfarer.companionoverlay.event.OverlayCoordinator
 import com.starfarer.companionoverlay.event.OverlayEvent
@@ -60,6 +64,7 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
     private val conversationManager: ConversationManager by inject()
     private val audioCoordinator: AudioCoordinator by inject()
     private val screenshotManager: ScreenshotManager by inject()
+    private val cameraManager: CameraManager by inject()
     private val settings: SettingsRepository by inject()
     private val beepManager: BeepManager by inject()
     private val httpClient: okhttp3.OkHttpClient by inject()
@@ -120,7 +125,11 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
         subscribeToEvents()
         startAnimation()
 
-        startForeground(1, createNotification())
+        // Start with the base types only. Camera is declared in the manifest but
+        // deliberately excluded here — applying it unconditionally would demand
+        // CAMERA permission at every overlay start. It's promoted in transiently
+        // during capture via setCameraForeground().
+        startForeground(1, createNotification(), baseForegroundType())
 
         registerReceiver(screenReceiver, IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_OFF)
@@ -405,6 +414,11 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
     }
 
     private fun handleScreenshotRequest() {
+        if (settings.cameraCaptureEnabled) {
+            handleCameraRequest()
+            return
+        }
+
         if (!coordinator.accessibilityRunning.value) {
             bubbleManager.showBrief("Grant screenshot permission in the app first~", 4000L)
             return
@@ -415,21 +429,69 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
         handler.postDelayed({
             screenshotManager.takeScreenshot { base64 ->
                 if (base64 != null) {
-                    if (settings.voiceScreenshotEnabled) {
-                        handler.post {
-                            pendingScreenshotBase64 = base64
-                            bubbleManager.cancelPendingDismiss()
-                            bubbleManager.hideSpeechBubble()
-                            voiceController.toggle()
-                        }
-                    } else {
-                        sendScreenshot(base64, null)
-                    }
+                    dispatchCapturedImage(base64)
                 } else {
-                    bubbleManager.showBrief("Couldn't peek at your screen...")
+                    handler.post { bubbleManager.showBrief("Couldn't peek at your screen...") }
                 }
             }
         }, 150)
+    }
+
+    private fun handleCameraRequest() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
+            != PackageManager.PERMISSION_GRANTED) {
+            bubbleManager.showBrief("Grant camera permission in the app first~", 4000L)
+            return
+        }
+
+        bubbleManager.showBrief("Let me look~", 2000L)
+
+        // Promote the foreground service to include the camera type so the OS
+        // permits capture while another app is in the foreground, then revert.
+        setCameraForeground(true)
+        handler.postDelayed({
+            cameraManager.capture { base64 ->
+                setCameraForeground(false)
+                if (base64 != null) {
+                    dispatchCapturedImage(base64)
+                } else {
+                    bubbleManager.showBrief("Couldn't get a good shot...")
+                }
+            }
+        }, 150)
+    }
+
+    /**
+     * Route a freshly captured image (screenshot or camera) into the conversation.
+     * Source-agnostic: both paths produce a base64 JPEG. Safe to call from any
+     * thread — the work is posted to the main handler.
+     */
+    private fun dispatchCapturedImage(base64: String) {
+        handler.post {
+            if (settings.voiceScreenshotEnabled) {
+                pendingScreenshotBase64 = base64
+                bubbleManager.cancelPendingDismiss()
+                bubbleManager.hideSpeechBubble()
+                voiceController.toggle()
+            } else {
+                sendScreenshot(base64, null)
+            }
+        }
+    }
+
+    private fun baseForegroundType(): Int =
+        ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+
+    /** Add or drop the camera foreground-service type around a capture. */
+    private fun setCameraForeground(enabled: Boolean) {
+        val type = if (enabled) baseForegroundType() or ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+        else baseForegroundType()
+        try {
+            startForeground(1, createNotification(), type)
+        } catch (e: Exception) {
+            DebugLog.log("Overlay", "FGS camera type change failed: ${e.message}")
+        }
     }
 
     private fun handleBubbleReopen() {
@@ -446,6 +508,10 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
     // ══════════════════════════════════════════════════════════════════════
 
     private fun sendScreenshot(imageBase64: String, voiceText: String?) {
+        if (settings.saveSentImages) {
+            val source = if (settings.cameraCaptureEnabled) "cam" else "screen"
+            ImageAudit.save(this, imageBase64, source)
+        }
         audioCoordinator.playBeep(BeepManager.Beep.STEP)
         bubbleManager.showBrief("🧠 Thinking...", 30000L)
         conversationManager.sendWithScreenshot(imageBase64, voiceText)
