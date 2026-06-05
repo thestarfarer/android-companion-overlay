@@ -2,7 +2,6 @@ package com.starfarer.companionoverlay
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
-import android.content.Intent
 import android.graphics.Bitmap
 import android.media.AudioManager
 import android.os.Handler
@@ -10,7 +9,6 @@ import android.os.Looper
 import android.util.Base64
 import android.view.Display
 import android.view.KeyEvent
-import android.provider.Settings
 import android.widget.Toast
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityWindowInfo
@@ -37,8 +35,6 @@ class CompanionAccessibilityService : AccessibilityService() {
     companion object {
         private const val TAG = "A11y"
         private const val DOUBLE_TAP_WINDOW_MS = 400L
-        // Time for the overlay service to init before toggling voice (matches AssistActivity).
-        private const val OVERLAY_START_DELAY_MS = 800L
     }
 
     private val coordinator: OverlayCoordinator by inject()
@@ -108,12 +104,13 @@ class CompanionAccessibilityService : AccessibilityService() {
                     // it's up — otherwise the toggleVoice guard silently swallows the press.
                     DebugLog.log(TAG, "Triple-tap volume down → toggle voice")
                     tapCount = 0
-                    if (coordinator.overlayRunning.value) {
-                        coordinator.toggleVoice()
+                    // ensureRunning starts the overlay if needed (hiding it calls stopSelf)
+                    // then toggles voice. Only prompt for permission when a start is required.
+                    if (!coordinator.overlayRunning.value && !OverlayController.canStart(this)) {
+                        DebugLog.log(TAG, "No overlay permission, can't start for voice")
+                        Toast.makeText(this, "Grant overlay permission in the app first~", Toast.LENGTH_SHORT).show()
                     } else {
-                        DebugLog.log(TAG, "Overlay not running — starting it, then toggling voice")
-                        startForegroundService(Intent(this, CompanionOverlayService::class.java))
-                        handler.postDelayed({ coordinator.toggleVoice() }, OVERLAY_START_DELAY_MS)
+                        OverlayController.ensureRunning(this, coordinator, thenStartVoice = true)
                     }
                 } else {
                     // Wait to see if more taps are coming
@@ -166,14 +163,13 @@ class CompanionAccessibilityService : AccessibilityService() {
             DebugLog.log(TAG, "Hiding Senni~")
             coordinator.dismissOverlay()
         } else {
-            if (!Settings.canDrawOverlays(this)) {
+            if (!OverlayController.canStart(this)) {
                 DebugLog.log(TAG, "No overlay permission, ignoring toggle")
                 Toast.makeText(this, "Grant overlay permission in the app first~", Toast.LENGTH_SHORT).show()
                 return
             }
             DebugLog.log(TAG, "Summoning Senni~")
-            val intent = Intent(this, CompanionOverlayService::class.java)
-            startForegroundService(intent)
+            OverlayController.ensureRunning(this, coordinator)
         }
     }
 

@@ -102,7 +102,7 @@ class MainActivity : AppCompatActivity() {
 
     private val overlayPermissionLauncher: ActivityResultLauncher<Intent> =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-            if (Settings.canDrawOverlays(this)) {
+            if (OverlayController.canStart(this)) {
                 startOverlayService()
             }
         }
@@ -530,7 +530,7 @@ class MainActivity : AppCompatActivity() {
     // ══════════════════════════════════════════════════════════════════════
 
     private fun checkPermissionAndStart() {
-        if (!Settings.canDrawOverlays(this)) {
+        if (!OverlayController.canStart(this)) {
             Toast.makeText(this, "Please grant overlay permission!", Toast.LENGTH_LONG).show()
             overlayPermissionLauncher.launch(
                 Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
@@ -541,7 +541,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startOverlayService() {
-        startForegroundService(Intent(this, CompanionOverlayService::class.java))
+        OverlayController.ensureRunning(this, coordinator)
     }
 
     private fun stopOverlayService() {

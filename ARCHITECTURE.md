@@ -202,6 +202,7 @@ app/src/main/
 │   ├── ScreenshotManager.kt
 │   ├── CameraManager.kt
 │   ├── ImageAudit.kt
+│   ├── OverlayController.kt
 │   ├── CharacterPreset.kt
 │   ├── PromptSettings.kt
 │   ├── DebugLog.kt
