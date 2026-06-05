@@ -109,8 +109,10 @@ The service also self-guards: if "Display over other apps" is missing, `onCreate
 
 | Class | Role |
 |---|---|
-| `SpriteAnimator` | Animation state machine (idle breathing, walk, escape). Pre-extracts frames to avoid per-tick allocations. Ghost mode when keyboard is visible |
-| `BubbleManager` | Manages overlay speech bubbles — main response dialog, brief notifications, voice indicator. Touch and keyboard handling |
+| `SpriteAnimator` | Animation state machine (idle breathing, walk, escape). Pre-extracts frames to avoid per-tick allocations. Ghost mode when keyboard is visible. Position/ghost applied through a `SpriteSurface`, so it runs on the overlay window or a plain view group unchanged |
+| `SpriteSurface` | Seam between `SpriteAnimator` and where it draws — `OverlaySpriteSurface` (real `TYPE_APPLICATION_OVERLAY` window, position via `updateViewLayout`, ghost via window flags) vs. `ViewGroupSpriteSurface` (a `View` in a `FrameLayout`, position via `view.x`). Mirrors `BubbleSurface` |
+| `BubbleManager` | Manages speech bubbles — main response dialog, brief notifications, voice indicator. Touch and keyboard handling. Placement/removal delegated to a `BubbleSurface`, so it never touches `WindowManager` directly |
+| `BubbleSurface` | Seam between `BubbleManager` and its surface — `OverlayBubbleSurface` (one overlay window per bubble, incl. the reply-input focus promotion) vs. `ViewGroupBubbleSurface` (bubbles as `FrameLayout` children, for the in-app tutorial) |
 | `BubbleStyle` | Centralized bubble styling — Monet Material You colors (API 31+), fallback warm cream, rounded backgrounds |
 | `ScreenshotManager` | Screenshot request API — delegates to accessibility service via `OverlayCoordinator` |
 | `CameraManager` | Headless back-camera still capture via CameraX — binds `ImageCapture` to a throwaway `LifecycleOwner`, waits for focus, returns a downscaled (1568px), EXIF-uprighted base64 JPEG. Same artifact as `ScreenshotManager`, so the send pipeline is shared |
@@ -138,8 +140,9 @@ The service also self-guards: if "Display over other apps" is missing, `onCreate
 
 | Class | Role |
 |---|---|
-| `MainActivity` | Settings UI, character preset carousel (ViewPager2), prompt/sprite editing |
-| `SettingsActivity` / `SettingsFragment` | `PreferenceFragmentCompat` host — all toggles, model selection, Gemini API key, silence timeout, debug tools, open-source licenses |
+| `MainActivity` | Settings UI, character preset carousel (ViewPager2), prompt/sprite editing. Launches the tutorial on first run |
+| `SettingsActivity` / `SettingsFragment` | `PreferenceFragmentCompat` host — all toggles, model selection, Gemini API key, silence timeout, debug tools, tutorial replay, open-source licenses |
+| `TutorialActivity` | Self-contained interactive walkthrough — hosts the real `SpriteAnimator`, `BubbleManager`, `RadialMenuView`, `BeepManager`, and on-device `TtsManager` in a normal Activity sandbox (no overlay/service/permissions/network) via the `ViewGroup*Surface` implementations. A **data-driven step machine** (`Step` objects with per-step enter/exit/gesture hooks and gating) covers tap/escape/long-press/swipe plus voice (with a real spoken reply), volume/headset shortcuts (auto-play animation), web-search/tool indicators, and ghost mode — all with scripted mock pipelines and verbatim indicator strings. Snapshots and restores the four radial-menu settings so nothing the user flips persists |
 | `SettingsDialogs` | Reusable dialog builders |
 | `ui/PresetPagerAdapter` | ViewPager2 adapter for preset carousel |
 | `ui/PresetDialogHelper` | Dialogs for preset creation/editing |
@@ -191,6 +194,7 @@ app/src/main/
 │   ├── SettingsActivity.kt
 │   ├── SettingsFragment.kt
 │   ├── SettingsDialogs.kt
+│   ├── TutorialActivity.kt
 │   ├── AssistActivity.kt
 │   ├── CompanionOverlayService.kt
 │   ├── CompanionAccessibilityService.kt
@@ -211,8 +215,10 @@ app/src/main/
 │   ├── BluetoothAudioRouter.kt
 │   ├── SilenceKeepAlive.kt
 │   ├── SpriteAnimator.kt
+│   ├── SpriteSurface.kt
 │   ├── BubbleManager.kt
 │   ├── BubbleStyle.kt
+│   ├── BubbleSurface.kt
 │   ├── ScreenshotManager.kt
 │   ├── CameraManager.kt
 │   ├── ImageAudit.kt

@@ -110,6 +110,33 @@
         <item name="android:textSize">15sp</item>
     </style>
 
+    <style name="CompanionButton.Large.Left" parent="CompanionButton.Secondary">
+        <item name="android:paddingTop">14dp</item>
+        <item name="android:paddingBottom">14dp</item>
+        <item name="android:textSize">15sp</item>
+        <item name="shapeAppearanceOverlay">@style/ShapeAppearance.LeftButton</item>
+    </style>
+
+    <style name="CompanionButton.Large.Right" parent="CompanionButton.Large">
+        <item name="shapeAppearanceOverlay">@style/ShapeAppearance.RightButton</item>
+    </style>
+
+    <style name="ShapeAppearance.LeftButton" parent="">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSizeTopLeft">12dp</item>
+        <item name="cornerSizeBottomLeft">12dp</item>
+        <item name="cornerSizeTopRight">0dp</item>
+        <item name="cornerSizeBottomRight">0dp</item>
+    </style>
+
+    <style name="ShapeAppearance.RightButton" parent="">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSizeTopLeft">0dp</item>
+        <item name="cornerSizeBottomLeft">0dp</item>
+        <item name="cornerSizeTopRight">12dp</item>
+        <item name="cornerSizeBottomRight">12dp</item>
+    </style>
+
     <style name="CompanionButton.Secondary" parent="Widget.Material3.Button.OutlinedButton">
         <item name="android:textColor">@color/gold</item>
         <item name="strokeColor">@color/gold</item>

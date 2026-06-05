@@ -10,6 +10,7 @@ An animated sprite companion powered by Claude AI that lives on your Android scr
 ## Features
 
 ### Core
+- **Interactive tutorial** — a hands-on walkthrough of every feature — gestures (tap, repeat-tap, long-press, swipe), voice (with a real spoken reply), volume/headset shortcuts, web-search/tool indicators, and ghost mode — running entirely in-app with mocked responses, no permissions, overlay, or network needed. Auto-shows on first launch; replay any time from Settings → About → Tutorial
 - **Animated sprite overlay** — idle breathing, walks when tapped, escapes when tapped repeatedly
 - **Screenshot + AI commentary** — long-press the sprite to capture the screen and get a response in a speech bubble
 - **Camera capture** — set long-press to snap a back-camera photo instead of a screenshot ("look at this"), sent through the same pipeline

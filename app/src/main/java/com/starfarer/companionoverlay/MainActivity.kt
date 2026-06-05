@@ -125,6 +125,12 @@ class MainActivity : AppCompatActivity() {
         setupModelDropdown()
         setupClickListeners()
         observeState()
+
+        // First launch: show the interactive tutorial once.
+        if (!settings.tutorialSeen) {
+            settings.tutorialSeen = true
+            startActivity(Intent(this, TutorialActivity::class.java))
+        }
     }
 
     override fun onResume() {

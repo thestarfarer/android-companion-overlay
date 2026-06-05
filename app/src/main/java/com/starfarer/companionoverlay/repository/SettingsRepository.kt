@@ -192,6 +192,11 @@ class SettingsRepository(
         get() = settingsPrefs.getBoolean(KEY_SAVE_SENT_IMAGES, false)
         set(value) = settingsPrefs.edit().putBoolean(KEY_SAVE_SENT_IMAGES, value).apply()
 
+    /** Whether the first-launch interactive tutorial has been shown. */
+    var tutorialSeen: Boolean
+        get() = settingsPrefs.getBoolean(KEY_TUTORIAL_SEEN, false)
+        set(value) = settingsPrefs.edit().putBoolean(KEY_TUTORIAL_SEEN, value).apply()
+
     // ══════════════════════════════════════════════════════════════════════
     // MCP
     // ══════════════════════════════════════════════════════════════════════
@@ -279,6 +284,7 @@ class SettingsRepository(
         private const val KEY_VOICE_SCREENSHOT = "voice_screenshot_enabled"
         private const val KEY_CAPTURE_MODE = "capture_mode"
         private const val KEY_SAVE_SENT_IMAGES = "save_sent_images"
+        private const val KEY_TUTORIAL_SEEN = "tutorial_seen"
         private const val KEY_MCP_ENABLED = "mcp_enabled"
         private const val KEY_MCP_SHOW_TOOL_BUBBLES = "mcp_show_tool_bubbles"
         private const val KEY_NEXUS_EMIT_COUNTER = "nexus_emit_counter"
