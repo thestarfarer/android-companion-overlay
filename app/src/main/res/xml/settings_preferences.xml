@@ -230,6 +230,12 @@
             app:title="Camera"
             app:summary="Required for camera capture instead of screenshots"/>
 
+        <Preference
+            app:iconSpaceReserved="false"
+            app:key="perm_notifications"
+            app:title="Notifications"
+            app:summary="Shows the overlay status and its Stop button"/>
+
     </PreferenceCategory>
 
     <!-- ════════ CLAUDE API ════════ -->

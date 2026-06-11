@@ -56,6 +56,9 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
 
     companion object {
         const val CHANNEL_ID = CompanionApplication.NOTIFICATION_CHANNEL_ID
+        // Notification "Stop" action — the only way to dismiss the overlay
+        // without opening the app.
+        const val ACTION_STOP = "com.starfarer.companionoverlay.action.STOP"
         private const val LONG_PRESS_TIMEOUT_MS = 500L
         // Vertical travel (dp) that commits a swipe — opens/closes the radial menu.
         private const val SWIPE_MIN_DISTANCE_DP = 56f
@@ -120,6 +123,10 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_STOP) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
         return START_STICKY
     }
 
@@ -781,12 +788,23 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        val stopIntent = Intent(this, CompanionOverlayService::class.java)
+            .setAction(ACTION_STOP)
+        val stopPendingIntent = PendingIntent.getService(
+            this, 1, stopIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Senni is here~")
-            .setContentText("Tap to open settings")
+            .setContentText("Tap to open the app")
             .setSmallIcon(R.drawable.ic_notification)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
+            // Without IMMEDIATE the system may defer showing an FGS notification
+            // for ~10s, which hides the abort-path notification entirely.
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+            .addAction(0, "Stop", stopPendingIntent)
             .build()
     }
 }

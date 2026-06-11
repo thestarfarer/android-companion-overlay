@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  companion_auth.xml is EncryptedSharedPreferences: its Tink keyset is wrapped
+  by an Android Keystore master key that never leaves the device, so a restored
+  copy is undecryptable and crashes prefs creation on first launch (see
+  di/StorageModule). Conversation history and sent images are excluded as
+  private content (screen captures, chat transcripts).
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="companion_auth.xml" />
+        <exclude domain="file" path="conversation_history.json" />
+        <exclude domain="file" path="conversation_history.json.tmp" />
+        <exclude domain="external" path="sent_images/" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="companion_auth.xml" />
+        <exclude domain="file" path="conversation_history.json" />
+        <exclude domain="file" path="conversation_history.json.tmp" />
+        <exclude domain="external" path="sent_images/" />
+    </device-transfer>
+</data-extraction-rules>

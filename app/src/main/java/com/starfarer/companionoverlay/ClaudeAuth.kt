@@ -158,7 +158,18 @@ class ClaudeAuth(
 
     fun logout() {
         log("Logging out")
-        prefs.edit().clear().commit()
+        // This prefs file is shared with MCP client secrets and other encrypted
+        // settings (see StorageModule's "auth" single) — remove only our own
+        // keys, never clear() the whole file.
+        prefs.edit()
+            .remove(KEY_ACCESS_TOKEN)
+            .remove(KEY_REFRESH_TOKEN)
+            .remove(KEY_EXPIRES_AT)
+            .remove(KEY_USER_ID)
+            .remove(KEY_ACCOUNT_UUID)
+            .remove(KEY_SESSION_ID)
+            .commit()
+        _tokenExpiry.value = 0L
     }
 
     fun cancelAuth() {

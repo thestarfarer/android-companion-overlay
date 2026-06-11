@@ -10,14 +10,26 @@ if (localPropertiesFile.exists()) {
     localProperties.load(new FileInputStream(localPropertiesFile))
 }
 
+// Resolution order: local.properties (dev machine) → environment (CI) →
+// -P/gradle.properties. No fallback default — a placeholder would silently
+// outrank the environment and sign releases with a junk password.
 def storePass = localProperties.getProperty('RELEASE_STORE_PASSWORD')
-    ?: project.findProperty('RELEASE_STORE_PASSWORD')
     ?: System.getenv('RELEASE_STORE_PASSWORD')
-    ?: 'changeme'
+    ?: project.findProperty('RELEASE_STORE_PASSWORD')
 def keyPass = localProperties.getProperty('RELEASE_KEY_PASSWORD')
-    ?: project.findProperty('RELEASE_KEY_PASSWORD')
     ?: System.getenv('RELEASE_KEY_PASSWORD')
-    ?: 'changeme'
+    ?: project.findProperty('RELEASE_KEY_PASSWORD')
+
+// Fail release builds up front when credentials are absent, instead of
+// producing an APK signed with a wrong/blank password deep in the task graph.
+gradle.taskGraph.whenReady { graph ->
+    def buildsRelease = graph.allTasks.any { it.name ==~ /(package|assemble|bundle)\w*Release/ }
+    if (buildsRelease && (storePass == null || keyPass == null)) {
+        throw new GradleException(
+            'Release signing credentials missing — set RELEASE_STORE_PASSWORD and ' +
+            'RELEASE_KEY_PASSWORD via environment variables or local.properties.')
+    }
+}
 
 android {
     namespace = 'com.starfarer.companionoverlay'
