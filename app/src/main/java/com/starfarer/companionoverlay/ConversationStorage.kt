@@ -3,10 +3,13 @@ package com.starfarer.companionoverlay
 import android.content.Context
 import com.starfarer.companionoverlay.api.Message
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
+import java.io.FileOutputStream
 
 /**
  * File-based persistence for conversation history.
@@ -45,48 +48,63 @@ class ConversationStorage(private val context: Context) {
 
     private val file: File get() = File(context.filesDir, FILENAME)
 
+    // Serializes save/save and save/clear — they share one temp path, and the
+    // launching scope happily interleaves them at suspension points.
+    private val ioMutex = Mutex()
+
     /**
      * Load conversation history from disk.
      * Returns an empty list if the file doesn't exist or is corrupt.
      */
     suspend fun load(): MutableList<Message> = withContext(Dispatchers.IO) {
-        val f = file
-        if (!f.exists()) return@withContext mutableListOf()
+        ioMutex.withLock {
+            val f = file
+            if (!f.exists()) return@withContext mutableListOf()
 
-        try {
-            val text = f.readText()
-            val messages = json.decodeFromString<List<Message>>(text)
-            DebugLog.log(TAG, "Loaded ${messages.size} messages from file")
-            messages.toMutableList()
-        } catch (e: Exception) {
-            DebugLog.log(TAG, "Failed to load history: ${e.message}")
-            mutableListOf()
+            try {
+                val text = f.readText()
+                val messages = json.decodeFromString<List<Message>>(text)
+                DebugLog.log(TAG, "Loaded ${messages.size} messages from file")
+                messages.toMutableList()
+            } catch (e: Exception) {
+                DebugLog.log(TAG, "Failed to load history: ${e.message}")
+                mutableListOf()
+            }
         }
     }
 
     /**
      * Save conversation history to disk.
-     * Writes to a temp file and renames for atomicity.
+     * Writes to a temp file, fsyncs, then renames. Without the sync the rename
+     * can become durable before the data does — a crash then leaves a
+     * truncated/empty "atomically written" file.
      */
     suspend fun save(messages: List<Message>) = withContext(Dispatchers.IO) {
-        try {
-            val text = json.encodeToString(messages)
-            val tmp = File(context.filesDir, "$FILENAME.tmp")
-            tmp.writeText(text)
-            if (!tmp.renameTo(file)) {
-                DebugLog.log(TAG, "renameTo failed, falling back to copy")
-                tmp.copyTo(file, overwrite = true)
-                tmp.delete()
+        ioMutex.withLock {
+            try {
+                val text = json.encodeToString(messages)
+                val tmp = File(context.filesDir, "$FILENAME.tmp")
+                FileOutputStream(tmp).use { out ->
+                    out.write(text.toByteArray())
+                    out.fd.sync()
+                }
+                if (!tmp.renameTo(file)) {
+                    DebugLog.log(TAG, "renameTo failed, falling back to copy")
+                    tmp.copyTo(file, overwrite = true)
+                    tmp.delete()
+                }
+                DebugLog.log(TAG, "Saved ${messages.size} messages to file")
+            } catch (e: Exception) {
+                DebugLog.log(TAG, "Failed to save history: ${e.message}")
             }
-            DebugLog.log(TAG, "Saved ${messages.size} messages to file")
-        } catch (e: Exception) {
-            DebugLog.log(TAG, "Failed to save history: ${e.message}")
         }
     }
 
     /** Delete the history file. */
     suspend fun clear() = withContext(Dispatchers.IO) {
-        file.delete()
-        DebugLog.log(TAG, "History file deleted")
+        ioMutex.withLock {
+            file.delete()
+            DebugLog.log(TAG, "History file deleted")
+        }
     }
 }

@@ -107,6 +107,15 @@ class OverlayCoordinator {
         }
     }
 
+    /**
+     * Clear the running service's conversation. Returns false when the overlay
+     * isn't running — the caller should clear the storage file directly instead.
+     */
+    fun clearConversation(): Boolean {
+        if (!_overlayRunning.value) return false
+        return _events.tryEmit(OverlayEvent.ClearConversation)
+    }
+
     // ══════════════════════════════════════════════════════════════════════
     // Screenshot flow
     // ══════════════════════════════════════════════════════════════════════

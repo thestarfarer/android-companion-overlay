@@ -6,8 +6,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
-import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
 
 /**
  * Fetches context from the Nexus via [McpManager] and caches it in
@@ -47,12 +45,11 @@ class NexusContextFetcher(
             return@withContext Result.failure(Exception(msg))
         }
 
-        val now = LocalDateTime.now()
-            .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm (EEEE)"))
-        val presetName = settings.systemPrompt.take(80)
-            .let { if (it.contains("\n")) it.substringBefore("\n") else it }
-
-        val stateText = state ?: "What happened recently? What are we up to? What should I know?"
+        // The user-editable prompt from Settings — it existed in the UI but was
+        // never consulted here, so edits silently did nothing.
+        val stateText = state
+            ?: settings.nexusContextPrompt.takeIf { it.isNotBlank() }
+            ?: "What happened recently? What are we up to? What should I know?"
 
         val arguments = buildJsonObject {
             put("state", stateText)
@@ -73,6 +70,10 @@ class NexusContextFetcher(
                 return@withContext Result.failure(Exception("Empty context returned"))
             }
 
+            // KNOWN WEAK POINT (accepted): cached uncapped and injected into
+            // every system prompt — a misbehaving Nexus server returning huge
+            // text would bloat every request until re-fetched. Contract with
+            // the server.
             settings.nexusContextCache = context
             settings.nexusContextTimestamp = System.currentTimeMillis()
             DebugLog.log(TAG, "Cached ${context.length} chars")

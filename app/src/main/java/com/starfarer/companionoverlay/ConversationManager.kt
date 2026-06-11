@@ -1,8 +1,10 @@
 package com.starfarer.companionoverlay
 
 import android.content.ClipData
+import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.Context
+import android.os.PersistableBundle
 import com.starfarer.companionoverlay.api.*
 import com.starfarer.companionoverlay.mcp.McpManager
 import com.starfarer.companionoverlay.mcp.AsyncResultPoller
@@ -101,6 +103,9 @@ class ConversationManager(
     }
 
     fun clearHistory() {
+        // A response landing after the clear would re-plant its user+assistant
+        // pair into the "empty" history — kill the in-flight request first.
+        cancelPending()
         conversationHistory.clear()
         lastAssistantMessage = null
         settings.nexusEmitCounter = 0
@@ -109,10 +114,16 @@ class ConversationManager(
     }
 
     fun startAsyncPolling() {
+        // Undelivered results must survive an MCP re-init (credential save,
+        // reconnect) — they used to die with the old poller instance.
+        val carriedOver = asyncPoller?.peekResults() ?: emptyList()
         asyncPoller?.destroy()
         asyncPoller = null
         if (!settings.nexusIntegrationEnabled) return
-        asyncPoller = AsyncResultPoller(mcpManager).also { it.start() }
+        asyncPoller = AsyncResultPoller(mcpManager) { lastUserMessageTime }.also {
+            it.seed(carriedOver)
+            it.start()
+        }
     }
 
     /**
@@ -208,14 +219,17 @@ class ConversationManager(
             "[System: Async job results arrived]\n$resultText\n[React to these results naturally. The user didn't type this — it arrived from a background task you dispatched earlier.]"
         )
         lastUserMessageTime = System.currentTimeMillis()
-        sendMessage(synthetic)
+        sendMessage(synthetic, injectedResults = results)
     }
 
     // ══════════════════════════════════════════════════════════════════════
     // Internal
     // ══════════════════════════════════════════════════════════════════════
 
-    private fun sendMessage(userMessage: Message) {
+    private fun sendMessage(
+        userMessage: Message,
+        injectedResults: List<AsyncResultPoller.JobResult> = emptyList()
+    ) {
         activeJob = scope.launch {
             try {
                 val allMessages = synchronized(conversationHistory) {
@@ -226,12 +240,14 @@ class ConversationManager(
                 val basePrompt = "[Current time: $now]\n\n" + settings.systemPrompt +
                     (nexusContext?.let { "\n\n[Nexus context]\n$it\n[/Nexus context]" } ?: "")
 
-                // For user-initiated messages (not synthetic injections), drain any
-                // pending results into the system prompt as bonus context.
+                // For user-initiated messages (not synthetic injections), PEEK any
+                // pending results into the system prompt as bonus context. They are
+                // consumed only in handleSuccess — the old drain-here approach lost
+                // them for good when the request failed or was cancelled.
                 val asyncResults = if (!syntheticInjectionInFlight &&
                     settings.mcpEnabled && settings.nexusIntegrationEnabled
                 ) {
-                    asyncPoller?.drainResults() ?: emptyList()
+                    asyncPoller?.peekResults() ?: emptyList()
                 } else emptyList()
 
                 val systemPrompt = if (asyncResults.isNotEmpty()) {
@@ -239,6 +255,8 @@ class ConversationManager(
                     DebugLog.log(TAG, "Injecting ${asyncResults.size} async result(s) into context")
                     basePrompt + "\n\n[Async results arrived while you were talking]\n" + resultText
                 } else basePrompt
+
+                val deliveredResults = injectedResults + asyncResults
                 val webSearch = settings.webSearchEnabled
                 val mcpTools = if (settings.mcpEnabled) mcpManager.getClaudeTools() else emptyList()
 
@@ -259,11 +277,13 @@ class ConversationManager(
                     when {
                         response.cancelled -> {
                             DebugLog.log(TAG, "Request cancelled")
+                            syntheticInjectionInFlight = false
                             listener?.onCancelled()
                             return@launch
                         }
                         !response.success -> {
                             DebugLog.log(TAG, "API error: ${response.error}")
+                            syntheticInjectionInFlight = false
                             listener?.onError(response.error ?: "Unknown error")
                             return@launch
                         }
@@ -277,21 +297,28 @@ class ConversationManager(
 
                         listener?.onToolUseProgress(toolUseBlocks.mapNotNull { it.name })
 
+                        // Send the response content back VERBATIM (RawBlocks):
+                        // rebuilding it from the typed blocks dropped
+                        // server_tool_use / web_search_tool_result blocks, so in
+                        // mixed web-search + MCP turns Claude lost its own search
+                        // results between loop iterations. Loop-local only — tool
+                        // turns are deliberately never persisted to history.
                         val assistantMsg = Message(
                             role = "assistant",
-                            content = MessageContent.Blocks(
-                                fullResponse.content.mapNotNull { block ->
-                                    when (block.type) {
-                                        "tool_use" -> ContentBlock.ToolUse(
-                                            id = block.id!!,
-                                            name = block.name!!,
-                                            input = block.input ?: JsonObject(emptyMap())
-                                        )
-                                        "text" -> ContentBlock.Text(block.text ?: "")
-                                        else -> null
+                            content = response.rawContent?.let { MessageContent.RawBlocks(it) }
+                                ?: MessageContent.Blocks(
+                                    fullResponse.content.mapNotNull { block ->
+                                        when (block.type) {
+                                            "tool_use" -> ContentBlock.ToolUse(
+                                                id = block.id!!,
+                                                name = block.name!!,
+                                                input = block.input ?: JsonObject(emptyMap())
+                                            )
+                                            "text" -> ContentBlock.Text(block.text ?: "")
+                                            else -> null
+                                        }
                                     }
-                                }
-                            )
+                                )
                         )
 
                         val toolResults = mutableListOf<ContentBlock>()
@@ -314,33 +341,75 @@ class ConversationManager(
 
                         messages = messages + assistantMsg + toolResultMsg
                     } else {
+                        if (response.text.isBlank()) {
+                            // Never store an empty reply: history is resent every
+                            // turn and the API rejects empty content — one stored
+                            // blank poisoned every subsequent request.
+                            DebugLog.log(TAG, "Empty assistant reply — not storing")
+                            syntheticInjectionInFlight = false
+                            listener?.onError("Empty response")
+                            return@launch
+                        }
                         val userMsg = allMessages.last()
                         val newMessages = listOf(userMsg, assistantMessage(response.text))
-                        handleSuccess(newMessages, response.text)
+                        handleSuccess(newMessages, response.text, deliveredResults)
                         return@launch
                     }
                 }
 
-                DebugLog.log(TAG, "Tool use loop exceeded $maxIterations iterations")
-                listener?.onError("Tool execution limit reached")
+                // Iteration cap hit AFTER up to 10 rounds of real side effects.
+                // Discarding the exchange here gave the model amnesia about work
+                // the external world remembers — instead, force one closing text
+                // reply (tool_choice "none") and store it like any other turn.
+                DebugLog.log(TAG, "Tool loop hit $maxIterations iterations — forcing a closing reply")
+                val closing = withContext(Dispatchers.IO) {
+                    claudeApi.sendConversation(
+                        messages, systemPrompt, webSearch, mcpTools,
+                        forceTextResponse = true
+                    )
+                }
+                when {
+                    closing.cancelled -> {
+                        syntheticInjectionInFlight = false
+                        listener?.onCancelled()
+                    }
+                    !closing.success || closing.text.isBlank() -> {
+                        syntheticInjectionInFlight = false
+                        listener?.onError(closing.error ?: "Tool execution limit reached")
+                    }
+                    else -> {
+                        val userMsg = allMessages.last()
+                        handleSuccess(
+                            listOf(userMsg, assistantMessage(closing.text)),
+                            closing.text,
+                            deliveredResults
+                        )
+                    }
+                }
 
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 DebugLog.log(TAG, "Unexpected error: ${e::class.simpleName}: ${e.message}")
+                syntheticInjectionInFlight = false
                 listener?.onError(e.message ?: "Unexpected error")
             }
         }
     }
 
-    private fun handleSuccess(newMessages: List<Message>, responseText: String) {
-        // If this was a synthetic injection, NOW we consume the results.
-        // They survived the full round trip — peek to API call to response.
-        if (syntheticInjectionInFlight) {
-            asyncPoller?.drainResults()
-            syntheticInjectionInFlight = false
-            DebugLog.log(TAG, "Async results delivered successfully")
+    private fun handleSuccess(
+        newMessages: List<Message>,
+        responseText: String,
+        deliveredResults: List<AsyncResultPoller.JobResult>
+    ) {
+        // NOW the injected results are consumed — by identity, so anything that
+        // arrived during the round trip stays queued instead of being silently
+        // marked delivered (the old drain-all dropped those).
+        if (deliveredResults.isNotEmpty()) {
+            asyncPoller?.confirmDelivered(deliveredResults)
+            DebugLog.log(TAG, "${deliveredResults.size} async result(s) delivered successfully")
         }
+        syntheticInjectionInFlight = false
 
         synchronized(conversationHistory) {
             conversationHistory.addAll(newMessages)
@@ -354,17 +423,27 @@ class ConversationManager(
         lastAssistantMessage = responseText
         DebugLog.log(TAG, "Response: ${responseText.take(60)}...")
 
-        settings.nexusEmitCounter += newMessages.size
-        if (settings.nexusEmitCounter >= 20) {
-            settings.nexusEmitCounter = 0
-            maybeEmitNexus()
+        // Gated: with Nexus off this was a SharedPreferences write per exchange
+        // for a feature doing nothing.
+        if (settings.nexusIntegrationEnabled && settings.mcpEnabled) {
+            settings.nexusEmitCounter += newMessages.size
+            if (settings.nexusEmitCounter >= 20) {
+                settings.nexusEmitCounter = 0
+                maybeEmitNexus()
+            }
         }
 
         saveHistory()
 
         if (settings.autoCopy) {
             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            clipboard.setPrimaryClip(ClipData.newPlainText("Senni", responseText))
+            val clip = ClipData.newPlainText("Senni", responseText).apply {
+                // Keeps replies out of clipboard preview UI / synced history.
+                description.extras = PersistableBundle().apply {
+                    putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true)
+                }
+            }
+            clipboard.setPrimaryClip(clip)
         }
 
         listener?.onResponseReceived(responseText)

@@ -150,6 +150,12 @@
             app:defaultValue="30"
             app:persistent="false"/>
 
+        <Preference
+            app:iconSpaceReserved="false"
+            app:key="clear_history"
+            app:title="Clear conversation history"
+            app:summary="Forget everything said so far (asks first)"/>
+
     </PreferenceCategory>
 
     <!-- ════════ MCP SERVERS ════════ -->
