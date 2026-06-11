@@ -1,6 +1,7 @@
 package com.starfarer.companionoverlay
 
 import android.Manifest
+import android.app.KeyguardManager
 import android.app.Notification
 import android.app.PendingIntent
 import android.app.Service
@@ -10,6 +11,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
+import android.content.res.Configuration
 import android.graphics.PixelFormat
 import android.os.Handler
 import android.os.IBinder
@@ -78,7 +80,10 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
     private val httpClient: okhttp3.OkHttpClient by inject()
     private val mcpManager: McpManager by inject()
 
-    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    // Main.immediate so launch bodies run inline up to their first suspension —
+    // subscribeToEvents() relies on this: its collect subscription must be live
+    // before onCreate publishes "running" (see onCreate ordering comment).
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     // ══════════════════════════════════════════════════════════════════════
     // Managers (created in service)
@@ -112,9 +117,26 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
 
     private val longPressHandler = Handler(Looper.getMainLooper())
     private var isLongPress = false
-    private var touchDownX = 0f
-    private var touchDownY = 0f
+    // Raw (screen) coordinates for movement deltas — the window itself moves
+    // while the sprite walks, so view-relative deltas would drift mid-gesture.
+    private var touchDownRawX = 0f
+    private var touchDownRawY = 0f
+    // View-relative Y kept separately for the upper/lower-body long-press split.
+    private var touchDownViewY = 0f
     private var swipeConsumed = false   // a swipe already opened/closed the menu this gesture
+
+    // Set at the end of initializeManagers(); onDestroy uses it to skip teardown
+    // of managers that were never created (permission-abort path used to crash
+    // here on uninitialized lateinit fields, then crash-loop via START_STICKY).
+    private var managersInitialized = false
+
+    // Lets late async callbacks (capture results, FGS type demotion) detect that
+    // the service is gone instead of poking dead UI or re-entering foreground.
+    @Volatile private var destroyed = false
+
+    // Tracked so screen-on/unlock fades restore to the ghost alpha (0.5) rather
+    // than snapping a ghosted sprite back to fully visible.
+    private var ghostActive = false
 
     // ══════════════════════════════════════════════════════════════════════
     // Lifecycle
@@ -145,19 +167,24 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
             return
         }
 
-        coordinator.onOverlayServiceStarted()
+        // Enter the foreground state before any heavy work — sprite decode and
+        // (in 3D mode) Filament engine creation can take long enough to trip the
+        // "did not call startForeground" ANR window. Base types only: camera is
+        // declared in the manifest but deliberately excluded here — applying it
+        // unconditionally would demand CAMERA permission at every overlay start.
+        // It's promoted in transiently during capture via setCameraForeground().
+        startForeground(1, createNotification(), baseForegroundType())
 
         initializeScreen()
         initializeManagers()
-        initializeOverlayView()
+        if (!initializeOverlayView()) {
+            // addView rejected (e.g. permission revoked mid-flight). stopSelf has
+            // already been called; skip the rest and let onDestroy tear down what
+            // exists instead of continuing to initialize a dead service.
+            return
+        }
         subscribeToEvents()
         startAnimation()
-
-        // Start with the base types only. Camera is declared in the manifest but
-        // deliberately excluded here — applying it unconditionally would demand
-        // CAMERA permission at every overlay start. It's promoted in transiently
-        // during capture via setCameraForeground().
-        startForeground(1, createNotification(), baseForegroundType())
 
         registerReceiver(screenReceiver, IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_OFF)
@@ -165,25 +192,41 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
             addAction(Intent.ACTION_USER_PRESENT)
         })
 
+        // Publish "running" only after the event collector is live (the scope is
+        // Main.immediate, so subscribeToEvents' collect subscription is already
+        // active here). Flipping the flag earlier let a ToggleVoice fired by a
+        // fast observer land on a SharedFlow with no subscriber — silently dropped.
+        coordinator.onOverlayServiceStarted()
+
         DebugLog.log("Overlay", "Service created")
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        destroyed = true
         saveState()
         stopAnimation()
+        // Kill pending delayed work (screenshot/camera capture posts) — a capture
+        // firing after destroy used to be able to start the microphone.
+        handler.removeCallbacksAndMessages(null)
 
         runCatching { unregisterReceiver(screenReceiver) }
             .onFailure { DebugLog.log("Overlay", "Failed to unregister receiver: ${it.message}") }
 
-        voiceController.destroy()
-        audioCoordinator.release()
-        conversationManager.destroy()
-        bubbleManager.hideVoice()
-        bubbleManager.hideSpeechBubble()
-        if (::radialMenuManager.isInitialized) radialMenuManager.close()
+        // Only tear down what initializeManagers() actually created — the
+        // permission-abort path never gets there, and the injected delegates
+        // (audioCoordinator, conversationManager) must not be lazily *created*
+        // here just to be destroyed.
+        if (managersInitialized) {
+            voiceController.destroy()
+            audioCoordinator.release()
+            conversationManager.destroy()
+            bubbleManager.hideVoice()
+            bubbleManager.hideSpeechBubble()
+            radialMenuManager.close()
+            spriteAnimator.release()
+        }
         filamentRenderer?.destroy()
-        spriteAnimator.release()
 
         if (::overlayView.isInitialized) {
             runCatching { windowManager.removeView(overlayView) }
@@ -194,6 +237,23 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
         coordinator.onOverlayServiceStopped()
 
         DebugLog.log("Overlay", "Service destroyed")
+    }
+
+    /**
+     * Screen bounds are captured at onCreate; rotation and fold changes move
+     * them under us. Re-measure, re-point the animator's walk/escape math, and
+     * clamp the window back on-screen.
+     */
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (!managersInitialized || !::overlayView.isInitialized) return
+
+        initializeScreen()
+        spriteAnimator.onScreenResized(screenWidth, screenHeight)
+        params.x = params.x.coerceIn(0, maxOf(0, screenWidth - params.width))
+        params.y = params.y.coerceIn(0, maxOf(0, screenHeight - params.height))
+        runCatching { windowManager.updateViewLayout(overlayView, params) }
+            .onFailure { DebugLog.log("Overlay", "Rotation relayout failed: ${it.message}") }
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -252,6 +312,8 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
                 conversationManager.startAsyncPolling()
             }
         }
+
+        managersInitialized = true
     }
 
     private fun subscribeToEvents() {
@@ -262,10 +324,27 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
                     is OverlayEvent.DismissOverlay -> dismissAnimated()
                     is OverlayEvent.KeyboardVisibility -> setGhostMode(event.visible)
                     is OverlayEvent.ReloadMcp -> reloadMcp()
+                    is OverlayEvent.ReloadSprites -> reloadSprites()
                     else -> { /* Handled elsewhere */ }
                 }
             }
         }
+    }
+
+    /** Live sprite/preset change from MainActivity — reload sheets in place. */
+    private fun reloadSprites() {
+        // 3D mode doesn't render sprite sheets; nothing to reload.
+        if (filamentRenderer != null) return
+        DebugLog.log("Overlay", "Sprites/preset changed — reloading sheets")
+        spriteAnimator.reloadSprites()
+        // The window is sized to the sheet's frame dimensions — track changes.
+        if (params.width != spriteAnimator.viewWidth || params.height != spriteAnimator.viewHeight) {
+            params.width = spriteAnimator.viewWidth
+            params.height = spriteAnimator.viewHeight
+            runCatching { windowManager.updateViewLayout(overlayView, params) }
+                .onFailure { DebugLog.log("Overlay", "Sprite resize failed: ${it.message}") }
+        }
+        spriteAnimator.update()
     }
 
     private fun reloadMcp() {
@@ -282,15 +361,15 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
         }
     }
 
-    private fun initializeOverlayView() {
+    /** @return false when the overlay window could not be added (service is stopping). */
+    private fun initializeOverlayView(): Boolean {
         if (settings.is3dMode) {
-            initializeFilamentOverlay()
-            return
+            return initializeFilamentOverlay()
         }
-        initializeSpriteOverlay()
+        return initializeSpriteOverlay()
     }
 
-    private fun initializeFilamentOverlay() {
+    private fun initializeFilamentOverlay(): Boolean {
         try {
             val renderer = FilamentAvatarRenderer(this)
             filamentRenderer = renderer
@@ -322,16 +401,17 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
             overlayView.animate().alpha(1f).setDuration(300).start()
             renderer.start()
             DebugLog.log("Overlay", "Filament 3D overlay active")
+            return true
         } catch (e: Exception) {
             DebugLog.log("Overlay", "Filament FAILED: ${e.message}")
             android.util.Log.e("Overlay", "Filament failed", e)
             settings.overlayMode = "sprite"
             filamentRenderer = null
-            initializeSpriteOverlay()
+            return initializeSpriteOverlay()
         }
     }
 
-    private fun initializeSpriteOverlay() {
+    private fun initializeSpriteOverlay(): Boolean {
         overlayView = ImageView(this).apply {
             scaleType = ImageView.ScaleType.FIT_CENTER
         }
@@ -363,11 +443,12 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
         } catch (e: Exception) {
             DebugLog.log("Overlay", "addView failed (${e.message}) — stopping service")
             stopSelf()
-            return
+            return false
         }
 
         overlayView.alpha = 0f
         overlayView.animate().alpha(1f).setDuration(300).start()
+        return true
     }
 
     private fun setupTouchHandling() {
@@ -379,8 +460,9 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
                 MotionEvent.ACTION_DOWN -> {
                     isLongPress = false
                     swipeConsumed = false
-                    touchDownX = event.x
-                    touchDownY = event.y
+                    touchDownRawX = event.rawX
+                    touchDownRawY = event.rawY
+                    touchDownViewY = event.y
                     longPressHandler.postDelayed({
                         isLongPress = true
                         handleLongPress()
@@ -388,8 +470,10 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    val dx = event.x - touchDownX
-                    val dy = event.y - touchDownY
+                    // Raw deltas: view-relative coords shift when the window itself
+                    // moves mid-gesture (walking sprite), faking movement.
+                    val dx = event.rawX - touchDownRawX
+                    val dy = event.rawY - touchDownRawY
                     // Any real movement cancels the long-press (it's a gesture, not a hold).
                     if (kotlin.math.hypot(dx, dy) > touchSlop) {
                         longPressHandler.removeCallbacksAndMessages(null)
@@ -437,6 +521,10 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
             if (!animating) return
             if (SystemClock.elapsedRealtime() - lastFrameTimeMs > 100) {
                 spriteAnimator.update()
+                // Re-arm the vsync callback without duplicating it: a repeated
+                // stale tick would otherwise stack a second callback, and each
+                // one re-posts itself — permanently multiplying update() rate.
+                Choreographer.getInstance().removeFrameCallback(frameCallback)
                 Choreographer.getInstance().postFrameCallback(frameCallback)
             }
             handler.postDelayed(this, 100)
@@ -444,6 +532,9 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
     }
 
     private fun startAnimation() {
+        // Idempotent: a duplicate SCREEN_ON (or ON without OFF) must not register
+        // a second frame callback + watchdog on top of the running ones.
+        if (animating) return
         spriteAnimator.startTime = SystemClock.elapsedRealtime()
         animating = true
         Choreographer.getInstance().postFrameCallback(frameCallback)
@@ -465,7 +556,7 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
         overlayView.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
 
         val threshold = overlayView.height * 2f / 3f
-        if (touchDownY < threshold) {
+        if (touchDownViewY < threshold) {
             handleScreenshotRequest()
         } else {
             handleBubbleReopen()
@@ -534,6 +625,9 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
      */
     private fun dispatchCapturedImage(base64: String) {
         handler.post {
+            // Capture callbacks can outlive the service (the executor isn't ours
+            // to cancel) — never start voice input against a destroyed host.
+            if (destroyed) return@post
             if (settings.voiceScreenshotEnabled) {
                 pendingScreenshotBase64 = base64
                 bubbleManager.cancelPendingDismiss()
@@ -557,6 +651,9 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
     private fun baseForegroundType(): Int = ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
 
     private fun applyForegroundType() {
+        // A late capture/recording callback must not re-enter the foreground
+        // state on a service that is already shutting down.
+        if (destroyed) return
         var type = baseForegroundType()
         if (micFgsActive) type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
         if (cameraFgsActive) type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
@@ -702,7 +799,10 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
     // Internal helpers
     // ══════════════════════════════════════════════════════════════════════
 
-    private fun setGhostMode(ghost: Boolean) = spriteAnimator.setGhostMode(ghost)
+    private fun setGhostMode(ghost: Boolean) {
+        ghostActive = ghost
+        spriteAnimator.setGhostMode(ghost)
+    }
 
     private fun dismissAnimated() {
         spriteAnimator.dismissAnimated { stopSelf() }
@@ -715,7 +815,11 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
     private fun restorePosition() {
         val savedX = settings.avatarX
         if (savedX >= 0) {
-            params.x = savedX
+            // saveState() can run mid-escape, persisting an x beyond the right
+            // edge (left-side escape saves a negative x, already rejected by the
+            // guard above). Unclamped, the window spawns fully off-screen —
+            // FLAG_LAYOUT_NO_LIMITS means the system won't pull it back.
+            params.x = savedX.coerceIn(0, maxOf(0, screenWidth - params.width))
             settings.avatarPosition?.let {
                 spriteAnimator.position = if (it == "left")
                     SpriteAnimator.OverlayPosition.Left
@@ -742,16 +846,27 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
                 Intent.ACTION_SCREEN_OFF -> stopAnimation()
                 Intent.ACTION_SCREEN_ON -> {
                     spriteAnimator.startTime = SystemClock.elapsedRealtime()
-                    overlayView.alpha = 0f
                     spriteAnimator.update()
                     startAnimation()
+                    val keyguard = getSystemService(KeyguardManager::class.java)
+                    if (keyguard?.isKeyguardLocked == true) {
+                        // Hide above the lock screen; USER_PRESENT fades back in.
+                        overlayView.alpha = 0f
+                    } else {
+                        // No keyguard — USER_PRESENT may never fire on this device,
+                        // so restore directly or the overlay stays invisible.
+                        overlayView.animate().alpha(restingAlpha()).setDuration(300).start()
+                    }
                 }
                 Intent.ACTION_USER_PRESENT -> {
-                    overlayView.animate().alpha(1f).setDuration(300).start()
+                    overlayView.animate().alpha(restingAlpha()).setDuration(300).start()
                 }
             }
         }
     }
+
+    /** The alpha the sprite should rest at — ghost mode dims it to 0.5. */
+    private fun restingAlpha(): Float = if (ghostActive) 0.5f else 1f
 
     // ══════════════════════════════════════════════════════════════════════
     // Bubble host interface
@@ -763,6 +878,7 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
         override fun onVoiceToggle() = voiceController.toggle()
         override fun onKeyboardShown() {
             handler.post {
+                ghostActive = true
                 overlayView.alpha = 0f
                 params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
                 runCatching {

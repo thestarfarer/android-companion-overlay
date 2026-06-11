@@ -12,16 +12,6 @@ package com.starfarer.companionoverlay.event
 sealed class OverlayEvent {
 
     // ══════════════════════════════════════════════════════════════════════
-    // Service Lifecycle
-    // ══════════════════════════════════════════════════════════════════════
-
-    /** Overlay service has started and is ready to receive commands. */
-    data object ServiceStarted : OverlayEvent()
-
-    /** Overlay service is stopping. */
-    data object ServiceStopping : OverlayEvent()
-
-    // ══════════════════════════════════════════════════════════════════════
     // Voice Input
     // ══════════════════════════════════════════════════════════════════════
 

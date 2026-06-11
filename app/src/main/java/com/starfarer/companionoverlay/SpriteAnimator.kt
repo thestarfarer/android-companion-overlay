@@ -29,13 +29,13 @@ class SpriteAnimator(
 ) {
 
     /**
-     * Immutable screen geometry, resolved once at service creation.
-     * Everything the animator needs to know about the display without
-     * reaching back into the service.
+     * Screen geometry, resolved at service creation. Width/height are mutable
+     * so the service can re-point the walk/escape math after a rotation or
+     * fold change (see [onScreenResized]); density is per-display and fixed.
      */
     data class Config(
-        val screenWidth: Int,
-        val screenHeight: Int,
+        var screenWidth: Int,
+        var screenHeight: Int,
         val density: Float
     )
 
@@ -132,7 +132,29 @@ class SpriteAnimator(
         if (!s.setGhost(ghost)) isGhostMode = !ghost
     }
 
+    /** Update the screen bounds the walk/escape math clamps against (rotation). */
+    fun onScreenResized(width: Int, height: Int) {
+        config.screenWidth = width
+        config.screenHeight = height
+    }
+
     fun release() {
+        releaseBitmaps()
+        surface = null
+    }
+
+    /**
+     * Reload sprite sheets in place — custom sprite or preset changed while the
+     * overlay is running. Recycling then immediately redrawing is safe because
+     * both happen in the same main-thread turn: no draw pass can observe the
+     * view holding a recycled bitmap before the caller's next [update].
+     */
+    fun reloadSprites() {
+        releaseBitmaps()
+        loadSprites()
+    }
+
+    private fun releaseBitmaps() {
         idleRenderBitmap?.recycle()
         idleRenderBitmap = null
         idleRenderCanvas = null
@@ -146,8 +168,6 @@ class SpriteAnimator(
         walkSpriteSheet?.recycle()
         idleSpriteSheet = null
         walkSpriteSheet = null
-
-        surface = null
     }
 
     // ══════════════════════════════════════════════════════════════════════

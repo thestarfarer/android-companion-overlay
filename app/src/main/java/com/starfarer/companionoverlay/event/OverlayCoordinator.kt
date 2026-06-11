@@ -58,12 +58,10 @@ class OverlayCoordinator {
 
     fun onOverlayServiceStarted() {
         _overlayRunning.value = true
-        _events.tryEmit(OverlayEvent.ServiceStarted)
     }
 
     fun onOverlayServiceStopped() {
         _overlayRunning.value = false
-        _events.tryEmit(OverlayEvent.ServiceStopping)
     }
 
     fun onAccessibilityServiceConnected() {
@@ -72,7 +70,9 @@ class OverlayCoordinator {
 
     fun onAccessibilityServiceDisconnected() {
         _accessibilityRunning.value = false
-        pendingScreenshotCallback.set(null)
+        // Fail the waiting caller instead of dropping its callback — otherwise
+        // the capture flow upstream hangs forever on a request nobody will answer.
+        pendingScreenshotCallback.getAndSet(null)?.invoke(null)
     }
 
     // ══════════════════════════════════════════════════════════════════════
