@@ -27,8 +27,9 @@ object PromptSettings {
         "claude-sonnet-4-5-20250929",
         "claude-opus-4-1-20250805",
         "claude-opus-4-6",
+        "claude-fable-5",
     )
-    val MODEL_NAMES = arrayOf("Sonnet 4.5", "Opus 4.1", "Opus 4.6")
+    val MODEL_NAMES = arrayOf("Sonnet 4.5", "Opus 4.1", "Opus 4.6", "Fable 5")
 
     val BUBBLE_TIMEOUT_VALUES = arrayOf(15, 30, 60, 120)
     val BUBBLE_TIMEOUT_LABELS = arrayOf("15 sec", "30 sec", "60 sec", "120 sec")
