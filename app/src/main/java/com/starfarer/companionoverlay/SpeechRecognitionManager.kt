@@ -62,6 +62,18 @@ class SpeechRecognitionManager(private val context: Context) {
     private var commitRunnable: Runnable? = null
     /** Guard against delivering results after explicit cancel/stop. */
     private var cancelled = false
+    /**
+     * Session generation, bumped on start, cancel, and commit. The delayed
+     * restart post captures it: checking only `cancelled` let a quick
+     * cancel→start reset the flag so a stale post double-started the
+     * recognizer, and a commit racing the post left a zombie recognizer
+     * that could echo TTS audio back as user speech.
+     */
+    private var session = 0
+    /** True while a delayed recognizer restart is in flight (ghost-error window). */
+    private var restartPending = false
+    /** One free retry for a mid-accumulation ERROR_CLIENT before committing. */
+    private var clientErrorRetried = false
 
     /** Silence timeout in ms — set from settings before startListening(). */
     var silenceTimeoutMs: Long = DEFAULT_SILENCE_TIMEOUT_MS
@@ -112,16 +124,30 @@ class SpeechRecognitionManager(private val context: Context) {
                     }
                 }
                 SpeechRecognizer.ERROR_CLIENT -> {
-                    // Often a ghost from a recognizer we just destroyed during
-                    // restart. If we have accumulated segments, commit them.
-                    // If not, treat it as a silent stop.
                     if (accumulating && accumulatedSegments.isNotEmpty()) {
-                        DebugLog.log(TAG, "Client error during accumulation, committing")
-                        commitAccumulated()
+                        // Mid-accumulation hiccup: keep listening once before
+                        // giving up — committing immediately truncated an
+                        // utterance the user was still speaking.
+                        if (!clientErrorRetried) {
+                            clientErrorRetried = true
+                            DebugLog.log(TAG, "Client error during accumulation — restarting once")
+                            restartListening()
+                        } else {
+                            DebugLog.log(TAG, "Repeated client error, committing what we have")
+                            commitAccumulated()
+                        }
+                    } else if (restartPending) {
+                        // Ghost from the recognizer we just destroyed mid-restart.
+                        DebugLog.log(TAG, "Client error (ghost from restart), ignoring")
                     } else {
-                        DebugLog.log(TAG, "Client error (benign), ignoring")
+                        // First-segment client failure with no restart in flight is
+                        // a real one (e.g. no recognition service) — surfacing it
+                        // replaces the old silent swallow that left users with
+                        // zero feedback on devices without a recognizer.
                         isListening = false
                         accumulating = false
+                        session++
+                        onError?.invoke(msg)
                         onStopped?.invoke()
                     }
                 }
@@ -130,6 +156,7 @@ class SpeechRecognitionManager(private val context: Context) {
                     accumulating = false
                     accumulatedSegments.clear()
                     cancelCommitTimer()
+                    session++
                     onError?.invoke(msg)
                     onStopped?.invoke()
                 }
@@ -186,7 +213,15 @@ class SpeechRecognitionManager(private val context: Context) {
      * Must be called on the main thread.
      */
     fun startListening() {
+        if (!SpeechRecognizer.isRecognitionAvailable(context)) {
+            DebugLog.log(TAG, "No speech recognition service available on this device")
+            onError?.invoke("No speech recognition service on this device — try Gemini voice in settings")
+            onStopped?.invoke()
+            return
+        }
+        session++
         cancelled = false
+        clientErrorRetried = false
         accumulatedSegments.clear()
         accumulating = false
         cancelCommitTimer()
@@ -201,8 +236,13 @@ class SpeechRecognitionManager(private val context: Context) {
         try { recognizer?.destroy() } catch (_: Exception) {}
         recognizer = null
 
+        restartPending = true
+        val mySession = session
         handler.postDelayed({
-            if (cancelled) return@postDelayed
+            restartPending = false
+            // Session check, not just `cancelled`: cancel→start resets the flag,
+            // and a commit ends the session — either way this post is stale.
+            if (cancelled || session != mySession) return@postDelayed
             ensureRecognizer()
             doStartListening()
         }, 100) // brief delay for cleanup
@@ -265,6 +305,10 @@ class SpeechRecognitionManager(private val context: Context) {
     /** Deliver the accumulated segments as one final result. */
     private fun commitAccumulated() {
         cancelCommitTimer()
+        // End the session so a pending 100ms restart can't start an unowned
+        // recognizer after the result is delivered (the zombie could capture
+        // the TTS reply and echo it back to Claude as user speech).
+        session++
         // Stop any in-progress recognition
         try { recognizer?.cancel() } catch (_: Exception) {}
 
@@ -281,23 +325,10 @@ class SpeechRecognitionManager(private val context: Context) {
         }
     }
 
-    /**
-     * Stop listening. Commits any accumulated speech immediately.
-     */
-    fun stopListening() {
-        cancelCommitTimer()
-        try { recognizer?.stopListening() } catch (_: Exception) {}
-
-        if (accumulating && accumulatedSegments.isNotEmpty()) {
-            commitAccumulated()
-        } else {
-            isListening = false
-        }
-    }
-
     /** Cancel without delivering a result. */
     fun cancel() {
         cancelled = true
+        session++
         cancelCommitTimer()
         accumulatedSegments.clear()
         accumulating = false
@@ -340,8 +371,9 @@ class SpeechRecognitionManager(private val context: Context) {
             "p****" to "pussy",
             "w***e" to "whore",
             "h**l" to "hell",
-            "n****" to "nigga",
-            "n*****" to "nigger",
+            // Deliberately no slur entries: reconstructing a slur and attributing
+            // it to the user as literal speech is worse than the censored form.
+            // Ambiguous patterns fall through to the visible "X[?]" catch-all.
         )
         var result = text
         // Case-insensitive replacement preserving original case of first letter

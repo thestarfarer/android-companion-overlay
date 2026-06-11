@@ -42,7 +42,7 @@ class SileroVadDetector(context: Context) {
     private var contextBuffer: FloatArray
 
     init {
-        val modelBytes = context.assets.open("silero_vad.onnx").readBytes()
+        val modelBytes = context.assets.open("silero_vad.onnx").use { it.readBytes() }
         session = env.createSession(modelBytes)
         state = freshState()
         contextBuffer = FloatArray(CONTEXT_SIZE)
@@ -80,41 +80,47 @@ class SileroVadDetector(context: Context) {
         // Save last 64 samples as context for next call
         System.arraycopy(inputWithContext, INPUT_SIZE - CONTEXT_SIZE, contextBuffer, 0, CONTEXT_SIZE)
 
-        // Create tensors
-        val inputTensor = OnnxTensor.createTensor(
-            env,
-            FloatBuffer.wrap(inputWithContext),
-            longArrayOf(1, INPUT_SIZE.toLong())
-        )
-        val stateTensor = OnnxTensor.createTensor(env, state)
-        val srTensor = OnnxTensor.createTensor(
-            env,
-            LongBuffer.wrap(longArrayOf(SAMPLE_RATE)),
-            longArrayOf()  // scalar
-        )
+        // Create tensors — closed in the finally block so an exception inside
+        // run() (or a closed session) doesn't leak native allocations.
+        var inputTensor: OnnxTensor? = null
+        var stateTensor: OnnxTensor? = null
+        var srTensor: OnnxTensor? = null
+        try {
+            inputTensor = OnnxTensor.createTensor(
+                env,
+                FloatBuffer.wrap(inputWithContext),
+                longArrayOf(1, INPUT_SIZE.toLong())
+            )
+            stateTensor = OnnxTensor.createTensor(env, state)
+            srTensor = OnnxTensor.createTensor(
+                env,
+                LongBuffer.wrap(longArrayOf(SAMPLE_RATE)),
+                longArrayOf()  // scalar
+            )
 
-        val inputs = mapOf(
-            "input" to inputTensor,
-            "state" to stateTensor,
-            "sr" to srTensor
-        )
+            val inputs = mapOf(
+                "input" to inputTensor,
+                "state" to stateTensor,
+                "sr" to srTensor
+            )
 
-        val result = session.run(inputs)
+            session.run(inputs).use { result ->
+                // Extract speech probability
+                @Suppress("UNCHECKED_CAST")
+                val output = (result[0].value as Array<FloatArray>)[0][0]
 
-        // Extract speech probability
-        @Suppress("UNCHECKED_CAST")
-        val output = (result[0].value as Array<FloatArray>)[0][0]
+                // Update LSTM state for next call (value materializes a JVM copy,
+                // safe to keep after the result closes)
+                @Suppress("UNCHECKED_CAST")
+                state = result[1].value as Array<Array<FloatArray>>
 
-        // Update LSTM state for next call
-        @Suppress("UNCHECKED_CAST")
-        state = result[1].value as Array<Array<FloatArray>>
-
-        inputTensor.close()
-        stateTensor.close()
-        srTensor.close()
-        result.close()
-
-        return output
+                return output
+            }
+        } finally {
+            inputTensor?.close()
+            stateTensor?.close()
+            srTensor?.close()
+        }
     }
 
     private var closed = false

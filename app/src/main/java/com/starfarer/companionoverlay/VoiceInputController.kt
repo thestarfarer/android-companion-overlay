@@ -111,8 +111,12 @@ class VoiceInputController(
 
     private fun interruptAndRestart() {
         DebugLog.log(TAG, "Interrupting processing → start listening")
+        // The PROCESSING-watchdog timeout belongs to the session being
+        // interrupted — left armed, it fired into the next healthy session.
+        cancelSafetyTimeout()
         host.stopTtsAndCancel()
         speechManager?.cancel()
+        geminiRecognizer?.cancel()
         state = State.IDLE
         host.hideVoiceBubble()
         startListening()
@@ -155,9 +159,14 @@ class VoiceInputController(
         setOnError: ((String) -> Unit) -> Unit,
         setOnStopped: (() -> Unit) -> Unit
     ) {
+        // All wrappers are gated on LISTENING: the engines guard their own
+        // sessions, but a callback that slipped through after a state change
+        // (cancel, timeout, response shown) could otherwise wedge the UI or
+        // hijack the next session's state.
         setOnReady {
             val label = if (useGemini) "🎙 Recording..." else "🎙 Listening..."
             handler.post {
+                if (state != State.LISTENING) return@post
                 host.showVoiceBubble(label)
                 if (beepsEnabled) beepManager.play(BeepManager.Beep.READY)
             }
@@ -165,16 +174,14 @@ class VoiceInputController(
 
         setOnPartial { partial ->
             handler.post {
+                if (state != State.LISTENING) return@post
                 host.updateVoiceBubble(partial)
-                if (partial == "✒️ Transcribing...") {
-                    btRouter.clearRouting()
-                    if (beepsEnabled) handler.postDelayed({ beepManager.play(BeepManager.Beep.STEP) }, BT_CLEAR_DELAY_MS)
-                }
             }
         }
 
         setOnFinal { text ->
             handler.post {
+                if (state != State.LISTENING) return@post
                 DebugLog.log(TAG, "Got speech: ${text.take(80)}")
                 state = State.PROCESSING
                 host.hideVoiceBubble()
@@ -186,6 +193,7 @@ class VoiceInputController(
 
         setOnError { error ->
             handler.post {
+                if (state != State.LISTENING) return@post
                 DebugLog.log(TAG, "Recognition error: $error")
                 if (beepsEnabled) beepManager.play(BeepManager.Beep.ERROR)
                 state = State.IDLE
@@ -235,11 +243,35 @@ class VoiceInputController(
                     { mgr.onError = it },
                     { mgr.onStopped = it }
                 )
+                mgr.onStatus = { status -> handleVoiceStatus(status) }
             }
         }
         geminiRecognizer?.silenceDurationMs = settings.silenceTimeoutMs
         geminiRecognizer?.conversationContext = host.getConversationContextForStt()
         geminiRecognizer?.startListening()
+    }
+
+    /**
+     * Typed engine status → display label + side effects. Replaces the old
+     * exact-match on the "✒️ Transcribing..." display string, which made the
+     * label itself a protocol token — retouching it silently broke Bluetooth
+     * teardown and the step beep.
+     */
+    private fun handleVoiceStatus(status: VoiceStatus) {
+        handler.post {
+            if (state != State.LISTENING) return@post
+            when (status) {
+                VoiceStatus.Recording -> host.updateVoiceBubble("🎙 Recording...")
+                VoiceStatus.Transcribing -> {
+                    host.updateVoiceBubble("✒️ Transcribing...")
+                    // Mic capture is done — release the BT route early so the
+                    // codec can settle before the response is spoken.
+                    btRouter.clearRouting()
+                    if (beepsEnabled) handler.postDelayed({ beepManager.play(BeepManager.Beep.STEP) }, BT_CLEAR_DELAY_MS)
+                }
+                VoiceStatus.Retrying -> host.updateVoiceBubble("Retrying transcription...")
+            }
+        }
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -253,6 +285,7 @@ class VoiceInputController(
                 DebugLog.log(TAG, "Safety timeout! Stuck in $state, forcing IDLE")
                 host.stopTtsAndCancel()
                 speechManager?.cancel()
+                geminiRecognizer?.cancel()
                 state = State.IDLE
                 btRouter.clearRouting()
                 host.hideVoiceBubble()
