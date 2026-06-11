@@ -631,7 +631,13 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
                 pendingScreenshotBase64 = base64
                 bubbleManager.cancelPendingDismiss()
                 bubbleManager.hideSpeechBubble()
-                voiceController.toggle()
+                // Blind toggle() here CANCELLED an active listening session —
+                // which also cleared the screenshot we just stored. If already
+                // listening, the capture simply rides along with that session;
+                // toggling from PROCESSING interrupts into a fresh listen.
+                if (voiceController.state != VoiceInputController.State.LISTENING) {
+                    voiceController.toggle()
+                }
             } else {
                 sendScreenshot(base64, null)
             }
@@ -748,6 +754,9 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
 
     override fun onCancelled() {
         pendingVoiceReply = false
+        // Without this, an externally cancelled request (tap on the bubble,
+        // TTS stop) left the controller in PROCESSING until the 300s watchdog.
+        voiceController.onVoiceResponseComplete()
     }
 
     override fun onToolUseProgress(toolNames: List<String>) {
