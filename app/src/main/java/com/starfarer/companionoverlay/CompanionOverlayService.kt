@@ -221,8 +221,7 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
             voiceController.destroy()
             audioCoordinator.release()
             conversationManager.destroy()
-            bubbleManager.hideVoice()
-            bubbleManager.hideSpeechBubble()
+            bubbleManager.destroy()
             radialMenuManager.close()
             spriteAnimator.release()
         }
@@ -876,20 +875,22 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
         override fun onTtsStop() = stopTtsAndCancel()
         override fun onSendReply(text: String) = sendTextReply(text)
         override fun onVoiceToggle() = voiceController.toggle()
+
+        // Both delegate to the one ghost path (flags + alpha via the sprite
+        // surface). The old hand-rolled removeView/addView swap here could lose
+        // the sprite entirely if the re-add failed, and re-ordered its window
+        // above the bubble dialog.
         override fun onKeyboardShown() {
-            handler.post {
-                ghostActive = true
-                overlayView.alpha = 0f
-                params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-                runCatching {
-                    windowManager.removeView(overlayView)
-                    windowManager.addView(overlayView, params)
-                }.onFailure { DebugLog.log("Overlay", "Ghost mode view swap failed: ${it.message}") }
-                overlayView.animate().alpha(0.5f).setDuration(200).start()
-                spriteAnimator.setGhostMode(true)
-            }
+            handler.post { setGhostMode(true) }
         }
-        override fun cancelBubbleTimeout() = bubbleManager.cancelPendingDismiss()
+
+        // The exit that works without the accessibility service — before this,
+        // typing a reply left the sprite ghosted forever unless that (optional)
+        // service reported the keyboard closing.
+        override fun onKeyboardHidden() {
+            handler.post { setGhostMode(false) }
+        }
+
         override val screenHeight get() = this@CompanionOverlayService.screenHeight
     }
 

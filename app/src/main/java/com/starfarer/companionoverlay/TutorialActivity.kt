@@ -170,7 +170,7 @@ class TutorialActivity : AppCompatActivity() {
             }
             override fun onVoiceToggle() {}
             override fun onKeyboardShown() {}
-            override fun cancelBubbleTimeout() {}
+            override fun onKeyboardHidden() {}
             override val screenHeight: Int get() = binding.sandbox.height
         })
     }

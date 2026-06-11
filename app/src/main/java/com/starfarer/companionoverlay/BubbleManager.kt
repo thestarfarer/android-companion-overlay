@@ -30,17 +30,29 @@ class BubbleManager(
         fun onSendReply(text: String)
         fun onVoiceToggle()
         fun onKeyboardShown()
-        fun cancelBubbleTimeout()
+
+        /**
+         * The reply keyboard closed (IME dismissed or bubble torn down). This is
+         * the ghost-mode exit that does NOT depend on the optional accessibility
+         * service — without it, typing a reply left the sprite permanently
+         * ghosted for users who never enabled that service.
+         */
+        fun onKeyboardHidden()
         val screenHeight: Int
     }
 
     // --- Speech bubble (main response dialog + brief notifications) ---
     private var speechBubble: View? = null
+    private var speechBubbleIsToast = false
     var pendingDismiss: Runnable? = null
         private set
 
     // --- Voice bubble (recording indicator) ---
     private var voiceBubble: TextView? = null
+
+    // True between the reply input raising the keyboard and its dismissal —
+    // gates onKeyboardShown/Hidden so they fire exactly once per session.
+    private var replyKeyboardActive = false
 
     // --- Brief bubble ---
 
@@ -63,9 +75,14 @@ class BubbleManager(
 
         try {
             bubble.alpha = 0f
-            surface.attach(bubble, BubblePlacement.TOP_RIGHT_TOAST)
+            // Step down when the voice indicator holds the primary toast slot —
+            // both anchored top-right, they used to fully overlap.
+            val placement = if (voiceBubble != null) BubblePlacement.TOP_RIGHT_TOAST_STACKED
+                else BubblePlacement.TOP_RIGHT_TOAST
+            surface.attach(bubble, placement)
             bubble.animate().alpha(1f).setDuration(200).start()
             speechBubble = bubble
+            speechBubbleIsToast = true
 
             bubble.setOnClickListener { host.onTtsStop(); hideSpeechBubble() }
             scheduleDismiss(durationMs)
@@ -168,6 +185,7 @@ class BubbleManager(
             surface.attach(container, BubblePlacement.CENTERED_DIALOG, maxW)
             container.animate().alpha(1f).setDuration(300).start()
             speechBubble = container
+            speechBubbleIsToast = false
 
             val maxResponseH = (host.screenHeight * 0.6).toInt()
             responseScroll.post {
@@ -180,14 +198,39 @@ class BubbleManager(
             responseText.setOnClickListener { host.onTtsStop(); hideSpeechBubble() }
 
             replyInput.setOnTouchListener { _, event ->
-                if (event.action == MotionEvent.ACTION_DOWN && surface.makeFocusable(container)) {
-                    replyInput.requestFocus()
-                    val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-                    replyInput.post { imm.showSoftInput(replyInput, InputMethodManager.SHOW_IMPLICIT) }
+                if (event.action == MotionEvent.ACTION_DOWN) {
+                    // Promotion happens at most once per bubble; the other side
+                    // effects must run on every tap — gating them all on the
+                    // promotion result used to skip dismiss-cancel and ghost
+                    // handling from the second tap onward.
+                    if (surface.makeFocusable(container)) {
+                        replyInput.requestFocus()
+                        val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+                        replyInput.post { imm.showSoftInput(replyInput, InputMethodManager.SHOW_IMPLICIT) }
+                    }
                     cancelPendingDismiss()
-                    host.onKeyboardShown()
+                    if (!replyKeyboardActive) {
+                        replyKeyboardActive = true
+                        host.onKeyboardShown()
+                    }
                 }
                 false
+            }
+
+            // Detect the reply keyboard closing via IME insets on our own window —
+            // the focused window receives them, so this works with no accessibility
+            // service. Only react after the IME was actually seen open (the first
+            // insets pass arrives before it shows).
+            var imeWasVisible = false
+            container.setOnApplyWindowInsetsListener { _, insets ->
+                val imeVisible = insets.isVisible(android.view.WindowInsets.Type.ime())
+                if (imeVisible) {
+                    imeWasVisible = true
+                } else if (imeWasVisible) {
+                    imeWasVisible = false
+                    onReplyKeyboardDismissed(container)
+                }
+                insets
             }
 
             replyInput.setOnEditorActionListener { _, actionId, _ ->
@@ -228,7 +271,10 @@ class BubbleManager(
 
         try {
             bubble.alpha = 0f
-            surface.attach(bubble, BubblePlacement.TOP_RIGHT_TOAST)
+            // Mirror of showBrief: step down if a brief toast already holds the slot.
+            val placement = if (speechBubble != null && speechBubbleIsToast)
+                BubblePlacement.TOP_RIGHT_TOAST_STACKED else BubblePlacement.TOP_RIGHT_TOAST
+            surface.attach(bubble, placement)
             bubble.animate().alpha(1f).setDuration(200).start()
             voiceBubble = bubble
             bubble.setOnClickListener { host.onVoiceToggle() }
@@ -256,6 +302,9 @@ class BubbleManager(
         val bubble = speechBubble ?: return
         val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
         bubble.windowToken?.let { imm.hideSoftInputFromWindow(it, 0) }
+        // Fallback exit: if the insets path never fired, the bubble going away
+        // must still clear ghost mode (no-op when the keyboard wasn't up).
+        onReplyKeyboardDismissed(bubble)
 
         if (animate) {
             bubble.animate().alpha(0f).setDuration(250).withEndAction {
@@ -267,6 +316,18 @@ class BubbleManager(
         speechBubble = null
     }
 
+    /**
+     * The reply keyboard closed (IME insets or bubble teardown). Demote the
+     * window so it stops swallowing Back/key events meant for the app underneath,
+     * and let the host clear ghost mode. Gated to fire once per keyboard session.
+     */
+    private fun onReplyKeyboardDismissed(bubble: View) {
+        if (!replyKeyboardActive) return
+        replyKeyboardActive = false
+        surface.makeUnfocusable(bubble)
+        host.onKeyboardHidden()
+    }
+
     fun cancelPendingDismiss() {
         pendingDismiss?.let { handler.removeCallbacks(it) }
         pendingDismiss = null
@@ -276,5 +337,17 @@ class BubbleManager(
         val dismiss = Runnable { hideSpeechBubble() }
         pendingDismiss = dismiss
         handler.postDelayed(dismiss, delayMs)
+    }
+
+    /**
+     * Immediate teardown for service destroy. The animated hide paths remove
+     * windows inside withEndAction, which a dying service can cancel — leaking
+     * the bubble windows until the process exits. Detach synchronously instead.
+     */
+    fun destroy() {
+        cancelPendingDismiss()
+        voiceBubble?.let { surface.detach(it) }
+        voiceBubble = null
+        hideSpeechBubble(animate = false)
     }
 }

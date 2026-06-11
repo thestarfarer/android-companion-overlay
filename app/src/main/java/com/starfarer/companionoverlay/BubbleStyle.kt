@@ -50,7 +50,7 @@ object BubbleStyle {
     }
 
     /** Top-right edge-anchored params for brief/voice toasts. */
-    fun topRightEdgeParams(density: Float): WindowManager.LayoutParams {
+    fun topRightEdgeParams(density: Float, topOffsetDp: Int = 60): WindowManager.LayoutParams {
         return WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -60,22 +60,7 @@ object BubbleStyle {
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.RIGHT
-            y = (60 * density).toInt()
-        }
-    }
-
-    /** Standard bottom-center overlay params for brief/voice bubbles. */
-    fun bottomCenterParams(density: Float): WindowManager.LayoutParams {
-        return WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
-            PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-            y = (120 * density).toInt()
+            y = (topOffsetDp * density).toInt()
         }
     }
 
