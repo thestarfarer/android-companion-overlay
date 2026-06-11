@@ -1,4 +1,4 @@
 <resources>
     <string name="app_name">Companion Overlay</string>
-    <string name="accessibility_service_description">Senni uses this to peek at your screen when you long-press her. No data is collected or stored.</string>
+    <string name="accessibility_service_description">Senni uses this to capture your screen when you long-press her, and to detect volume-button shortcuts and keyboard visibility. Captures happen only when you trigger them and are sent to Anthropic (Claude) to generate her response; if conversation memory is enabled, they are also stored in the conversation history on this device. Nothing is captured or recorded in the background.</string>
 </resources>

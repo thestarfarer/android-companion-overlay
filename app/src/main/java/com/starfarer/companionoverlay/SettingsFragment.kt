@@ -119,6 +119,18 @@ class SettingsFragment : PreferenceFragmentCompat() {
         refreshPermissions()
     }
 
+    private val notifPermLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        val ctx = context ?: return@registerForActivityResult
+        if (granted) {
+            Toast.makeText(ctx, "Notifications ready~", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(ctx, "Without notifications you won't see the overlay status or its Stop button", Toast.LENGTH_LONG).show()
+        }
+        refreshPermissions()
+    }
+
     override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
         // Point at the same SharedPreferences file PromptSettings uses
         preferenceManager.sharedPreferencesName = "companion_prompts"
@@ -440,11 +452,27 @@ class SettingsFragment : PreferenceFragmentCompat() {
             }
             true
         }
+
+        findPreference<Preference>("perm_notifications")?.setOnPreferenceClickListener {
+            if (hasNotifPerm()) {
+                Toast.makeText(requireContext(), "Already granted~", Toast.LENGTH_SHORT).show()
+            } else {
+                notifPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+            true
+        }
     }
 
     private fun hasCameraPerm(): Boolean =
         ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.CAMERA) ==
             PackageManager.PERMISSION_GRANTED
+
+    // POST_NOTIFICATIONS is runtime-requestable from API 33; below that it is
+    // granted by install (minSdk 31 covers 31/32).
+    private fun hasNotifPerm(): Boolean =
+        android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU ||
+            ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.POST_NOTIFICATIONS) ==
+                PackageManager.PERMISSION_GRANTED
 
     private fun refreshPermissions() {
         val ctx = context ?: return
@@ -459,6 +487,10 @@ class SettingsFragment : PreferenceFragmentCompat() {
         findPreference<Preference>("perm_camera")?.summary =
             if (hasCameraPerm()) "✓ Granted"
             else "Required for camera capture instead of screenshots"
+
+        findPreference<Preference>("perm_notifications")?.summary =
+            if (hasNotifPerm()) "✓ Granted"
+            else "Shows the overlay status and its Stop button"
     }
 
     // ── Account ──

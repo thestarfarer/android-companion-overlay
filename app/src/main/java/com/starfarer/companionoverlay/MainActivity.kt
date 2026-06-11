@@ -1,9 +1,12 @@
 package com.starfarer.companionoverlay
 
+import android.Manifest
 import android.app.ActivityOptions
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.View
@@ -105,6 +108,16 @@ class MainActivity : AppCompatActivity() {
             if (OverlayController.canStart(this)) {
                 startOverlayService()
             }
+        }
+
+    // The FGS notification is the overlay's only status/stop surface, and on
+    // Android 13+ it is invisible without POST_NOTIFICATIONS. Asked for at the
+    // moment the notification first matters — overlay start. The overlay starts
+    // regardless of the answer (calls ensureRunning directly, not
+    // startOverlayService, so a denial can't re-prompt in a loop).
+    private val notificationPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+            OverlayController.ensureRunning(this, coordinator)
         }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -547,6 +560,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startOverlayService() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            return
+        }
         OverlayController.ensureRunning(this, coordinator)
     }
 
