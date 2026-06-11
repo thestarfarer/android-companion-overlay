@@ -59,15 +59,17 @@ class OverlaySpriteSurface(
 
     override fun setGhost(ghost: Boolean): Boolean {
         val oldFlags = params.flags
-        if (ghost) {
-            view.animate().alpha(0.5f).setDuration(200).start()
-            params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        params.flags = if (ghost) {
+            params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
         } else {
-            view.animate().alpha(1f).setDuration(200).start()
-            params.flags = params.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+            params.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
         }
         return try {
             windowManager.updateViewLayout(view, params)
+            // Animate only after the flags actually applied — starting the fade
+            // first left a half-ghosted sprite (dimmed but still touchable, or
+            // vice versa) when the layout update failed.
+            view.animate().alpha(if (ghost) 0.5f else 1f).setDuration(200).start()
             true
         } catch (e: Exception) {
             params.flags = oldFlags

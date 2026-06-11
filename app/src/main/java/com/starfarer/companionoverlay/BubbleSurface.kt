@@ -30,6 +30,13 @@ interface BubbleSurface {
      */
     fun makeFocusable(view: View): Boolean
 
+    /**
+     * Undo [makeFocusable]. A promoted overlay window keeps focus after the keyboard closes
+     * and silently swallows Back/key events meant for the app underneath — demote as soon as
+     * the reply keyboard goes away. No-op where promotion was a no-op.
+     */
+    fun makeUnfocusable(view: View) {}
+
     /** Remove [view] from the surface. Safe to call if already detached. */
     fun detach(view: View)
 }
@@ -38,6 +45,8 @@ interface BubbleSurface {
 enum class BubblePlacement {
     /** Edge-anchored toast: top-right, flat against the right edge. */
     TOP_RIGHT_TOAST,
+    /** Second toast slot, stacked below [TOP_RIGHT_TOAST] so both can show at once. */
+    TOP_RIGHT_TOAST_STACKED,
     /** Centered dialog, width-capped, raises above the keyboard when typing. */
     CENTERED_DIALOG,
 }
@@ -57,6 +66,8 @@ class OverlayBubbleSurface(
     override fun attach(view: View, placement: BubblePlacement, maxWidth: Int) {
         val lp = when (placement) {
             BubblePlacement.TOP_RIGHT_TOAST -> BubbleStyle.topRightEdgeParams(density)
+            BubblePlacement.TOP_RIGHT_TOAST_STACKED ->
+                BubbleStyle.topRightEdgeParams(density, topOffsetDp = 110)
             BubblePlacement.CENTERED_DIALOG -> BubbleStyle.centeredParams(maxWidth)
         }
         windowManager.addView(view, lp)
@@ -69,6 +80,13 @@ class OverlayBubbleSurface(
         lp.flags = lp.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
         try { windowManager.updateViewLayout(view, lp) } catch (_: Exception) {}
         return true
+    }
+
+    override fun makeUnfocusable(view: View) {
+        val lp = params[view] ?: return
+        if (lp.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE != 0) return
+        lp.flags = lp.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+        try { windowManager.updateViewLayout(view, lp) } catch (_: Exception) {}
     }
 
     override fun detach(view: View) {
@@ -93,6 +111,11 @@ class ViewGroupBubbleSurface(
                 FrameLayout.LayoutParams.WRAP_CONTENT,
                 Gravity.TOP or Gravity.END
             ).apply { topMargin = (60 * density).toInt() }
+            BubblePlacement.TOP_RIGHT_TOAST_STACKED -> FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP or Gravity.END
+            ).apply { topMargin = (110 * density).toInt() }
             BubblePlacement.CENTERED_DIALOG -> FrameLayout.LayoutParams(
                 if (maxWidth > 0) maxWidth else FrameLayout.LayoutParams.WRAP_CONTENT,
                 FrameLayout.LayoutParams.WRAP_CONTENT,
