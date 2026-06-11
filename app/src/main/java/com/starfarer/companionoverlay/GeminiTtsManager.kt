@@ -11,7 +11,6 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
 import com.starfarer.companionoverlay.repository.SettingsRepository
@@ -33,21 +32,40 @@ class GeminiTtsManager(
         private const val AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT
 
         private const val DEFAULT_VOICE = "Kore"
+
+        /** Cap synthesis input — an unbounded request can hit model/output limits. */
+        private const val MAX_TTS_CHARS = 4000
     }
 
     var onSpeechDone: (() -> Unit)? = null
     var onSpeechError: ((String) -> Unit)? = null
-    var onStatusUpdate: ((String) -> Unit)? = null
 
-    private var pendingText: String? = null
+    /** Synthesis request went out — UI may show a "generating" indicator. */
+    var onSynthesisStarted: (() -> Unit)? = null
 
+    /**
+     * Audio playback began (or the attempt ended) — UI should clear the
+     * indicator. Replaces the old "" sentinel pushed through the status-string
+     * channel and checked with isNotEmpty() at the far end.
+     */
+    var onSynthesisEnded: (() -> Unit)? = null
+
+    @Volatile
     var isSpeaking: Boolean = false
         private set
 
     private val handler = Handler(Looper.getMainLooper())
     private val audioTrackRef = AtomicReference<AudioTrack?>(null)
+    private val activeCall = AtomicReference<Call?>(null)
     private var synthesisThread: Thread? = null
-    private val stopped = AtomicBoolean(false)
+
+    // Session generation, bumped on every speak() and stop() (both main-thread).
+    // The synthesis thread, posts, and HTTP completion capture their value and
+    // no-op once stale. The old shared `stopped` AtomicBoolean was reset by
+    // each new speak(), un-cancelling the previous in-flight synthesis — two
+    // threads then played at once and the old one clobbered audioTrackRef so
+    // the new track became unstoppable.
+    @Volatile private var session = 0
 
     private val httpClient = baseClient.newBuilder()
         .connectTimeout(30, TimeUnit.SECONDS)
@@ -65,33 +83,28 @@ class GeminiTtsManager(
             return
         }
 
-        val cleaned = text
-            .replace(Regex("\\*+"), "")
-            .replace(Regex("~+"), "")
-            .replace(Regex("#+\\s*"), "")
-            .replace(Regex("```[\\s\\S]*?```"), "")
-            .replace(Regex("`[^`]*`"), "")
-            .replace(Regex("---+"), "")
-            .trim()
-
+        val cleaned = TtsTextCleaner.clean(text)
         if (cleaned.isEmpty()) {
             onSpeechDone?.invoke()
             return
         }
+        val capped = if (cleaned.length > MAX_TTS_CHARS) {
+            DebugLog.log(TAG, "Text too long for one synthesis (${cleaned.length}), capping at $MAX_TTS_CHARS")
+            cleaned.take(MAX_TTS_CHARS)
+        } else cleaned
 
-        stopped.set(false)
+        val mySession = ++session
         isSpeaking = true
-        pendingText = cleaned
 
         val voiceName = settings.geminiTtsVoice ?: DEFAULT_VOICE
 
         synthesisThread = Thread({
-            synthesizeAndPlay(apiKey, cleaned, voiceName)
+            synthesizeAndPlay(mySession, apiKey, capped, voiceName)
         }, "gemini-tts").also { it.start() }
     }
 
-    private fun synthesizeAndPlay(apiKey: String, text: String, voiceName: String) {
-        handler.post { onStatusUpdate?.invoke("\uD83D\uDD0A Generating voice...") }
+    private fun synthesizeAndPlay(mySession: Int, apiKey: String, text: String, voiceName: String) {
+        handler.post { if (session == mySession) onSynthesisStarted?.invoke() }
         DebugLog.log(TAG, "Synthesizing: ${text.length} chars, voice=$voiceName")
 
         val requestJson = JSONObject().apply {
@@ -123,10 +136,19 @@ class GeminiTtsManager(
             .build()
 
         try {
-            val response = httpClient.newCall(request).execute()
-            val responseBody = response.body?.string()
+            val call = httpClient.newCall(request)
+            activeCall.set(call)
+            val responseBody: String?
+            val response: Response
+            try {
+                response = call.execute()
+                responseBody = response.body?.string()
+            } finally {
+                // compareAndSet: plain set(null) could clear a newer session's call.
+                activeCall.compareAndSet(call, null)
+            }
 
-            if (stopped.get()) return
+            if (session != mySession) return
 
             if (!response.isSuccessful) {
                 val errorMsg = try {
@@ -137,7 +159,7 @@ class GeminiTtsManager(
                     "HTTP ${response.code}"
                 }
                 DebugLog.log(TAG, "Gemini TTS error: $errorMsg")
-                finishWithError(errorMsg)
+                finishWithError(mySession, text, errorMsg)
                 return
             }
 
@@ -153,64 +175,69 @@ class GeminiTtsManager(
             } catch (e: Exception) {
                 DebugLog.log(TAG, "Failed to parse TTS response: ${e.message}")
                 DebugLog.log(TAG, "Raw: ${responseBody?.take(300)}")
-                finishWithError("parse error")
+                finishWithError(mySession, text, "parse error")
                 return
             }
 
-            if (stopped.get()) return
+            if (session != mySession) return
 
             val pcmData = android.util.Base64.decode(base64Audio, android.util.Base64.DEFAULT)
             DebugLog.log(TAG, "Got ${pcmData.size} bytes PCM (${pcmData.size / (SAMPLE_RATE * 2.0)}s audio)")
 
-            playPcm(pcmData)
+            playPcm(mySession, text, pcmData)
 
         } catch (e: Exception) {
+            if (session != mySession) return
             DebugLog.log(TAG, "Network error: ${e.message}")
-            finishWithError(e.message ?: "network error")
+            finishWithError(mySession, text, e.message ?: "network error")
         }
     }
 
-    private fun playPcm(pcmData: ByteArray) {
-        if (stopped.get()) {
-            finishSpeaking()
-            return
-        }
+    private fun playPcm(mySession: Int, text: String, pcmData: ByteArray) {
+        if (session != mySession) return
 
-        val bufferSize = AudioTrack.getMinBufferSize(SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT)
-
-        val track = AudioTrack.Builder()
-            .setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                    .build()
-            )
-            .setAudioFormat(
-                AudioFormat.Builder()
-                    .setSampleRate(SAMPLE_RATE)
-                    .setChannelMask(CHANNEL_CONFIG)
-                    .setEncoding(AUDIO_FORMAT)
-                    .build()
-            )
-            .setBufferSizeInBytes(bufferSize)
-            .setTransferMode(AudioTrack.MODE_STREAM)
-            .build()
-
-        audioTrackRef.set(track)
-
+        val track: AudioTrack
         try {
-            if (stopped.get()) {
-                releaseTrack(track)
+            val bufferSize = AudioTrack.getMinBufferSize(SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT)
+            if (bufferSize <= 0) {
+                finishWithError(mySession, text, "audio init failed (buffer=$bufferSize)")
+                return
+            }
+
+            track = AudioTrack.Builder()
+                .setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build()
+                )
+                .setAudioFormat(
+                    AudioFormat.Builder()
+                        .setSampleRate(SAMPLE_RATE)
+                        .setChannelMask(CHANNEL_CONFIG)
+                        .setEncoding(AUDIO_FORMAT)
+                        .build()
+                )
+                .setBufferSizeInBytes(bufferSize)
+                .setTransferMode(AudioTrack.MODE_STREAM)
+                .build()
+
+            audioTrackRef.set(track)
+            // Re-check after publishing: if stop() ran in the window it may have
+            // missed the ref — reclaim and release ourselves.
+            if (session != mySession) {
+                releaseTrack(audioTrackRef.getAndSet(null))
                 return
             }
 
             track.play()
             DebugLog.log(TAG, "Playing audio (stream mode, ${pcmData.size} bytes)...")
-            handler.post { onStatusUpdate?.invoke("") }
+            handler.post { if (session == mySession) onSynthesisEnded?.invoke() }
 
+            val chunk = AudioTrack.getMinBufferSize(SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT)
             var offset = 0
-            while (offset < pcmData.size && !stopped.get()) {
-                val toWrite = minOf(bufferSize, pcmData.size - offset)
+            while (offset < pcmData.size && session == mySession) {
+                val toWrite = minOf(chunk, pcmData.size - offset)
                 val written = track.write(pcmData, offset, toWrite)
                 if (written < 0) break
                 offset += written
@@ -218,14 +245,14 @@ class GeminiTtsManager(
         } catch (e: Exception) {
             DebugLog.log(TAG, "AudioTrack error: ${e.message}")
             releaseTrack(audioTrackRef.getAndSet(null))
-            finishWithError(e.message ?: "playback error")
+            finishWithError(mySession, text, e.message ?: "playback error")
             return
         }
 
         releaseTrack(audioTrackRef.getAndSet(null))
 
-        if (!stopped.get()) {
-            finishSpeaking()
+        if (session == mySession) {
+            finishSpeaking(mySession)
         }
     }
 
@@ -236,7 +263,11 @@ class GeminiTtsManager(
     }
 
     fun stop() {
-        stopped.set(true)
+        // Invalidates the synthesis thread, posts, and HTTP completion of the
+        // current session, and aborts the in-flight request — previously the
+        // call kept running to completion (up to the 120s read timeout).
+        session++
+        activeCall.getAndSet(null)?.cancel()
         releaseTrack(audioTrackRef.getAndSet(null))
         isSpeaking = false
     }
@@ -246,23 +277,22 @@ class GeminiTtsManager(
         synthesisThread = null
     }
 
-    private fun finishSpeaking() {
-        isSpeaking = false
-        pendingText = null
-        handler.post { onSpeechDone?.invoke() }
+    private fun finishSpeaking(mySession: Int) {
+        handler.post {
+            if (session != mySession) return@post
+            isSpeaking = false
+            onSpeechDone?.invoke()
+        }
     }
 
-    private fun finishWithError(reason: String) {
-        isSpeaking = false
-        val text = pendingText
-        pendingText = null
-        DebugLog.log(TAG, "TTS failed ($reason), offering fallback for ${text?.length ?: 0} chars")
+    private fun finishWithError(mySession: Int, text: String, reason: String) {
+        DebugLog.log(TAG, "TTS failed ($reason), offering fallback for ${text.length} chars")
         handler.post {
-            if (text != null) {
-                onSpeechError?.invoke(text)
-            } else {
-                onSpeechDone?.invoke()
-            }
+            // Session check here is what stops a CANCELLED utterance from being
+            // resurrected through the on-device fallback path.
+            if (session != mySession) return@post
+            isSpeaking = false
+            onSpeechError?.invoke(text)
         }
     }
 }

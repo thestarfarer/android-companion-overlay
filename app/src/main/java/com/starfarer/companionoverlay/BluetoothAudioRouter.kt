@@ -1,6 +1,7 @@
 package com.starfarer.companionoverlay
 
 import android.content.Context
+import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 
@@ -28,6 +29,20 @@ class BluetoothAudioRouter(private val context: Context) {
     }
 
     private var routedDevice: AudioDeviceInfo? = null
+    private var callbackRegistered = false
+
+    // The headset can walk away mid-recording (power-off, range). Clear our
+    // routing state when the routed device disappears so isRouted is honest
+    // and the next session doesn't act on a dead device.
+    private val deviceCallback = object : AudioDeviceCallback() {
+        override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>) {
+            val routed = routedDevice ?: return
+            if (removedDevices.any { it.id == routed.id }) {
+                DebugLog.log(TAG, "Routed BT device disconnected — clearing routing")
+                clearRouting()
+            }
+        }
+    }
 
     /**
      * Find a connected BT headset and set it as the communication device.
@@ -53,6 +68,10 @@ class BluetoothAudioRouter(private val context: Context) {
         val result = audioManager.setCommunicationDevice(btDevice)
         if (result) {
             routedDevice = btDevice
+            if (!callbackRegistered) {
+                audioManager.registerAudioDeviceCallback(deviceCallback, null)
+                callbackRegistered = true
+            }
             DebugLog.log(TAG, "Routed to ${btDevice.productName} (${deviceTypeName(btDevice.type)})")
         } else {
             DebugLog.log(TAG, "setCommunicationDevice failed for ${btDevice.productName}")
@@ -64,6 +83,10 @@ class BluetoothAudioRouter(private val context: Context) {
      * Clear the communication device routing, returning to system default.
      */
     fun clearRouting() {
+        if (callbackRegistered) {
+            audioManager.unregisterAudioDeviceCallback(deviceCallback)
+            callbackRegistered = false
+        }
         if (routedDevice != null) {
             audioManager.clearCommunicationDevice()
             DebugLog.log(TAG, "Cleared BT audio routing")

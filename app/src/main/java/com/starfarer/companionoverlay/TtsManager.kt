@@ -35,6 +35,14 @@ class TtsManager(
     private val handler = Handler(Looper.getMainLooper())
     private var pendingText: String? = null
 
+    /**
+     * Bumped on every initEngine() and release(). The async init callback
+     * checks it — a release() racing a slow init used to let the stale
+     * callback set isReady=true with tts already null, after which every
+     * speak() silently no-oped forever.
+     */
+    private var engineGeneration = 0
+
     init {
         initEngine()
     }
@@ -47,7 +55,12 @@ class TtsManager(
     }
 
     private fun initEngine() {
+        val myGeneration = ++engineGeneration
         tts = TextToSpeech(context) { status ->
+            if (myGeneration != engineGeneration) {
+                DebugLog.log(TAG, "Init callback for a superseded engine, ignoring")
+                return@TextToSpeech
+            }
             if (status == TextToSpeech.SUCCESS) {
                 tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                     override fun onStart(utteranceId: String?) {
@@ -64,15 +77,23 @@ class TtsManager(
 
                     @Deprecated("Deprecated in API 21")
                     override fun onError(utteranceId: String?) {
-                        isSpeaking = false
-                        DebugLog.log(TAG, "TTS error on utterance: $utteranceId")
-                        handler.post { onSpeechDone?.invoke() }
+                        onChunkError(utteranceId)
                     }
 
                     override fun onError(utteranceId: String?, errorCode: Int) {
-                        isSpeaking = false
                         DebugLog.log(TAG, "TTS error: $errorCode on $utteranceId")
-                        handler.post { onSpeechDone?.invoke() }
+                        onChunkError(utteranceId)
+                    }
+
+                    // Completion fires only for the FINAL chunk's id — an error
+                    // on an intermediate chunk used to signal onSpeechDone while
+                    // the remaining chunks were still queued and speaking.
+                    private fun onChunkError(utteranceId: String?) {
+                        DebugLog.log(TAG, "TTS error on utterance: $utteranceId")
+                        if (utteranceId == UTTERANCE_ID) {
+                            isSpeaking = false
+                            handler.post { onSpeechDone?.invoke() }
+                        }
                     }
                 })
 
@@ -88,27 +109,31 @@ class TtsManager(
                 onReady?.invoke()
             } else {
                 DebugLog.log(TAG, "TTS init failed: $status")
+                // Leave the engine null so ensureReady() can retry — a failed
+                // init used to park here forever, and any queued utterance's
+                // completion never fired (the voice flow then hung until the
+                // safety watchdog).
+                tts?.shutdown()
+                tts = null
+                isReady = false
+                pendingText = null
+                handler.post { onSpeechDone?.invoke() }
             }
         }
     }
 
     fun speak(text: String) {
-        if (!isReady) {
+        if (!isReady || tts == null) {
             DebugLog.log(TAG, "TTS not ready, queuing text")
             pendingText = text
+            ensureReady()
             return
         }
 
         // Apply voice/rate/pitch in case settings changed since init
         applyCurrentSettings()
 
-        val cleaned = text
-            .replace(Regex("\\*+"), "")
-            .replace(Regex("~+"), "")
-            .replace(Regex("#+\\s*"), "")
-            .replace(Regex("```[\\s\\S]*?```"), "")
-            .replace(Regex("`[^`]*`"), "")
-            .trim()
+        val cleaned = TtsTextCleaner.clean(text)
 
         if (cleaned.isEmpty()) {
             onSpeechDone?.invoke()
@@ -122,10 +147,15 @@ class TtsManager(
         val maxLen = TextToSpeech.getMaxSpeechInputLength()
         DebugLog.log(TAG, "Speaking: ${cleaned.length} chars (max=$maxLen): ${cleaned.take(60)}...")
 
+        // Mark speaking at enqueue, not at the engine's async onStart — gating
+        // logic (e.g. conversationManager.isTtsSpeaking) raced into the gap.
+        isSpeaking = true
+
         if (cleaned.length <= maxLen) {
             val result = tts?.speak(cleaned, TextToSpeech.QUEUE_FLUSH, params, UTTERANCE_ID)
             if (result != TextToSpeech.SUCCESS) {
                 DebugLog.log(TAG, "speak() returned error: $result")
+                isSpeaking = false
             }
         } else {
             val chunks = mutableListOf<String>()
@@ -157,6 +187,9 @@ class TtsManager(
 
     fun stop() {
         tts?.stop()
+        // A queued utterance must die with the stop — it used to survive and
+        // blurt out whenever a slow engine init finally completed.
+        pendingText = null
         isSpeaking = false
     }
 
@@ -197,6 +230,7 @@ class TtsManager(
 
     fun release() {
         stop()
+        engineGeneration++
         tts?.shutdown()
         tts = null
         isReady = false

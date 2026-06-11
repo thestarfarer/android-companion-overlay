@@ -286,13 +286,8 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
         conversationManager.listener = this
         conversationManager.isTtsSpeaking = { audioCoordinator.isSpeaking }
 
-        audioCoordinator.onStatusUpdate = { status ->
-            if (status.isNotEmpty()) {
-                bubbleManager.showBrief(status, 30000L)
-            } else {
-                bubbleManager.hideSpeechBubble()
-            }
-        }
+        audioCoordinator.onSynthesisStarted = { bubbleManager.showBrief("🔊 Generating voice...", 30000L) }
+        audioCoordinator.onSynthesisEnded = { bubbleManager.hideSpeechBubble() }
 
         audioCoordinator.warmUp()
         voiceController = VoiceInputController(this, this, settings, beepManager, httpClient)
@@ -681,6 +676,9 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
         if (micFgsActive == active) return
         micFgsActive = active
         applyForegroundType()
+        // Same signal drives audio focus: duck/pause other audio while the mic
+        // is genuinely live so the recording isn't polluted by music.
+        audioCoordinator.setRecordingActive(active)
     }
 
     private fun handleBubbleReopen() {
