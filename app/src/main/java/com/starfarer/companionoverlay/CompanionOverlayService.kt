@@ -319,6 +319,7 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
                     is OverlayEvent.KeyboardVisibility -> setGhostMode(event.visible)
                     is OverlayEvent.ReloadMcp -> reloadMcp()
                     is OverlayEvent.ReloadSprites -> reloadSprites()
+                    is OverlayEvent.ClearConversation -> conversationManager.clearHistory()
                     else -> { /* Handled elsewhere */ }
                 }
             }

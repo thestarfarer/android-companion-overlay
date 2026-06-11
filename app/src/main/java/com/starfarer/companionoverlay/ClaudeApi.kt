@@ -110,7 +110,11 @@ class ClaudeApi(
         messages: List<Message>,
         systemPrompt: String? = null,
         webSearch: Boolean = false,
-        mcpTools: List<Tool> = emptyList()
+        mcpTools: List<Tool> = emptyList(),
+        /** Force a text reply via tool_choice "none" — tools stay declared so
+         *  the tool blocks already in [messages] remain valid. Used by the
+         *  tool loop's closing call when the iteration cap is hit. */
+        forceTextResponse: Boolean = false
     ): ApiResponse = withContext(Dispatchers.IO) {
         try {
             cancelRequested = false
@@ -122,7 +126,7 @@ class ClaudeApi(
                     return@withContext ApiResponse.error("Claude API key not set")
                 }
                 DebugLog.log(TAG, "Sending conversation (${messages.size} messages, model=$model, mode=api_key)...")
-                buildApiKeyRequest(apiKey, messages, systemPrompt, model, webSearch, mcpTools)
+                buildApiKeyRequest(apiKey, messages, systemPrompt, model, webSearch, mcpTools, forceTextResponse)
             } else {
                 val token = auth.getValidToken()
                     ?: return@withContext ApiResponse.error("Not authenticated")
@@ -130,7 +134,7 @@ class ClaudeApi(
                 val firstUserText = messages.firstOrNull { it.role == "user" }
                     ?.content?.textContent() ?: ""
                 val billingHeader = ClaudeBilling.computeHeader(firstUserText)
-                buildOAuthRequest(token, messages, systemPrompt, model, webSearch, billingHeader, mcpTools)
+                buildOAuthRequest(token, messages, systemPrompt, model, webSearch, billingHeader, mcpTools, forceTextResponse)
             }
 
             var request = baseRequest
@@ -184,7 +188,16 @@ class ClaudeApi(
                 }
                 DebugLog.log(TAG, "Response text: ${responseText.take(100)}...")
 
-                return@withContext ApiResponse.success(responseText, claudeResponse)
+                // On tool_use, hand the caller the verbatim content (plus any
+                // paused rounds) — the typed models drop server-tool blocks the
+                // tool loop must send back unchanged.
+                val rawContent = if (claudeResponse.hasToolUse()) {
+                    val finalBlocks = json.parseToJsonElement(result.body)
+                        .jsonObject["content"]?.jsonArray ?: JsonArray(emptyList())
+                    JsonArray(pausedContent + finalBlocks)
+                } else null
+
+                return@withContext ApiResponse.success(responseText, claudeResponse, rawContent)
             }
             @Suppress("UNREACHABLE_CODE")
             ApiResponse.error("unreachable")
@@ -287,7 +300,8 @@ class ClaudeApi(
         systemPrompt: String?,
         model: String,
         webSearch: Boolean,
-        mcpTools: List<Tool> = emptyList()
+        mcpTools: List<Tool> = emptyList(),
+        forceTextResponse: Boolean = false
     ): Request {
         val systemBlocks = if (systemPrompt != null) {
             listOf(SystemBlock(text = systemPrompt))
@@ -307,7 +321,9 @@ class ClaudeApi(
             maxTokens = if (hasTools) 4096 else 512,
             system = systemBlocks,
             messages = cleanMessages,
-            tools = tools
+            tools = tools,
+            toolChoice = if (forceTextResponse && tools != null)
+                buildJsonObject { put("type", "none") } else null
         )
 
         val bodyJson = json.encodeToString(requestBody)
@@ -329,7 +345,8 @@ class ClaudeApi(
         model: String,
         webSearch: Boolean,
         billingHeader: String,
-        mcpTools: List<Tool> = emptyList()
+        mcpTools: List<Tool> = emptyList(),
+        forceTextResponse: Boolean = false
     ): Request {
         val systemBlocks = buildList {
             add(SystemBlock(text = billingHeader))
@@ -352,7 +369,9 @@ class ClaudeApi(
             system = systemBlocks,
             messages = cleanMessages,
             metadata = RequestMetadata(userId = auth.buildMetadataUserId()),
-            tools = tools
+            tools = tools,
+            toolChoice = if (forceTextResponse && tools != null)
+                buildJsonObject { put("type", "none") } else null
         )
 
         val bodyJson = json.encodeToString(requestBody)
@@ -394,11 +413,13 @@ class ClaudeApi(
         val text: String,
         val error: String? = null,
         val cancelled: Boolean = false,
-        val fullResponse: ClaudeResponse? = null
+        val fullResponse: ClaudeResponse? = null,
+        /** Verbatim response content when stop_reason is tool_use — see sendConversation. */
+        val rawContent: JsonArray? = null
     ) {
         companion object {
-            fun success(text: String, response: ClaudeResponse? = null) =
-                ApiResponse(true, text, fullResponse = response)
+            fun success(text: String, response: ClaudeResponse? = null, rawContent: JsonArray? = null) =
+                ApiResponse(true, text, fullResponse = response, rawContent = rawContent)
             fun error(message: String) = ApiResponse(false, "", message)
             fun cancelled() = ApiResponse(false, "", "Cancelled", cancelled = true)
         }

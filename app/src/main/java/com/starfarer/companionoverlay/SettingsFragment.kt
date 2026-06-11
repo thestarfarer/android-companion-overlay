@@ -415,6 +415,24 @@ class SettingsFragment : PreferenceFragmentCompat() {
                 true
             }
         }
+
+        findPreference<Preference>("clear_history")?.setOnPreferenceClickListener {
+            MaterialAlertDialogBuilder(requireContext())
+                .setTitle("Clear conversation history?")
+                .setMessage("Senni forgets everything said so far. This cannot be undone.")
+                .setPositiveButton("Clear") { _, _ ->
+                    // Running service clears memory + file via the event; with
+                    // the overlay down, delete the stored file directly.
+                    if (!coordinator.clearConversation()) {
+                        val storage: ConversationStorage by inject()
+                        lifecycleScope.launch { storage.clear() }
+                    }
+                    Toast.makeText(requireContext(), "Conversation cleared~", Toast.LENGTH_SHORT).show()
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+            true
+        }
     }
 
     // ── Permissions ──

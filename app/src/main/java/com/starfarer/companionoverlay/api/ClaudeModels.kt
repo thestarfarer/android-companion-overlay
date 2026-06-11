@@ -32,7 +32,9 @@ data class ClaudeRequest(
     val system: List<SystemBlock>,
     val messages: List<Message>,
     val metadata: RequestMetadata? = null,
-    val tools: List<Tool>? = null
+    val tools: List<Tool>? = null,
+    /** e.g. {"type":"none"} to force a text reply while tools stay declared. */
+    @SerialName("tool_choice") val toolChoice: JsonObject? = null
 )
 
 @OptIn(ExperimentalSerializationApi::class)
@@ -80,11 +82,27 @@ sealed class MessageContent {
     data class Text(val text: String) : MessageContent()
     data class Blocks(val blocks: List<ContentBlock>) : MessageContent()
 
+    /**
+     * Verbatim content blocks from an API response, re-sent untouched.
+     *
+     * Used only for the in-flight assistant message inside the tool loop, so
+     * server-side blocks (server_tool_use, web_search_tool_result, citations)
+     * survive the round trip — the typed [Blocks] model would drop them.
+     * Never persisted: tool turns are deliberately not stored in history, so
+     * deserialization doesn't need to produce this variant.
+     */
+    data class RawBlocks(val blocks: JsonArray) : MessageContent()
+
     /** Convenience: extract plain text regardless of variant. */
     fun textContent(): String = when (this) {
         is Text -> text
         is Blocks -> blocks.filterIsInstance<ContentBlock.Text>()
             .joinToString("") { it.text }
+        is RawBlocks -> blocks
+            .filterIsInstance<JsonObject>()
+            .filter { it["type"]?.let { t -> t is JsonPrimitive && t.content == "text" } == true }
+            .mapNotNull { (it["text"] as? JsonPrimitive)?.content }
+            .joinToString("")
     }
 }
 
@@ -203,6 +221,7 @@ object MessageContentSerializer : KSerializer<MessageContent> {
                     value.blocks
                 )
             )
+            is MessageContent.RawBlocks -> jsonEncoder.encodeJsonElement(value.blocks)
         }
     }
 
