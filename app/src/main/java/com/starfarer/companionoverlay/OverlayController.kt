@@ -2,10 +2,13 @@ package com.starfarer.companionoverlay
 
 import android.content.Context
 import android.content.Intent
-import android.os.Handler
-import android.os.Looper
 import android.provider.Settings
 import com.starfarer.companionoverlay.event.OverlayCoordinator
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Single entry point for bringing the overlay service up.
@@ -25,8 +28,7 @@ import com.starfarer.companionoverlay.event.OverlayCoordinator
  */
 object OverlayController {
 
-    private const val INIT_DELAY_MS = 800L
-    private val handler = Handler(Looper.getMainLooper())
+    private const val READY_TIMEOUT_MS = 5000L
 
     /** Whether the overlay can be shown — i.e. "Display over other apps" is granted. */
     fun canStart(context: Context): Boolean = Settings.canDrawOverlays(context)
@@ -34,8 +36,9 @@ object OverlayController {
     /**
      * Ensure the overlay service is running. If [thenStartVoice] is set, voice
      * input is toggled once the service is up — immediately if it was already
-     * running, or after a short init delay if it had to be started. Safe to call
-     * when already running.
+     * running, or as soon as it reports ready ([OverlayCoordinator.overlayRunning],
+     * which the service flips only after its event collector is live, so the
+     * toggle can't be dropped). Safe to call when already running.
      */
     fun ensureRunning(
         context: Context,
@@ -48,7 +51,16 @@ object OverlayController {
         }
         context.startForegroundService(Intent(context, CompanionOverlayService::class.java))
         if (thenStartVoice) {
-            handler.postDelayed({ coordinator.toggleVoice() }, INIT_DELAY_MS)
+            // Wait for the actual ready signal instead of a fixed delay — a slow
+            // device used to outlive the 800ms guess and lose the toggle. One-shot
+            // coroutine, bounded by the timeout; if the service never comes up
+            // (permission abort) the toggle is skipped rather than fired blind.
+            CoroutineScope(Dispatchers.Main.immediate).launch {
+                val ready = withTimeoutOrNull(READY_TIMEOUT_MS) {
+                    coordinator.overlayRunning.first { it }
+                }
+                if (ready != null) coordinator.toggleVoice()
+            }
         }
     }
 }
