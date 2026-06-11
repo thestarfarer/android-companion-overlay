@@ -51,8 +51,18 @@ class SilenceKeepAlive {
             track = t
 
             Thread {
-                try { while (isActive) { if (t.write(silence, 0, silence.size) < 0) break } }
-                catch (_: Exception) {}
+                var failed = false
+                try { while (isActive) { if (t.write(silence, 0, silence.size) < 0) { failed = true; break } } }
+                catch (_: Exception) { failed = true }
+                if (failed && isActive) {
+                    // A failed write used to break the loop but leave isActive
+                    // true — a zombie that start() skipped forever. Mark dead so
+                    // the next start() (e.g. on a device change) can recreate it.
+                    isActive = false
+                    try { t.stop(); t.release() } catch (_: Exception) {}
+                    if (track === t) track = null
+                    DebugLog.log(TAG, "Write failed — keep-alive stopped")
+                }
             }.start()
 
             DebugLog.log(TAG, "Started")

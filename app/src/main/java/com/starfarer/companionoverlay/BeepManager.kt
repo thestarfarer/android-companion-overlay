@@ -25,7 +25,14 @@ class BeepManager(private val context: Context) {
     enum class Beep { READY, STEP, DONE, ERROR, QUEUE }
 
     private val soundPool: SoundPool
-    private val soundIds = mutableMapOf<Beep, Int>()
+    private val soundIds = java.util.concurrent.ConcurrentHashMap<Beep, Int>()
+
+    // Temp-WAV bookkeeping: each file is deleted as soon as ITS load completes
+    // (success or failure). The old all-or-nothing pass left every file in the
+    // cache forever if a single load failed.
+    private val fileLock = Any()
+    private val pendingFiles = HashMap<Int, File>()
+    private val completedIds = HashSet<Int>()
     private var loaded = 0
 
     init {
@@ -39,22 +46,36 @@ class BeepManager(private val context: Context) {
             )
             .build()
 
-        soundPool.setOnLoadCompleteListener { _, _, status ->
+        soundPool.setOnLoadCompleteListener { _, sampleId, status ->
             if (status == 0 && ++loaded == Beep.entries.size) {
                 DebugLog.log(TAG, "All beeps loaded")
-                Beep.entries.forEach { File(context.cacheDir, "beep_${it.name.lowercase()}.wav").delete() }
             }
+            val file = synchronized(fileLock) {
+                completedIds.add(sampleId)
+                pendingFiles.remove(sampleId)
+            }
+            file?.delete()
         }
 
-        mapOf(
-            Beep.READY to generateTone(880f, 80),
-            Beep.STEP to concatenate(generateTone(660f, 50), generateSilence(10), generateTone(880f, 50)),
-            Beep.DONE to concatenate(generateTone(660f, 50), generateSilence(10), generateTone(880f, 50), generateSilence(10), generateTone(1100f, 50)),
-            Beep.ERROR to generateSweep(440f, 330f, 120),
-            Beep.QUEUE to concatenate(generateTone(1047f, 45), generateSilence(15), generateTone(784f, 55))
-        ).forEach { (beep, pcm) ->
-            soundIds[beep] = soundPool.load(writeWav(pcm, "beep_${beep.name.lowercase()}.wav").absolutePath, 1)
-        }
+        // PCM synthesis + WAV writes are disk I/O, and this is constructed by
+        // DI during service onCreate — keep it off the main thread.
+        Thread({
+            mapOf(
+                Beep.READY to generateTone(880f, 80),
+                Beep.STEP to concatenate(generateTone(660f, 50), generateSilence(10), generateTone(880f, 50)),
+                Beep.DONE to concatenate(generateTone(660f, 50), generateSilence(10), generateTone(880f, 50), generateSilence(10), generateTone(1100f, 50)),
+                Beep.ERROR to generateSweep(440f, 330f, 120),
+                Beep.QUEUE to concatenate(generateTone(1047f, 45), generateSilence(15), generateTone(784f, 55))
+            ).forEach { (beep, pcm) ->
+                val file = writeWav(pcm, "beep_${beep.name.lowercase()}.wav")
+                val id = soundPool.load(file.absolutePath, 1)
+                soundIds[beep] = id
+                synchronized(fileLock) {
+                    // The load callback may already have fired for this id.
+                    if (completedIds.contains(id)) file.delete() else pendingFiles[id] = file
+                }
+            }
+        }, "beep-init").start()
     }
 
     fun play(beep: Beep) {

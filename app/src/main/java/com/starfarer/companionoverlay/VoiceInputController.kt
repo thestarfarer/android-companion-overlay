@@ -266,8 +266,17 @@ class VoiceInputController(
                     host.updateVoiceBubble("✒️ Transcribing...")
                     // Mic capture is done — release the BT route early so the
                     // codec can settle before the response is spoken.
+                    val wasBtRouted = btRouter.isRouted
                     btRouter.clearRouting()
-                    if (beepsEnabled) handler.postDelayed({ beepManager.play(BeepManager.Beep.STEP) }, BT_CLEAR_DELAY_MS)
+                    if (beepsEnabled) {
+                        if (wasBtRouted) {
+                            // Give the collapsing SCO link a beat before beeping
+                            // into it; pointless latency on the built-in mic path.
+                            handler.postDelayed({ beepManager.play(BeepManager.Beep.STEP) }, BT_CLEAR_DELAY_MS)
+                        } else {
+                            beepManager.play(BeepManager.Beep.STEP)
+                        }
+                    }
                 }
                 VoiceStatus.Retrying -> host.updateVoiceBubble("Retrying transcription...")
             }
