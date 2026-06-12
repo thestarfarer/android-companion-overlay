@@ -27,12 +27,26 @@ class RadialMenuManager(
 
     private val density = context.resources.displayMetrics.density
 
+    // Kept non-null through the close fade so open() can't stack a second
+    // window on top of one still animating out; `closing` tracks that fade.
     private var menuView: RadialMenuView? = null
+    private var closing = false
 
-    val isOpen: Boolean get() = menuView != null
+    val isOpen: Boolean get() = menuView != null && !closing
 
     fun open() {
-        if (menuView != null) return
+        val existing = menuView
+        if (existing != null) {
+            // A close fade is still running — cancel it and fade back in rather
+            // than adding a second window (the old close-during-fade had no
+            // reopen guard and dropped the request).
+            if (closing) {
+                closing = false
+                existing.animate().cancel()
+                existing.animate().alpha(1f).setDuration(150).start()
+            }
+            return
+        }
 
         val view = RadialMenuView(context, settings, onRequestClose = { close() })
         val params = WindowManager.LayoutParams(
@@ -52,6 +66,7 @@ class RadialMenuManager(
             windowManager.addView(view, params)
             view.animate().alpha(1f).setDuration(150).start()
             menuView = view
+            closing = false
         } catch (e: Exception) {
             DebugLog.log(TAG, "Failed to open: ${e.message}")
         }
@@ -59,9 +74,16 @@ class RadialMenuManager(
 
     fun close() {
         val view = menuView ?: return
-        menuView = null
+        if (closing) return
+        closing = true
         view.animate().alpha(0f).setDuration(120).withEndAction {
-            try { windowManager.removeView(view) } catch (_: Exception) {}
+            // Only remove if still closing the same view — open() may have
+            // revived it during the fade.
+            if (closing && menuView === view) {
+                try { windowManager.removeView(view) } catch (_: Exception) {}
+                menuView = null
+                closing = false
+            }
         }.start()
     }
 
