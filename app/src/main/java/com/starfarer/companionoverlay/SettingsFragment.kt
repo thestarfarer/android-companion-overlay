@@ -1063,10 +1063,12 @@ class SettingsFragment : PreferenceFragmentCompat() {
         clientIdLayout.addView(clientIdEdit)
         container.addView(clientIdLayout)
 
-        // Client Secret field
+        // Client Secret field. When one is already stored, say so and treat
+        // blank as "keep" — the field can't show the saved value.
+        val hasStoredSecret = existing != null && mcpRepo.hasClientSecret(existing.id)
         val secretLayout = TextInputLayout(ctx, null,
             com.google.android.material.R.attr.textInputOutlinedStyle).apply {
-            hint = "Client Secret"
+            hint = if (hasStoredSecret) "Client Secret (saved — leave blank to keep)" else "Client Secret"
             endIconMode = TextInputLayout.END_ICON_PASSWORD_TOGGLE
             setBoxCornerRadii(r, r, r, r)
             visibility = clientIdLayout.visibility

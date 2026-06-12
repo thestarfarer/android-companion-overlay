@@ -68,7 +68,11 @@ class McpRepository(
         val idx = servers.indexOfFirst { it.id == config.id }
         if (idx >= 0) servers[idx] = config else servers.add(config)
         saveServers(servers)
-        if (clientSecret != null) {
+        if (config.authType == McpAuthType.NONE) {
+            // Don't leave a stale secret in encrypted storage after the user
+            // switches a server back to no-auth.
+            removeClientSecret(config.id)
+        } else if (clientSecret != null) {
             setClientSecret(config.id, clientSecret)
         }
     }
@@ -95,7 +99,6 @@ class McpRepository(
             .apply()
     }
 
-    fun invalidateCache() {
-        cachedServers = null
-    }
+    fun hasClientSecret(serverId: String): Boolean =
+        securePrefs.contains("$SECRET_KEY_PREFIX$serverId")
 }

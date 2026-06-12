@@ -91,7 +91,9 @@ data class McpToolDefinition(
 @Serializable
 data class McpToolCallResult(
     val content: List<McpToolContent> = emptyList(),
-    val isError: Boolean? = null
+    val isError: Boolean? = null,
+    /** Structured tool output (MCP 2025-06-18+) — surfaced when content is empty. */
+    val structuredContent: JsonElement? = null
 )
 
 @Serializable
@@ -99,7 +101,9 @@ data class McpToolContent(
     val type: String,
     val text: String? = null,
     val data: String? = null,
-    val mimeType: String? = null
+    val mimeType: String? = null,
+    /** type=="resource" payload. */
+    val resource: JsonObject? = null
 )
 
 // ══════════════════════════════════════════════════════════════════════════
