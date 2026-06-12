@@ -5,7 +5,7 @@ Companion Overlay is a single-activity Android app backed by two long-running se
 - **CompanionOverlayService** — a foreground service that owns the sprite overlay, speech bubbles, conversation state, and voice pipeline
 - **CompanionAccessibilityService** — captures screenshots, intercepts volume buttons, and detects keyboard visibility
 
-All dependencies are wired through **Koin** DI. Cross-component communication goes through **OverlayCoordinator** (StateFlows + SharedFlows), with no static singletons.
+All dependencies are wired through **Koin** DI. Cross-component communication goes through **OverlayCoordinator** (StateFlows + SharedFlows). App state lives in Koin-managed singletons; the only top-level `object`s are stateless helpers (serializers, styling, constants, debug) — `DebugLog`, `ImageAudit`, `OverlayController`, `PromptSettings`, `TtsTextCleaner`, `BubbleStyle`, `SettingsDialogs`, `AudioUtils`, `api/ClaudeBilling`, and the `MessageContentSerializer` in `api/ClaudeModels`.
 
 ## Layers
 
@@ -82,6 +82,7 @@ The service also self-guards: if "Display over other apps" is missing, `onCreate
 | `mcp/McpModels` | kotlinx.serialization models for JSON-RPC 2.0, MCP initialize params, tool definitions, server configs |
 | `mcp/McpRepository` | Server config persistence (SharedPreferences) and client secrets (EncryptedSharedPreferences) |
 | `mcp/AsyncResultPoller` | Polls MCP servers for completed async job results (`nexus_poll_results`), queues for conversation injection |
+| `mcp/NexusContextFetcher` | Fetches Nexus context via `McpManager` (`nexus_get_context`) and caches it in `SettingsRepository` for reuse across conversations (not session-scoped) |
 
 ### Voice pipeline
 
@@ -102,7 +103,7 @@ The service also self-guards: if "Display over other apps" is missing, `onCreate
 | `GeminiTtsManager` | Gemini TTS API → base64 PCM → `AudioTrack` playback. Markdown cleanup, background synthesis, on-device fallback |
 | `BeepManager` | Synthesized sine wave tones via persistent `SoundPool` (`USAGE_ASSISTANCE_SONIFICATION`) — ready, step, done, error, queue |
 | `SilenceKeepAlive` | Near-silent audio stream keeping BT A2DP codec warm — prevents power-down and leading-edge clipping |
-| `BluetoothAudioRouter` | BT headset mic routing via `setCommunicationDevice` (API 31+). mSBC wideband codec negotiation |
+| `BluetoothAudioRouter` | Routes mic capture to a connected BT headset via `setCommunicationDevice` (API 31+), preferring BLE then classic SCO. Codec selection (mSBC wideband vs. CVSD) is negotiated by the OS/HFP link, not by this class |
 | `AudioUtils` | Audio format conversion utilities |
 
 ### UI and rendering
@@ -140,9 +141,9 @@ The service also self-guards: if "Display over other apps" is missing, `onCreate
 
 | Class | Role |
 |---|---|
-| `MainActivity` | Settings UI, character preset carousel (ViewPager2), prompt/sprite editing. Launches the tutorial on first run |
-| `SettingsActivity` / `SettingsFragment` | `PreferenceFragmentCompat` host — all toggles, model selection, Gemini API key, silence timeout, debug tools, tutorial replay, open-source licenses |
-| `TutorialActivity` | Self-contained interactive walkthrough — hosts the real `SpriteAnimator`, `BubbleManager`, `RadialMenuView`, `BeepManager`, and on-device `TtsManager` in a normal Activity sandbox (no overlay/service/permissions/network) via the `ViewGroup*Surface` implementations. A **data-driven step machine** (`Step` objects with per-step enter/exit/gesture hooks and gating) covers tap/escape/long-press/swipe plus voice (with a real spoken reply), volume/headset shortcuts (auto-play animation), web-search/tool indicators, and ghost mode — all with scripted mock pipelines and verbatim indicator strings. Snapshots and restores the four radial-menu settings so nothing the user flips persists |
+| `MainActivity` | Settings UI, character preset carousel (ViewPager2), prompt/sprite editing, model selection dropdown (`PromptSettings.MODEL_NAMES`/`MODEL_IDS` → `settings.model`). Launches the tutorial on first run |
+| `SettingsActivity` / `SettingsFragment` | `PreferenceFragmentCompat` host — all toggles, Gemini API key, silence timeout, debug tools, tutorial replay, open-source licenses |
+| `TutorialActivity` | Self-contained interactive walkthrough — hosts the real `SpriteAnimator`, `BubbleManager`, `RadialMenuView`, `BeepManager`, and on-device `TtsManager` in a normal Activity sandbox (no overlay/service/permissions/network) via the `ViewGroup*Surface` implementations. A **data-driven step machine** (`Step` objects with per-step enter/exit/gesture hooks and gating) covers tap/escape/long-press/swipe plus voice (with a real spoken reply), volume/headset shortcuts (auto-play animation), web-search/tool indicators, and ghost mode — all with scripted mock pipelines that pull the production `svc_bubble_*`/`status_*` string resources directly (no hardcoded copies, so indicator text stays in sync). Snapshots and restores the four radial-menu settings so nothing the user flips persists |
 | `SettingsDialogs` | Reusable dialog builders |
 | `ui/PresetPagerAdapter` | ViewPager2 adapter for preset carousel |
 | `ui/PresetDialogHelper` | Dialogs for preset creation/editing |
@@ -174,7 +175,7 @@ The service also self-guards: if "Display over other apps" is missing, `onCreate
 | Class | Role |
 |---|---|
 | `DebugLog` | In-memory ring buffer (50 KB), logcat output, copyable from settings UI |
-| `ImageAudit` | Debug-gated — saves the exact JPEG sent to Claude (screenshot or camera) to external files, logs resolution/size, viewable on-device via `FileProvider` |
+| `ImageAudit` | Gated on the `saveSentImages` user setting (off by default) — saves the exact JPEG sent to Claude (screenshot or camera) to external files, logs resolution/size, viewable on-device via `FileProvider` |
 
 ## Project structure
 
@@ -237,12 +238,17 @@ app/src/main/
 │   ├── api/
 │   │   ├── ClaudeBilling.kt
 │   │   └── ClaudeModels.kt
+│   ├── avatar3d/                       # Experimental 3D Filament avatar (hidden overlayMode pref)
+│   │   ├── FilamentAvatarRenderer.kt
+│   │   ├── FilamentOverlayManager.kt
+│   │   └── OverlayMode.kt
 │   ├── mcp/
 │   │   ├── AsyncResultPoller.kt
 │   │   ├── McpClient.kt
 │   │   ├── McpManager.kt
 │   │   ├── McpModels.kt
-│   │   └── McpRepository.kt
+│   │   ├── McpRepository.kt
+│   │   └── NexusContextFetcher.kt
 │   ├── di/
 │   │   ├── AppModule.kt
 │   │   ├── AudioModule.kt
@@ -256,6 +262,8 @@ app/src/main/
 │   │   ├── SettingsRepository.kt
 │   │   └── PresetRepository.kt
 │   ├── ui/
+│   │   ├── LongClickPreference.kt
+│   │   ├── McpSettingsUi.kt
 │   │   ├── PresetPagerAdapter.kt
 │   │   ├── PresetDialogHelper.kt
 │   │   ├── SpritePickerHelper.kt
@@ -275,7 +283,7 @@ app/src/main/
 
 ## Design patterns
 
-- **Dependency injection** — Koin modules wire all components; no static singletons except `DebugLog`
+- **Dependency injection** — Koin modules wire all stateful components; top-level `object`s are reserved for stateless helpers (`DebugLog`, `ImageAudit`, `OverlayController`, `PromptSettings`, `TtsTextCleaner`, `BubbleStyle`, `SettingsDialogs`, `AudioUtils`, `ClaudeBilling`, `MessageContentSerializer`)
 - **Repository pattern** — `SettingsRepository`, `PresetRepository`, `ConversationStorage` abstract storage behind clean interfaces
 - **State machine** — `VoiceInputController` transitions through `IDLE` → `LISTENING` → `PROCESSING` with explicit state guards
 - **Coordinator / event bus** — `OverlayCoordinator` uses `StateFlow` for observable state and `SharedFlow` for fire-and-forget events; pure data events only (no lambdas)
@@ -289,7 +297,7 @@ app/src/main/
 | `Dispatchers.IO` | File I/O, API calls, disk storage |
 | Background threads | Audio recording (`GeminiSpeechRecognizer`), TTS synthesis (`GeminiTtsManager`) |
 
-Thread-safety primitives: `AtomicReference` (API call cancellation), `AtomicBoolean` (recording state), `Collections.synchronizedList` (conversation history), `@Volatile` (shared mutable state), coroutine scopes with lifecycle-aware cancellation.
+Thread-safety primitives: `AtomicReference` (API/HTTP call cancellation), `AtomicBoolean` (`CameraManager` capture-complete latch), `Collections.synchronizedList` (conversation history), `@Volatile` (shared mutable state), coroutine scopes with lifecycle-aware cancellation. `VoiceInputController` recording state is a plain `enum State` field mutated on the main thread, not an atomic.
 
 ## API integration
 
@@ -310,4 +318,4 @@ Thread-safety primitives: `AtomicReference` (API call cancellation), `AtomicBool
 | JDK | 17 |
 | ABI filter | `arm64-v8a` only |
 | Release | ProGuard minification + resource shrinking |
-| CI | GitHub Actions — debug APK on push to master |
+| CI | GitHub Actions (`workflow_dispatch`) — runs `testDebugUnitTest`, then `assembleDebug` and uploads the debug APK |
