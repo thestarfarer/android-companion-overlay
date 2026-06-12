@@ -120,7 +120,18 @@ class MainViewModel(
         val current = _state.value.activePreset ?: return
         val updated = transform(current)
         presetRepository.save(updated)
-        loadPresets() // Reload to get updated list
+        // Reflect from the (in-memory) cache synchronously — the old async
+        // loadPresets() left _state stale for any caller that read it on the
+        // next line (e.g. the rename flow), and a rapid second edit could RMW
+        // against the stale snapshot.
+        syncStateFromRepo(activeId = current.id)
+    }
+
+    /** Push the repo's current (cached) presets + active id into UI state. */
+    private fun syncStateFromRepo(activeId: String?) {
+        val presets = presetRepository.loadAll().toList()
+        val index = presets.indexOfFirst { it.id == activeId }.coerceAtLeast(0)
+        _state.update { it.copy(presets = presets, activeIndex = index) }
     }
     
     fun createPreset(): CharacterPreset {
@@ -135,12 +146,12 @@ class MainViewModel(
             walkFrameCount = source.walkFrameCount
         )
         presetRepository.save(newPreset)
-        loadPresets()
-        
-        // Select the new preset
-        val newIndex = _state.value.presets.indexOfFirst { it.id == newPreset.id }
-        if (newIndex >= 0) selectPreset(newIndex)
-        
+        presetRepository.setActiveId(newPreset.id)
+        // Synchronous select-and-reflect: loadPresets() suspends before
+        // updating _state, so createPreset used to return with the new copy
+        // NOT selected — the rename dialog that follows then renamed the
+        // ORIGINAL preset.
+        syncStateFromRepo(activeId = newPreset.id)
         return newPreset
     }
     

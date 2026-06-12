@@ -22,6 +22,8 @@ class TtsManager(
 
     var onSpeechDone: (() -> Unit)? = null
     var onReady: (() -> Unit)? = null
+    /** Engine init failed — callers waiting on [onReady] should surface an error and release. */
+    var onInitFailed: (() -> Unit)? = null
 
     var isReady: Boolean = false
         private set
@@ -117,7 +119,10 @@ class TtsManager(
                 tts = null
                 isReady = false
                 pendingText = null
-                handler.post { onSpeechDone?.invoke() }
+                handler.post {
+                    onSpeechDone?.invoke()
+                    onInitFailed?.invoke()
+                }
             }
         }
     }

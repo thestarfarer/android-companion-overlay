@@ -68,8 +68,16 @@ class PresetPagerAdapter(
         private val walkCard: View = itemView.findViewById(R.id.walkSpriteCard)
 
         fun bind(position: Int) {
-            idleCard.setOnClickListener { onIdleSpriteClick(position) }
-            walkCard.setOnClickListener { onWalkSpriteClick(position) }
+            // Resolve the position when the click fires, not at bind time — a
+            // captured bind-time position goes stale if items shift.
+            idleCard.setOnClickListener {
+                val pos = bindingAdapterPosition
+                if (pos != RecyclerView.NO_POSITION) onIdleSpriteClick(pos)
+            }
+            walkCard.setOnClickListener {
+                val pos = bindingAdapterPosition
+                if (pos != RecyclerView.NO_POSITION) onWalkSpriteClick(pos)
+            }
             updateSprites(position)
         }
 

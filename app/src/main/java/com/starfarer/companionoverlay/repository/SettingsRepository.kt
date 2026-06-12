@@ -244,8 +244,18 @@ class SettingsRepository(
     // ══════════════════════════════════════════════════════════════════════
 
     fun resetToDefaults() {
-        settingsPrefs.edit().clear().apply()
-        // Don't clear secure prefs — that would wipe auth tokens too
+        // This prefs file is SHARED with PresetRepository (presets, active id)
+        // and McpRepository (server configs) — a blanket clear() would wipe the
+        // user's characters and MCP servers too. Preserve those keys.
+        val preserved = listOf(
+            "character_presets", "active_preset_id", "mcp_servers"
+        ).mapNotNull { key -> settingsPrefs.getString(key, null)?.let { key to it } }
+
+        settingsPrefs.edit().apply {
+            clear()
+            preserved.forEach { (key, value) -> putString(key, value) }
+        }.apply()
+        // Don't touch secure prefs — that would wipe auth tokens and MCP secrets.
     }
 
     var overlayMode: String
