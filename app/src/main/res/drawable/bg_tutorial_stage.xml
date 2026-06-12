@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Tutorial stage backdrop: theme background with a faint warm pool of light
+     over the lower (sandbox) area. The glow is a noise-dithered bitmap, not a
+     GradientDrawable — a ~20-step alpha ramp over 360dp quantizes into visible
+     ~18dp bands on OLED panels; baked dither noise breaks them up. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="?android:colorBackground"/>
+        </shape>
+    </item>
+    <item android:gravity="bottom|fill_horizontal" android:height="480dp">
+        <bitmap
+            android:src="@drawable/tutorial_glow_bitmap"
+            android:gravity="fill"/>
+    </item>
+</layer-list>

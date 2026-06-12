@@ -4,10 +4,20 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="?android:colorBackground">
+    android:background="@drawable/bg_tutorial_stage">
 
-    <!-- Two-row splitter: top half holds narration (bottom-aligned), bottom half is empty.
-         This positions the narration's bottom edge at the vertical center of the screen. -->
+    <!-- Faint gold glow under the sprite's walk line; Y set at runtime
+         once the sandbox is laid out (the walk line depends on sprite size). -->
+    <View
+        android:id="@+id/floorGlow"
+        android:layout_width="match_parent"
+        android:layout_height="96dp"
+        android:background="@drawable/bg_tutorial_floor"
+        android:visibility="invisible"/>
+
+    <!-- Two-row splitter: narration is bottom-aligned in the top row. Weights
+         0.85/1.15 put the bubble's bottom edge at ~42% height, clear of the
+         centered live bubbles and the sprite's stage. -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
@@ -16,9 +26,10 @@
         <FrameLayout
             android:layout_width="match_parent"
             android:layout_height="0dp"
-            android:layout_weight="1">
+            android:layout_weight="0.85">
 
-            <!-- Narration sits at the bottom of the top half. -->
+            <!-- Senni narrates from here: progress dots + her speech bubble.
+                 Bubble/tail colors come from BubbleStyle (Monet) at runtime. -->
             <LinearLayout
                 android:id="@+id/narrationBlock"
                 android:layout_width="match_parent"
@@ -26,61 +37,101 @@
                 android:layout_gravity="bottom"
                 android:orientation="vertical"
                 android:gravity="center_horizontal"
-                android:paddingStart="24dp"
-                android:paddingEnd="24dp"
-                android:paddingBottom="16dp">
+                android:paddingStart="20dp"
+                android:paddingEnd="20dp"
+                android:paddingBottom="12dp">
 
-                <TextView
-                    android:id="@+id/stepProgress"
+                <!-- Vertical padding + no clipping: the active dot scales to 1.25×
+                     (10dp), which an 8dp-tall row would clip into a squared-off
+                     shape. -->
+                <LinearLayout
+                    android:id="@+id/stepDots"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:textColor="?attr/colorPrimary"
-                    android:textStyle="bold"
-                    android:textSize="12sp"
-                    tools:text="2 / 11"/>
+                    android:orientation="horizontal"
+                    android:paddingTop="2dp"
+                    android:paddingBottom="2dp"
+                    android:clipToPadding="false"
+                    android:clipChildren="false"
+                    android:layout_marginBottom="14dp"/>
 
-                <TextView
-                    android:id="@+id/stepTitle"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:textAlignment="center"
-                    android:textColor="?attr/colorOnSurface"
-                    android:textStyle="bold"
-                    android:textSize="22sp"
-                    tools:text="Tap to walk"/>
-
-                <TextView
-                    android:id="@+id/stepBody"
+                <FrameLayout
                     android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:textAlignment="center"
-                    android:textColor="?attr/colorOnSurfaceVariant"
-                    android:textSize="15sp"
-                    android:lineSpacingExtra="3dp"
-                    tools:text="Tap her — she'll stroll across the screen."/>
+                    android:layout_height="wrap_content">
+
+                    <LinearLayout
+                        android:id="@+id/narrationBubble"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="9dp"
+                        android:orientation="vertical"
+                        android:paddingStart="18dp"
+                        android:paddingEnd="18dp"
+                        android:paddingTop="14dp"
+                        android:paddingBottom="14dp">
+
+                        <TextView
+                            android:id="@+id/senniLabel"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textSize="11sp"
+                            android:textStyle="bold"
+                            android:letterSpacing="0.08"
+                            android:text="@string/tutorial_senni_label"/>
+
+                        <TextView
+                            android:id="@+id/stepTitle"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:textStyle="bold"
+                            android:textSize="20sp"
+                            tools:text="Tap me to walk"/>
+
+                        <TextView
+                            android:id="@+id/stepBody"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="6dp"
+                            android:textSize="15sp"
+                            android:lineSpacingExtra="3dp"
+                            tools:text="Give me a tap and I'll stroll across the screen."/>
+
+                    </LinearLayout>
+
+                    <!-- Bubble tail pointing down toward her home corner; overlaps
+                         the bubble's bottom edge by 1dp so no seam shows. -->
+                    <View
+                        android:id="@+id/bubbleTail"
+                        android:layout_width="20dp"
+                        android:layout_height="10dp"
+                        android:layout_gravity="bottom|end"
+                        android:layout_marginEnd="40dp"
+                        android:background="@drawable/bubble_tail"/>
+
+                </FrameLayout>
 
             </LinearLayout>
 
         </FrameLayout>
 
-        <!-- Bottom half: empty spacer -->
+        <!-- Bottom row: the stage. -->
         <View
             android:layout_width="match_parent"
             android:layout_height="0dp"
-            android:layout_weight="1"/>
+            android:layout_weight="1.15"/>
 
     </LinearLayout>
 
-    <!-- The sandbox: stands in for "the screen". Sprite, bubbles, and the radial
-         menu are added here programmatically — and render above the narration. -->
+    <!-- The sandbox: stands in for "the screen". Sprite, bubbles, gesture hints,
+         sparkles, and the radial menu are added here programmatically — and
+         render above the narration. -->
     <FrameLayout
         android:id="@+id/sandbox"
         android:layout_width="match_parent"
         android:layout_height="match_parent"/>
 
-    <!-- Skip-the-whole-thing, top-right. -->
+    <!-- Skip-the-whole-thing, top-right. De-emphasized next to the live content. -->
     <Button
         android:id="@+id/skipButton"
         style="@style/Widget.Material3.Button.TextButton"
@@ -88,6 +139,7 @@
         android:layout_height="wrap_content"
         android:layout_gravity="top|end"
         android:layout_margin="8dp"
+        android:alpha="0.7"
         android:text="@string/tutorial_skip"/>
 
     <!-- Navigation buttons at the bottom: Previous (left) and Next (right), joined. -->
@@ -101,12 +153,15 @@
         app:singleSelection="false"
         app:selectionRequired="false">
 
+        <!-- checkable=false: the group is only here for the joined-corner look —
+             clicks must not latch a checked state. -->
         <com.google.android.material.button.MaterialButton
             android:id="@+id/prevButton"
             style="@style/CompanionButton.Large.Left"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
+            android:checkable="false"
             android:text="@string/tutorial_previous"/>
 
         <com.google.android.material.button.MaterialButton
@@ -115,6 +170,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
+            android:checkable="false"
             android:text="@string/tutorial_next"/>
 
     </com.google.android.material.button.MaterialButtonToggleGroup>

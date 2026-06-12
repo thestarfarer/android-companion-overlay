@@ -34,7 +34,9 @@ class CompanionAccessibilityService : AccessibilityService() {
 
     companion object {
         private const val TAG = "A11y"
-        private const val DOUBLE_TAP_WINDOW_MS = 400L
+        // Shared with the tutorial's mock volume key so the press rhythm the
+        // user learns there is the real one.
+        internal const val DOUBLE_TAP_WINDOW_MS = 400L
     }
 
     private val coordinator: OverlayCoordinator by inject()

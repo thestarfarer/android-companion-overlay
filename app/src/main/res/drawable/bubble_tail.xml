@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Speech-bubble tail: downward triangle with a softly rounded tip. Tinted at
+     runtime to BubbleStyle's Monet bubble color (fillColor here is a placeholder).
+     A vector beats the old rotated-square View, whose diamond tip poked past the
+     parent bounds and got clipped flat. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="20dp"
+    android:height="10dp"
+    android:viewportWidth="20"
+    android:viewportHeight="10">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M0,0 L20,0 L11.4,8.4 Q10,9.6 8.6,8.4 Z"/>
+</vector>
