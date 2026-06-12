@@ -58,10 +58,20 @@ class SpriteAnimator(
         private const val CROSSING_THRESHOLD_TIME_MS = 10000L
         private const val DISTURBANCE_MIN = 2
         private const val DISTURBANCE_MAX = 5
+
+        /** Longest-edge cap for a decoded sprite sheet (OOM guard for custom PNGs). */
+        private const val MAX_SPRITE_DIMENSION = 2048
     }
 
     // --- Enums ---
     enum class OverlayState { Idle, WalkingLeft, WalkingRight }
+
+    /**
+     * The direction the sprite walks on the next tap — note this reads inverted
+     * vs its physical location: [Right] means it's anchored at its left-most
+     * spot and will move right next. Persisted as "left"/"right" by the
+     * service, so don't repurpose the names without migrating that.
+     */
     enum class OverlayPosition { Left, Right }
     private enum class EscapePhase { None, Exit, Enter }
 
@@ -78,6 +88,10 @@ class SpriteAnimator(
     // --- Pre-allocated render buffers (avoids per-frame Bitmap allocations) ---
     private var idleRenderBitmap: Bitmap? = null
     private var idleRenderCanvas: Canvas? = null
+    // Reused across frames — drawIdle allocated a fresh Rect/RectF every tick,
+    // contradicting the "no per-frame allocations" intent.
+    private val idleSrcRect = Rect()
+    private val idleDstRect = RectF()
 
     // --- Pre-extracted walking frames (avoids per-frame createBitmap + mirror) ---
     private var walkFramesRight: Array<Bitmap>? = null
@@ -216,7 +230,11 @@ class SpriteAnimator(
         if (walkFrameWidth <= 0 || walkFrameHeight <= 0) return
 
         val right = Array(walkFrameCount) { i ->
-            Bitmap.createBitmap(sheet, i * walkFrameWidth, 0, walkFrameWidth, walkFrameHeight)
+            val sub = Bitmap.createBitmap(sheet, i * walkFrameWidth, 0, walkFrameWidth, walkFrameHeight)
+            // When the region covers the whole sheet (single-frame sheet),
+            // createBitmap returns the SOURCE itself — releasing the frame array
+            // would then recycle the still-referenced sheet. Force a copy.
+            if (sub === sheet) sub.copy(sub.config ?: Bitmap.Config.ARGB_8888, false) else sub
         }
         val mirrorMatrix = Matrix().apply {
             preScale(-1f, 1f)
@@ -234,12 +252,9 @@ class SpriteAnimator(
         if (customUri != null) {
             try {
                 val uri = Uri.parse(customUri)
-                context.contentResolver.openInputStream(uri)?.use { stream ->
-                    val bmp = BitmapFactory.decodeStream(stream)
-                    if (bmp != null) {
-                        DebugLog.log("Overlay", "Loaded custom sprite from $customUri")
-                        return bmp
-                    }
+                decodeCapped { context.contentResolver.openInputStream(uri) }?.let {
+                    DebugLog.log("Overlay", "Loaded custom sprite from $customUri")
+                    return it
                 }
             } catch (e: Exception) {
                 DebugLog.log("Overlay", "Failed to load custom sprite: ${e.message}")
@@ -247,18 +262,37 @@ class SpriteAnimator(
         }
 
         try {
-            context.assets.open(customAsset).use { stream ->
-                val bmp = BitmapFactory.decodeStream(stream)
-                if (bmp != null) {
-                    DebugLog.log("Overlay", "Loaded custom asset: $customAsset")
-                    return bmp
-                }
+            decodeCapped { context.assets.open(customAsset) }?.let {
+                DebugLog.log("Overlay", "Loaded custom asset: $customAsset")
+                return it
             }
         } catch (_: Exception) {}
 
-        return context.assets.open(defaultAsset).use { stream ->
-            BitmapFactory.decodeStream(stream)
-        } ?: Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
+        return decodeCapped { context.assets.open(defaultAsset) }
+            ?: Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
+    }
+
+    /**
+     * Decode a sprite sheet, downsampling so its longest edge stays within
+     * [MAX_SPRITE_DIMENSION]. A large user-supplied PNG would otherwise decode
+     * to a full-size bitmap that [extractWalkFrames] then duplicates ~2x (right
+     * + mirrored left frames) — an easy OOM. The [open] provider is called
+     * twice (bounds pass, then decode), so it must reopen the stream each time.
+     */
+    private fun decodeCapped(open: () -> java.io.InputStream?): Bitmap? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        // The bounds pass returns null even on success (inJustDecodeBounds
+        // produces no bitmap) — only a null stream is a failure here. Decode
+        // failure surfaces as outWidth/outHeight staying <= 0 below.
+        (open() ?: return null).use { BitmapFactory.decodeStream(it, null, bounds) }
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+
+        var sample = 1
+        val longest = maxOf(bounds.outWidth, bounds.outHeight)
+        while (longest / sample > MAX_SPRITE_DIMENSION) sample *= 2
+
+        val opts = BitmapFactory.Options().apply { inSampleSize = sample }
+        return open()?.use { BitmapFactory.decodeStream(it, null, opts) }
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -329,7 +363,11 @@ class SpriteAnimator(
             position = OverlayPosition.Right
         }
 
-        walkTargetX = walkTargetX.coerceIn(marginRightPx, config.screenWidth - s.spriteWidth - marginRightPx)
+        // A sprite wider than the screen makes maxX < minX, which crashes
+        // coerceIn ("empty range") — in that case just don't walk.
+        val maxX = config.screenWidth - s.spriteWidth - marginRightPx
+        walkTargetX = if (maxX <= marginRightPx) walkStartX
+            else walkTargetX.coerceIn(marginRightPx, maxX)
     }
 
     private fun triggerEscape() {
@@ -425,9 +463,9 @@ class SpriteAnimator(
         canvas.scale(1f, scale)
         canvas.translate(-vw / 2f, -vh / 2f)
 
-        val srcRect = Rect(frame * idleFrameWidth, 0, (frame + 1) * idleFrameWidth, idleFrameHeight)
-        val dstRect = RectF(xOffset, yCenter, xOffset + idleFrameWidth, yCenter + idleFrameHeight)
-        canvas.drawBitmap(idleSheet, srcRect, dstRect, null)
+        idleSrcRect.set(frame * idleFrameWidth, 0, (frame + 1) * idleFrameWidth, idleFrameHeight)
+        idleDstRect.set(xOffset, yCenter, xOffset + idleFrameWidth, yCenter + idleFrameHeight)
+        canvas.drawBitmap(idleSheet, idleSrcRect, idleDstRect, null)
         canvas.restore()
 
         view.setImageBitmap(renderBitmap)
