@@ -279,7 +279,7 @@ class MainActivity : AppCompatActivity() {
         binding.systemPromptCard.setOnClickListener {
             val preset = viewModel.state.value.activePreset ?: return@setOnClickListener
             SettingsDialogs.showTextEditor(this,
-                title = "System Prompt",
+                title = getString(R.string.main_system_prompt_title),
                 currentText = preset.systemPrompt,
                 defaultText = PromptSettings.DEFAULT_SYSTEM_PROMPT,
                 requestKey = RK_SYSTEM_PROMPT
@@ -289,7 +289,7 @@ class MainActivity : AppCompatActivity() {
         binding.userMessageCard.setOnClickListener {
             val preset = viewModel.state.value.activePreset ?: return@setOnClickListener
             SettingsDialogs.showTextEditor(this,
-                title = "User Message",
+                title = getString(R.string.main_user_message_title),
                 currentText = preset.userMessage,
                 defaultText = PromptSettings.DEFAULT_USER_MESSAGE,
                 requestKey = RK_USER_MESSAGE
@@ -374,11 +374,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateOverlayUI(state: MainViewModel.UiState) {
         if (state.overlayRunning) {
-            statusText.text = "Senni is walking around~"
-            toggleButton.text = "Let Her Rest"
+            statusText.text = getString(R.string.main_status_walking)
+            toggleButton.text = getString(R.string.main_toggle_rest)
         } else {
-            statusText.text = "Senni is sleeping..."
-            toggleButton.text = "Wake Her Up"
+            statusText.text = getString(R.string.main_status_sleeping)
+            toggleButton.text = getString(R.string.main_toggle_wake)
         }
     }
 
@@ -387,20 +387,20 @@ class MainActivity : AppCompatActivity() {
             is MainViewModel.AuthState.ApiKeyMode -> {
                 if (authState.hasKey) {
                     authDot.backgroundTintList = ColorStateList.valueOf(getColor(R.color.status_connected))
-                    authStatusText.text = "API Key configured"
+                    authStatusText.text = getString(R.string.main_api_key_configured)
                     authButton.visibility = View.GONE
                 } else {
                     authDot.backgroundTintList = ColorStateList.valueOf(getColor(R.color.status_error))
-                    authStatusText.text = "API Key not set"
+                    authStatusText.text = getString(R.string.main_api_key_not_set)
                     authButton.visibility = View.VISIBLE
-                    authButton.text = "Set Claude API key"
+                    authButton.text = getString(R.string.main_set_api_key)
                 }
             }
             is MainViewModel.AuthState.Waiting -> {
                 authDot.backgroundTintList = ColorStateList.valueOf(getColor(R.color.status_warning))
-                authStatusText.text = "Waiting for browser..."
+                authStatusText.text = getString(R.string.main_waiting_for_browser)
                 authButton.visibility = View.VISIBLE
-                authButton.text = "Cancel"
+                authButton.text = getString(R.string.common_cancel)
             }
             is MainViewModel.AuthState.Connected -> {
                 authDot.backgroundTintList = ColorStateList.valueOf(getColor(R.color.status_connected))
@@ -408,20 +408,20 @@ class MainActivity : AppCompatActivity() {
                 val date = Date(authState.expiresAt)
                 val df = android.text.format.DateFormat.getMediumDateFormat(this)
                 val tf = android.text.format.DateFormat.getTimeFormat(this)
-                authStatusText.text = "Connected until ${df.format(date)} ${tf.format(date)}"
+                authStatusText.text = getString(R.string.main_connected_until, df.format(date), tf.format(date))
                 authButton.visibility = View.GONE
             }
             is MainViewModel.AuthState.Expired -> {
                 authDot.backgroundTintList = ColorStateList.valueOf(getColor(R.color.status_error))
-                authStatusText.text = "Token expired"
+                authStatusText.text = getString(R.string.main_token_expired)
                 authButton.visibility = View.VISIBLE
-                authButton.text = "Reconnect"
+                authButton.text = getString(R.string.main_reconnect)
             }
             is MainViewModel.AuthState.NotConnected -> {
                 authDot.backgroundTintList = ColorStateList.valueOf(getColor(R.color.status_error))
-                authStatusText.text = "Not connected"
+                authStatusText.text = getString(R.string.main_not_connected)
                 authButton.visibility = View.VISIBLE
-                authButton.text = "Connect to Claude"
+                authButton.text = getString(R.string.main_connect_to_claude)
             }
         }
     }
@@ -464,7 +464,7 @@ class MainActivity : AppCompatActivity() {
         // The VM refuses to delete the only preset; without this guard the
         // confirmation dialog appeared and then silently did nothing.
         if (viewModel.state.value.presets.size <= 1) {
-            Toast.makeText(this, "Can't delete your only preset~", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, getString(R.string.main_cant_delete_only_preset), Toast.LENGTH_SHORT).show()
             return
         }
         presetDialogHelper.showDeleteConfirmation(preset.name) {
@@ -500,7 +500,7 @@ class MainActivity : AppCompatActivity() {
                     }
                     spriteAnimator.clearCache()
                     coordinator.reloadSprites()
-                    Toast.makeText(this, "Saved~", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, getString(R.string.main_saved), Toast.LENGTH_SHORT).show()
                 }
                 is SpritePickerHelper.Result.Reset -> {
                     val old = if (type == "idle") preset.idleSpriteUri else preset.walkSpriteUri
@@ -514,7 +514,7 @@ class MainActivity : AppCompatActivity() {
                     }
                     spriteAnimator.clearCache()
                     coordinator.reloadSprites()
-                    Toast.makeText(this, "Reset to default~", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, getString(R.string.main_reset_to_default), Toast.LENGTH_SHORT).show()
                 }
                 is SpritePickerHelper.Result.Cancelled -> { /* Do nothing */ }
             }
@@ -545,7 +545,7 @@ class MainActivity : AppCompatActivity() {
 
         spriteAnimator.clearCache()
         coordinator.reloadSprites()
-        Toast.makeText(this, "Sprite updated~", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, getString(R.string.main_sprite_updated), Toast.LENGTH_SHORT).show()
     }
 
     private fun releasePersistedUri(uriString: String?) {
@@ -570,13 +570,13 @@ class MainActivity : AppCompatActivity() {
             }
             is MainViewModel.AuthState.Waiting -> {
                 viewModel.cancelAuth()
-                Toast.makeText(this, "Cancelled", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, getString(R.string.main_cancelled), Toast.LENGTH_SHORT).show()
             }
             is MainViewModel.AuthState.Expired -> {
                 lifecycleScope.launch {
                     val result = viewModel.refreshToken()
                     if (result.isSuccess) {
-                        Toast.makeText(this@MainActivity, "Token refreshed~", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this@MainActivity, getString(R.string.main_token_refreshed), Toast.LENGTH_SHORT).show()
                     } else {
                         viewModel.logout()
                         startAuthentication()
@@ -585,7 +585,7 @@ class MainActivity : AppCompatActivity() {
             }
             is MainViewModel.AuthState.Connected -> {
                 viewModel.logout()
-                Toast.makeText(this, "Logged out~", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, getString(R.string.main_logged_out), Toast.LENGTH_SHORT).show()
             }
             is MainViewModel.AuthState.NotConnected -> startAuthentication()
         }
@@ -601,12 +601,12 @@ class MainActivity : AppCompatActivity() {
                 }
                 override fun onAuthSuccess() {
                     DebugLog.log("Main", "Auth SUCCESS")
-                    Toast.makeText(this@MainActivity, "Connected~", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@MainActivity, getString(R.string.main_connected), Toast.LENGTH_SHORT).show()
                     viewModel.refreshAuthState()
                 }
                 override fun onAuthFailure(error: String) {
                     DebugLog.log("Main", "Auth FAILURE: $error")
-                    Toast.makeText(this@MainActivity, "Failed: $error", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this@MainActivity, getString(R.string.main_auth_failed, error), Toast.LENGTH_LONG).show()
                     viewModel.refreshAuthState()
                 }
             })
@@ -619,7 +619,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun checkPermissionAndStart() {
         if (!OverlayController.canStart(this)) {
-            Toast.makeText(this, "Please grant overlay permission!", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, getString(R.string.main_grant_overlay_permission), Toast.LENGTH_LONG).show()
             overlayPermissionLauncher.launch(
                 Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
             )

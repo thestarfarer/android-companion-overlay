@@ -95,14 +95,14 @@ class SettingsFragment : PreferenceFragmentCompat() {
         val ctx = context ?: return@registerForActivityResult
         when {
             results.all { it.value } -> {
-                Toast.makeText(ctx, "Voice input ready~", Toast.LENGTH_SHORT).show()
+                Toast.makeText(ctx, ctx.getString(R.string.settings_voice_input_ready), Toast.LENGTH_SHORT).show()
             }
             results[Manifest.permission.RECORD_AUDIO] == false -> {
-                Toast.makeText(ctx, "Voice needs microphone permission", Toast.LENGTH_LONG).show()
+                Toast.makeText(ctx, ctx.getString(R.string.settings_voice_needs_mic), Toast.LENGTH_LONG).show()
             }
             else -> {
                 // Mic granted but Bluetooth denied — voice works, just not over BT.
-                Toast.makeText(ctx, "Granted — Bluetooth mic won't be used without that permission", Toast.LENGTH_LONG).show()
+                Toast.makeText(ctx, ctx.getString(R.string.settings_bluetooth_mic_denied), Toast.LENGTH_LONG).show()
             }
         }
         refreshPermissions()
@@ -113,9 +113,9 @@ class SettingsFragment : PreferenceFragmentCompat() {
     ) { granted ->
         val ctx = context ?: return@registerForActivityResult
         if (granted) {
-            Toast.makeText(ctx, "Camera ready~", Toast.LENGTH_SHORT).show()
+            Toast.makeText(ctx, ctx.getString(R.string.settings_camera_ready), Toast.LENGTH_SHORT).show()
         } else {
-            Toast.makeText(ctx, "Camera capture needs camera permission", Toast.LENGTH_LONG).show()
+            Toast.makeText(ctx, ctx.getString(R.string.settings_camera_needs_permission), Toast.LENGTH_LONG).show()
         }
         refreshPermissions()
     }
@@ -125,9 +125,9 @@ class SettingsFragment : PreferenceFragmentCompat() {
     ) { granted ->
         val ctx = context ?: return@registerForActivityResult
         if (granted) {
-            Toast.makeText(ctx, "Notifications ready~", Toast.LENGTH_SHORT).show()
+            Toast.makeText(ctx, ctx.getString(R.string.settings_notifications_ready), Toast.LENGTH_SHORT).show()
         } else {
-            Toast.makeText(ctx, "Without notifications you won't see the overlay status or its Stop button", Toast.LENGTH_LONG).show()
+            Toast.makeText(ctx, ctx.getString(R.string.settings_notifications_denied), Toast.LENGTH_LONG).show()
         }
         refreshPermissions()
     }
@@ -226,8 +226,8 @@ class SettingsFragment : PreferenceFragmentCompat() {
     private fun refreshApiKeySummary(pref: Preference? = findPreference("claude_api_key")) {
         pref ?: return
         val key = settings.claudeApiKey
-        pref.summary = if (key.isNullOrBlank()) "Enter your sk-ant-... API key"
-        else "Key set (${key.take(10)}...)"
+        pref.summary = if (key.isNullOrBlank()) getString(R.string.settings_api_key_enter)
+        else getString(R.string.settings_api_key_set, key.take(10))
     }
 
     private fun showApiKeyDialog() {
@@ -237,7 +237,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
 
         val r = 12 * d
         val inputLayout = TextInputLayout(ctx, null, com.google.android.material.R.attr.textInputOutlinedStyle).apply {
-            hint = "sk-ant-..."
+            hint = ctx.getString(R.string.settings_api_key_hint)
             endIconMode = TextInputLayout.END_ICON_PASSWORD_TOGGLE
             setBoxCornerRadii(r, r, r, r)
         }
@@ -255,14 +255,14 @@ class SettingsFragment : PreferenceFragmentCompat() {
         }
 
         MaterialAlertDialogBuilder(ctx, R.style.CompanionDialog)
-            .setTitle("Claude API Key")
+            .setTitle(getString(R.string.settings_claude_api_key_title))
             .setView(container)
-            .setPositiveButton("Save") { _, _ ->
+            .setPositiveButton(getString(R.string.common_save)) { _, _ ->
                 settings.claudeApiKey = editText.text?.toString()?.trim()
                 refreshApiKeySummary()
                 refreshDebugTest()
             }
-            .setNegativeButton("Cancel", null)
+            .setNegativeButton(getString(R.string.common_cancel), null)
             .show()
 
         editText.requestFocus()
@@ -270,12 +270,15 @@ class SettingsFragment : PreferenceFragmentCompat() {
 
     // ── Connection Type ──
 
-    private val connectionLabels = arrayOf("API Key", "Claude Code OAuth")
+    private val connectionLabels by lazy {
+        arrayOf(getString(R.string.settings_connection_api_key), getString(R.string.settings_connection_oauth))
+    }
     private val connectionValues = arrayOf(SettingsRepository.CONNECTION_API_KEY, SettingsRepository.CONNECTION_OAUTH)
 
     private fun setupConnectionType() {
         findPreference<Preference>("claude_connection_type")?.apply {
-            summary = if (settings.isApiKeyMode) "API Key" else "Claude Code OAuth"
+            summary = if (settings.isApiKeyMode) getString(R.string.settings_connection_api_key)
+            else getString(R.string.settings_connection_oauth)
             setOnPreferenceClickListener {
                 showConnectionTypeDialog()
                 true
@@ -289,11 +292,11 @@ class SettingsFragment : PreferenceFragmentCompat() {
         var selectedIndex = currentIndex
 
         MaterialAlertDialogBuilder(ctx, R.style.CompanionDialog)
-            .setTitle("Connection type")
+            .setTitle(getString(R.string.settings_connection_type_title))
             .setSingleChoiceItems(connectionLabels, currentIndex) { _, which ->
                 selectedIndex = which
             }
-            .setPositiveButton("Save") { _, _ ->
+            .setPositiveButton(getString(R.string.common_save)) { _, _ ->
                 val type = connectionValues[selectedIndex]
                 settings.connectionType = type
                 findPreference<Preference>("claude_connection_type")?.summary =
@@ -301,7 +304,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
                 refreshAccountVisibility()
                 refreshDebugTest()
             }
-            .setNegativeButton("Cancel", null)
+            .setNegativeButton(getString(R.string.common_cancel), null)
             .show()
     }
 
@@ -320,8 +323,8 @@ class SettingsFragment : PreferenceFragmentCompat() {
     private fun refreshGeminiKeySummary(pref: Preference? = findPreference("gemini_api_key")) {
         pref ?: return
         val key = settings.geminiApiKey
-        pref.summary = if (key.isNullOrBlank()) "Required for Gemini speech-to-text and text-to-speech"
-        else "Key set (${key.take(8)}…)"
+        pref.summary = if (key.isNullOrBlank()) getString(R.string.settings_gemini_key_required)
+        else getString(R.string.settings_gemini_key_set, key.take(8))
     }
 
     private fun showGeminiKeyDialog() {
@@ -331,7 +334,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
 
         val r = 12 * d
         val inputLayout = TextInputLayout(ctx, null, com.google.android.material.R.attr.textInputOutlinedStyle).apply {
-            hint = "AIza..."
+            hint = ctx.getString(R.string.settings_gemini_key_hint)
             endIconMode = TextInputLayout.END_ICON_PASSWORD_TOGGLE
             setBoxCornerRadii(r, r, r, r)
         }
@@ -349,13 +352,13 @@ class SettingsFragment : PreferenceFragmentCompat() {
         }
 
         MaterialAlertDialogBuilder(ctx, R.style.CompanionDialog)
-            .setTitle("Gemini API Key")
+            .setTitle(getString(R.string.settings_gemini_api_key_title))
             .setView(container)
-            .setPositiveButton("Save") { _, _ ->
+            .setPositiveButton(getString(R.string.common_save)) { _, _ ->
                 settings.geminiApiKey = editText.text?.toString()?.trim()
                 refreshGeminiKeySummary()
             }
-            .setNegativeButton("Cancel", null)
+            .setNegativeButton(getString(R.string.common_cancel), null)
             .show()
 
         editText.requestFocus()
@@ -385,7 +388,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
 
     private fun formatSilenceMs(ms: Long): String {
         val sec = ms / 1000.0
-        return "${"%.1f".format(sec)}s — wait this long after silence before sending"
+        return getString(R.string.settings_silence_timeout_summary, sec)
     }
 
     // ── Volume shortcut ──
@@ -393,7 +396,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
     private fun setupVolumeShortcut() {
         findPreference<SwitchPreferenceCompat>("volume_toggle_enabled")?.setOnPreferenceChangeListener { _, newValue ->
             if (newValue == true) {
-                Toast.makeText(requireContext(), "This option will interfere with long press for volume down", Toast.LENGTH_LONG).show()
+                Toast.makeText(requireContext(), getString(R.string.settings_volume_toggle_warning), Toast.LENGTH_LONG).show()
             }
             true
         }
@@ -414,7 +417,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
     private fun setupConversationLists() {
         findPreference<ListPreference>("max_messages")?.apply {
             value = settings.maxMessages.toString()
-            summary = "Keep %s messages in context"
+            summary = getString(R.string.settings_max_messages_summary)
             setOnPreferenceChangeListener { _, newValue ->
                 val count = (newValue as String).toIntOrNull() ?: PromptSettings.DEFAULT_MAX_MESSAGES
                 settings.maxMessages = count
@@ -424,7 +427,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
 
         findPreference<ListPreference>("bubble_timeout")?.apply {
             value = settings.bubbleTimeoutSeconds.toString()
-            summary = "Dismiss after %s seconds"
+            summary = getString(R.string.settings_bubble_timeout_summary)
             setOnPreferenceChangeListener { _, newValue ->
                 val secs = (newValue as String).toIntOrNull() ?: PromptSettings.DEFAULT_BUBBLE_TIMEOUT
                 settings.bubbleTimeoutSeconds = secs
@@ -434,18 +437,18 @@ class SettingsFragment : PreferenceFragmentCompat() {
 
         findPreference<Preference>("clear_history")?.setOnPreferenceClickListener {
             MaterialAlertDialogBuilder(requireContext())
-                .setTitle("Clear conversation history?")
-                .setMessage("Senni forgets everything said so far. This cannot be undone.")
-                .setPositiveButton("Clear") { _, _ ->
+                .setTitle(getString(R.string.settings_clear_history_title))
+                .setMessage(getString(R.string.settings_clear_history_message))
+                .setPositiveButton(getString(R.string.settings_clear)) { _, _ ->
                     // Running service clears memory + file via the event; with
                     // the overlay down, delete the stored file directly.
                     if (!coordinator.clearConversation()) {
                         val storage: ConversationStorage by inject()
                         lifecycleScope.launch { storage.clear() }
                     }
-                    Toast.makeText(requireContext(), "Conversation cleared~", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(requireContext(), getString(R.string.settings_conversation_cleared), Toast.LENGTH_SHORT).show()
                 }
-                .setNegativeButton("Cancel", null)
+                .setNegativeButton(getString(R.string.common_cancel), null)
                 .show()
             true
         }
@@ -457,9 +460,9 @@ class SettingsFragment : PreferenceFragmentCompat() {
         findPreference<Preference>("perm_accessibility")?.setOnPreferenceClickListener {
             val ctx = requireContext()
             if (coordinator.accessibilityRunning.value) {
-                Toast.makeText(ctx, "Already enabled~", Toast.LENGTH_SHORT).show()
+                Toast.makeText(ctx, ctx.getString(R.string.settings_already_enabled), Toast.LENGTH_SHORT).show()
             } else {
-                Toast.makeText(ctx, "Enable 'Senni Overlay' in Accessibility settings", Toast.LENGTH_LONG).show()
+                Toast.makeText(ctx, ctx.getString(R.string.settings_enable_accessibility), Toast.LENGTH_LONG).show()
                 startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
             }
             true
@@ -467,7 +470,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
 
         findPreference<Preference>("perm_voice")?.setOnPreferenceClickListener {
             if (hasVoicePerms()) {
-                Toast.makeText(requireContext(), "Already granted~", Toast.LENGTH_SHORT).show()
+                Toast.makeText(requireContext(), getString(R.string.settings_already_granted), Toast.LENGTH_SHORT).show()
             } else {
                 val perms = mutableListOf(Manifest.permission.RECORD_AUDIO)
                 if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
@@ -480,7 +483,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
 
         findPreference<Preference>("perm_camera")?.setOnPreferenceClickListener {
             if (hasCameraPerm()) {
-                Toast.makeText(requireContext(), "Already granted~", Toast.LENGTH_SHORT).show()
+                Toast.makeText(requireContext(), getString(R.string.settings_already_granted), Toast.LENGTH_SHORT).show()
             } else {
                 cameraPermLauncher.launch(Manifest.permission.CAMERA)
             }
@@ -489,7 +492,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
 
         findPreference<Preference>("perm_notifications")?.setOnPreferenceClickListener {
             if (hasNotifPerm()) {
-                Toast.makeText(requireContext(), "Already granted~", Toast.LENGTH_SHORT).show()
+                Toast.makeText(requireContext(), getString(R.string.settings_already_granted), Toast.LENGTH_SHORT).show()
             } else {
                 notifPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
@@ -511,20 +514,20 @@ class SettingsFragment : PreferenceFragmentCompat() {
     private fun refreshPermissions() {
         val ctx = context ?: return
         findPreference<Preference>("perm_accessibility")?.summary =
-            if (coordinator.accessibilityRunning.value) "✓ Enabled"
-            else "Required for screenshots and volume button shortcut"
+            if (coordinator.accessibilityRunning.value) getString(R.string.settings_perm_enabled)
+            else getString(R.string.settings_perm_accessibility_desc)
 
         findPreference<Preference>("perm_voice")?.summary =
-            if (hasVoicePerms()) "✓ Granted"
-            else "Microphone and Bluetooth permissions for voice recording"
+            if (hasVoicePerms()) getString(R.string.settings_perm_granted)
+            else getString(R.string.settings_perm_voice_desc)
 
         findPreference<Preference>("perm_camera")?.summary =
-            if (hasCameraPerm()) "✓ Granted"
-            else "Required for camera capture instead of screenshots"
+            if (hasCameraPerm()) getString(R.string.settings_perm_granted)
+            else getString(R.string.settings_perm_camera_desc)
 
         findPreference<Preference>("perm_notifications")?.summary =
-            if (hasNotifPerm()) "✓ Granted"
-            else "Shows the overlay status and its Stop button"
+            if (hasNotifPerm()) getString(R.string.settings_perm_granted)
+            else getString(R.string.settings_perm_notifications_desc)
     }
 
     // ── Account ──
@@ -541,13 +544,16 @@ class SettingsFragment : PreferenceFragmentCompat() {
                 accountTapCount++
                 val remaining = 10 - accountTapCount
                 if (remaining in 1..3) {
-                    val unit = if (remaining == 1) "tap" else "taps"
-                    Toast.makeText(requireContext(), "$remaining $unit to go...", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(
+                        requireContext(),
+                        resources.getQuantityString(R.plurals.settings_taps_to_go, remaining, remaining),
+                        Toast.LENGTH_SHORT
+                    ).show()
                 }
                 if (accountTapCount >= 10) {
                     settings.advancedUnlocked = true
                     accountTapCount = 0
-                    Toast.makeText(requireContext(), "Advanced mode unlocked", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(requireContext(), getString(R.string.settings_advanced_unlocked), Toast.LENGTH_SHORT).show()
                     refreshAccountVisibility()
                 }
             } else if (!settings.isApiKeyMode) {
@@ -571,13 +577,13 @@ class SettingsFragment : PreferenceFragmentCompat() {
         val isExpired = isAuth && System.currentTimeMillis() > claudeAuth.getExpiresAt()
 
         pref.summary = when {
-            isWaiting -> "Waiting for browser… (tap to cancel)"
+            isWaiting -> getString(R.string.settings_auth_waiting)
             isAuth && !isExpired -> {
                 val fmt = SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault())
-                "Connected until ${fmt.format(Date(claudeAuth.getExpiresAt()))} — tap to log out"
+                getString(R.string.settings_auth_connected_until, fmt.format(Date(claudeAuth.getExpiresAt())))
             }
-            isAuth && isExpired -> "Token expired — tap to reconnect"
-            else -> "Not connected — tap to log in"
+            isAuth && isExpired -> getString(R.string.settings_auth_token_expired)
+            else -> getString(R.string.settings_auth_not_connected)
         }
     }
 
@@ -592,8 +598,8 @@ class SettingsFragment : PreferenceFragmentCompat() {
             if (!isAdvanced) {
                 isVisible = true
                 if (isApiKey) {
-                    title = "Claude connection"
-                    summary = "Using API Key"
+                    title = getString(R.string.settings_claude_connection_title)
+                    summary = getString(R.string.settings_using_api_key)
                 }
             } else {
                 isVisible = !isApiKey
@@ -606,13 +612,13 @@ class SettingsFragment : PreferenceFragmentCompat() {
             claudeAuth.isWaitingForCallback() -> {
                 claudeAuth.cancelAuth()
                 refreshAccount()
-                Toast.makeText(requireContext(), "Cancelled", Toast.LENGTH_SHORT).show()
+                Toast.makeText(requireContext(), getString(R.string.settings_cancelled), Toast.LENGTH_SHORT).show()
             }
             claudeAuth.isAuthenticated() && System.currentTimeMillis() > claudeAuth.getExpiresAt() -> {
                 lifecycleScope.launch {
                     val result = claudeAuth.refreshToken()
                     if (result.isSuccess) {
-                        Toast.makeText(requireContext(), "Token refreshed~", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(requireContext(), getString(R.string.settings_token_refreshed), Toast.LENGTH_SHORT).show()
                     } else {
                         claudeAuth.logout()
                         startAuth()
@@ -625,7 +631,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
                 claudeAuth.logout()
                 refreshAccount()
                 refreshDebugTest()
-                Toast.makeText(requireContext(), "Logged out~", Toast.LENGTH_SHORT).show()
+                Toast.makeText(requireContext(), getString(R.string.settings_logged_out), Toast.LENGTH_SHORT).show()
             }
             else -> startAuth()
         }
@@ -637,12 +643,12 @@ class SettingsFragment : PreferenceFragmentCompat() {
             claudeAuth.startAuthWithCallback(ctx, object : ClaudeAuth.AuthCallback {
                 override fun onAuthProgress(message: String) { refreshAccount() }
                 override fun onAuthSuccess() {
-                    Toast.makeText(ctx, "Connected~", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(ctx, ctx.getString(R.string.settings_connected), Toast.LENGTH_SHORT).show()
                     refreshAccount()
                     refreshDebugTest()
                 }
                 override fun onAuthFailure(error: String) {
-                    Toast.makeText(ctx, "Failed: $error", Toast.LENGTH_LONG).show()
+                    Toast.makeText(ctx, ctx.getString(R.string.settings_auth_failed, error), Toast.LENGTH_LONG).show()
                     refreshAccount()
                 }
             })
@@ -659,9 +665,9 @@ class SettingsFragment : PreferenceFragmentCompat() {
         findPreference<Preference>("open_source_licenses")?.setOnPreferenceClickListener {
             val ctx = context ?: return@setOnPreferenceClickListener true
             MaterialAlertDialogBuilder(ctx, R.style.CompanionDialog)
-                .setTitle("Open source licenses")
+                .setTitle(getString(R.string.settings_open_source_licenses_title))
                 .setMessage(LICENSES_TEXT)
-                .setPositiveButton("Close", null)
+                .setPositiveButton(getString(R.string.common_close), null)
                 .show()
             true
         }
@@ -673,14 +679,14 @@ class SettingsFragment : PreferenceFragmentCompat() {
         findPreference<Preference>("debug_test")?.setOnPreferenceClickListener {
             val pref = it
             pref.isEnabled = false
-            pref.summary = "Thinking…"
+            pref.summary = getString(R.string.settings_test_thinking)
             lifecycleScope.launch {
                 val response = claudeApi.chat(
                     userMessage = "Hey Senni! Say something cute in under 50 words~",
                     systemPrompt = "You are Senni, a playful and mischievous companion. Be cute, a little teasing, maybe flirty. Keep it short and sweet. Use ~, ♡, and similar flourishes sparingly."
                 )
                 pref.summary = if (response.success) response.text
-                    else "Error: ${response.error}"
+                    else getString(R.string.settings_test_error, response.error)
                 pref.isEnabled = true
             }
             true
@@ -698,7 +704,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
             val ctx = requireContext()
             val file = ImageAudit.latest(ctx)
             if (file == null) {
-                Toast.makeText(ctx, "No saved images yet — enable 'Save sent images' and send one", Toast.LENGTH_LONG).show()
+                Toast.makeText(ctx, ctx.getString(R.string.settings_no_saved_images), Toast.LENGTH_LONG).show()
             } else {
                 val uri = androidx.core.content.FileProvider.getUriForFile(
                     ctx, "${ctx.packageName}.fileprovider", file
@@ -710,7 +716,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
                 try {
                     startActivity(intent)
                 } catch (e: Exception) {
-                    Toast.makeText(ctx, "No image viewer found", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(ctx, ctx.getString(R.string.settings_no_image_viewer), Toast.LENGTH_SHORT).show()
                 }
             }
             true
@@ -721,13 +727,13 @@ class SettingsFragment : PreferenceFragmentCompat() {
             val log = DebugLog.getLog()
             val clipboard = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
             clipboard.setPrimaryClip(ClipData.newPlainText("Senni Debug Log", log))
-            Toast.makeText(ctx, "Log copied! (${log.length} chars)", Toast.LENGTH_SHORT).show()
+            Toast.makeText(ctx, ctx.getString(R.string.settings_log_copied, log.length), Toast.LENGTH_SHORT).show()
             true
         }
 
         findPreference<Preference>("debug_clear_log")?.setOnPreferenceClickListener {
             DebugLog.clear()
-            Toast.makeText(requireContext(), "Log cleared", Toast.LENGTH_SHORT).show()
+            Toast.makeText(requireContext(), getString(R.string.settings_log_cleared), Toast.LENGTH_SHORT).show()
             true
         }
     }
@@ -743,9 +749,9 @@ class SettingsFragment : PreferenceFragmentCompat() {
             // Reset the summary when the connection becomes valid — the stale
             // "Set Claude API key first" / "Connect to Claude first" lingered
             // after the user fixed it.
-            summary = if (canTest) "Send a test message to verify the connection"
-                else if (settings.isApiKeyMode) "Set Claude API key first"
-                else "Connect to Claude first"
+            summary = if (canTest) getString(R.string.settings_test_ready)
+                else if (settings.isApiKeyMode) getString(R.string.settings_test_need_key)
+                else getString(R.string.settings_test_need_auth)
         }
     }
 

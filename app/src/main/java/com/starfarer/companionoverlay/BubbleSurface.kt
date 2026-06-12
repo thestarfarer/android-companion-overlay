@@ -106,15 +106,17 @@ class ViewGroupBubbleSurface(
 
     override fun attach(view: View, placement: BubblePlacement, maxWidth: Int) {
         val lp = when (placement) {
+            // Absolute RIGHT to match BubbleStyle.topRightEdgeParams — the placement
+            // means the physical right edge (the app is LTR-only; no supportsRtl).
             BubblePlacement.TOP_RIGHT_TOAST -> FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT,
                 FrameLayout.LayoutParams.WRAP_CONTENT,
-                Gravity.TOP or Gravity.END
+                Gravity.TOP or Gravity.RIGHT
             ).apply { topMargin = (60 * density).toInt() }
             BubblePlacement.TOP_RIGHT_TOAST_STACKED -> FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT,
                 FrameLayout.LayoutParams.WRAP_CONTENT,
-                Gravity.TOP or Gravity.END
+                Gravity.TOP or Gravity.RIGHT
             ).apply { topMargin = (110 * density).toInt() }
             BubblePlacement.CENTERED_DIALOG -> FrameLayout.LayoutParams(
                 if (maxWidth > 0) maxWidth else FrameLayout.LayoutParams.WRAP_CONTENT,

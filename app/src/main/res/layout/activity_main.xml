@@ -38,7 +38,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="Not connected"
+                android:text="@string/main_not_connected"
                 android:textSize="12sp"
                 android:textColor="@color/text_secondary"
                 android:singleLine="true"/>
@@ -50,7 +50,7 @@
                 android:src="@drawable/ic_settings"
                 android:padding="8dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
-                android:contentDescription="Settings"
+                android:contentDescription="@string/main_settings_button"
                 app:tint="@color/text_secondary"/>
 
         </LinearLayout>
@@ -94,7 +94,7 @@
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="Senni"
+                        android:text="@string/main_preset_name_default"
                         android:textAppearance="@style/TextAppearance.Companion.HeadlineLarge"
                         android:transitionName="preset_name"/>
 
@@ -143,7 +143,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginHorizontal="24dp"
                     android:layout_marginBottom="16dp"
-                    android:hint="Model">
+                    android:hint="@string/main_model_hint">
 
                     <AutoCompleteTextView
                         android:id="@+id/modelSelector"
@@ -180,7 +180,7 @@
                             android:id="@+id/systemPromptTitle"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="System Prompt"
+                            android:text="@string/main_system_prompt_title"
                             android:textAppearance="@style/TextAppearance.Companion.TitleMedium"
                             android:layout_marginBottom="6dp"/>
 
@@ -220,7 +220,7 @@
                             android:id="@+id/userMessageTitle"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="User Message"
+                            android:text="@string/main_user_message_title"
                             android:textAppearance="@style/TextAppearance.Companion.TitleMedium"
                             android:layout_marginBottom="6dp"/>
 
@@ -247,7 +247,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginHorizontal="24dp"
                     android:layout_marginBottom="12dp"
-                    android:text="Connect to Claude"
+                    android:text="@string/main_connect_to_claude"
                     android:visibility="gone"/>
 
                 <!-- ════════════════════════════════════════════════════════
@@ -259,7 +259,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginHorizontal="24dp"
-                    android:text="Senni is sleeping..."
+                    android:text="@string/main_status_sleeping"
                     android:textSize="16sp"
                     android:textColor="@color/text_secondary"
                     android:gravity="center"
@@ -271,7 +271,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginHorizontal="24dp"
-                    android:text="Wake Her Up"/>
+                    android:text="@string/main_toggle_wake"/>
 
             </LinearLayout>
         </ScrollView>

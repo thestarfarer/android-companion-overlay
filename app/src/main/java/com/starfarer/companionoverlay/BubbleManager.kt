@@ -118,7 +118,7 @@ class BubbleManager(
         }
 
         val replyInput = android.widget.EditText(context).apply {
-            hint = "Reply..."
+            hint = context.getString(R.string.bubble_reply_hint)
             setHintTextColor((colors.text and 0x00FFFFFF) or 0x66000000.toInt())
             setTextColor(colors.text)
             textSize = 13f

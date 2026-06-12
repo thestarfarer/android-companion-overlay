@@ -53,7 +53,7 @@ An animated sprite companion powered by Claude AI that lives on your Android scr
 
 1. **Overlay** — Settings > Apps > Special Access > Display over other apps
 2. **Accessibility service** — Settings > Accessibility > enable the service (for screenshots and volume button detection)
-3. **Microphone** — prompted on first voice input
+3. **Microphone** — grant via Settings > Permissions > Voice input in the app (voice input fails silently until granted)
 4. **Camera** (optional) — only needed for camera capture; grant via Settings > Permissions > Camera in the app
 
 Optional: **Digital assistant** — Settings > Apps > Default Apps > Digital assistant app > Companion Overlay (enables headset button support and dedicated assistant button support if present on device)

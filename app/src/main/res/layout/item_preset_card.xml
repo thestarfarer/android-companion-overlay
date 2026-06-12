@@ -44,12 +44,12 @@
                         android:layout_width="match_parent"
                         android:layout_height="140dp"
                         android:scaleType="fitCenter"
-                        android:contentDescription="Idle sprite"/>
+                        android:contentDescription="@string/preset_idle_sprite"/>
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="idle"
+                        android:text="@string/preset_idle_label"
                         android:textAppearance="@style/TextAppearance.Companion.LabelSmall"
                         android:layout_marginTop="4dp"/>
 
@@ -86,12 +86,12 @@
                         android:layout_width="match_parent"
                         android:layout_height="140dp"
                         android:scaleType="fitCenter"
-                        android:contentDescription="Walk sprite"/>
+                        android:contentDescription="@string/preset_walk_sprite"/>
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="walk"
+                        android:text="@string/preset_walk_label"
                         android:textAppearance="@style/TextAppearance.Companion.LabelSmall"
                         android:layout_marginTop="4dp"/>
 

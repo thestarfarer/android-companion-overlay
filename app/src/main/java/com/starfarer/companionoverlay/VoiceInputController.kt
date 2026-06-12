@@ -164,7 +164,8 @@ class VoiceInputController(
         // (cancel, timeout, response shown) could otherwise wedge the UI or
         // hijack the next session's state.
         setOnReady {
-            val label = if (useGemini) "🎙 Recording..." else "🎙 Listening..."
+            val label = if (useGemini) context.getString(R.string.status_recording)
+                else context.getString(R.string.status_listening)
             handler.post {
                 if (state != State.LISTENING) return@post
                 host.showVoiceBubble(label)
@@ -200,7 +201,7 @@ class VoiceInputController(
                 btRouter.clearRouting()
                 host.hideVoiceBubble()
                 host.clearPendingScreenshot()
-                host.showBriefBubble("Couldn't hear that~ ($error)")
+                host.showBriefBubble(context.getString(R.string.status_couldnt_hear, error))
             }
         }
 
@@ -261,9 +262,9 @@ class VoiceInputController(
         handler.post {
             if (state != State.LISTENING) return@post
             when (status) {
-                VoiceStatus.Recording -> host.updateVoiceBubble("🎙 Recording...")
+                VoiceStatus.Recording -> host.updateVoiceBubble(context.getString(R.string.status_recording))
                 VoiceStatus.Transcribing -> {
-                    host.updateVoiceBubble("✒️ Transcribing...")
+                    host.updateVoiceBubble(context.getString(R.string.status_transcribing))
                     // Mic capture is done — release the BT route early so the
                     // codec can settle before the response is spoken.
                     val wasBtRouted = btRouter.isRouted
@@ -278,7 +279,7 @@ class VoiceInputController(
                         }
                     }
                 }
-                VoiceStatus.Retrying -> host.updateVoiceBubble("Retrying transcription...")
+                VoiceStatus.Retrying -> host.updateVoiceBubble(context.getString(R.string.status_retrying))
             }
         }
     }

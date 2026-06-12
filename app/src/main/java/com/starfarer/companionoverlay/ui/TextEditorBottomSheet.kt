@@ -73,14 +73,14 @@ class TextEditorBottomSheet : BottomSheetDialogFragment() {
         saveButton.setOnClickListener {
             val newText = editText.text.toString().trim()
             if (newText.isEmpty()) {
-                Toast.makeText(requireContext(), "Prompt can't be empty~", Toast.LENGTH_SHORT).show()
+                Toast.makeText(requireContext(), getString(R.string.editor_prompt_empty), Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
             parentFragmentManager.setFragmentResult(
                 requestKey,
                 bundleOf(RESULT_TEXT to newText)
             )
-            Toast.makeText(requireContext(), "Saved~", Toast.LENGTH_SHORT).show()
+            Toast.makeText(requireContext(), getString(R.string.editor_saved), Toast.LENGTH_SHORT).show()
             dismiss()
         }
     }
