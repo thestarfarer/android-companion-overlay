@@ -1,7 +1,10 @@
 package com.starfarer.companionoverlay
 
 import android.widget.*
+import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.starfarer.companionoverlay.repository.SettingsRepository
 import com.starfarer.companionoverlay.ui.TextEditorBottomSheet
@@ -14,28 +17,49 @@ import com.starfarer.companionoverlay.ui.TextEditorBottomSheet
  */
 object SettingsDialogs {
 
-    /** Bottom sheet text editor for system prompt and personality. */
+    /**
+     * Show the text editor for a field. The result is delivered to [requestKey]
+     * via the Fragment Result API; the caller registers the listener once at
+     * Activity-create time (so a rotation can't drop the save or misroute it).
+     */
     fun showTextEditor(
         activity: FragmentActivity,
         title: String,
         currentText: String,
         defaultText: String,
-        onSave: (String) -> Unit
+        requestKey: String
     ) {
-        activity.supportFragmentManager.setFragmentResultListener(
-            TextEditorBottomSheet.REQUEST_KEY,
-            activity
-        ) { _, bundle ->
-            val text = bundle.getString(TextEditorBottomSheet.RESULT_TEXT) ?: return@setFragmentResultListener
-            onSave(text)
-        }
-        val bottomSheet = TextEditorBottomSheet.newInstance(title, currentText, defaultText)
-        bottomSheet.show(activity.supportFragmentManager, "text_editor")
+        TextEditorBottomSheet.newInstance(title, currentText, defaultText, requestKey)
+            .show(activity.supportFragmentManager, "text_editor")
+    }
+
+    /**
+     * Release [tts] when the activity stops — covers rotation and the
+     * init-never-completes window, where the dialog's own release paths can't
+     * run. release() is idempotent, so a later normal release is harmless.
+     */
+    private fun releaseOnStop(activity: FragmentActivity, tts: TtsManager) {
+        activity.lifecycle.addObserver(object : DefaultLifecycleObserver {
+            override fun onStop(owner: LifecycleOwner) {
+                tts.release()
+                activity.lifecycle.removeObserver(this)
+            }
+        })
     }
 
     /** Voice selection with preview playback. */
     fun showVoicePicker(activity: FragmentActivity, settings: SettingsRepository, onTuneRequested: () -> Unit) {
         val tts = TtsManager(activity, settings)
+        releaseOnStop(activity, tts)
+
+        // Init failure used to leave onReady un-fired: the dialog never appeared
+        // AND the manager leaked. Surface it and release.
+        tts.onInitFailed = {
+            if (!activity.isFinishing && !activity.isDestroyed) {
+                Toast.makeText(activity, "Text-to-speech engine unavailable", Toast.LENGTH_LONG).show()
+            }
+            tts.release()
+        }
 
         tts.onReady = ready@{
             if (activity.isFinishing || activity.isDestroyed) {
@@ -83,6 +107,14 @@ object SettingsDialogs {
         val currentRate = settings.ttsSpeechRate
         val currentPitch = settings.ttsPitch
         val tts = TtsManager(activity, settings)
+        releaseOnStop(activity, tts)
+
+        tts.onInitFailed = {
+            if (!activity.isFinishing && !activity.isDestroyed) {
+                Toast.makeText(activity, "Text-to-speech engine unavailable", Toast.LENGTH_LONG).show()
+            }
+            tts.release()
+        }
 
         val rateSeek = SeekBar(activity).apply {
             max = 150
@@ -140,26 +172,30 @@ object SettingsDialogs {
                 return@ready
             }
 
-            MaterialAlertDialogBuilder(activity, R.style.CompanionDialog)
+            val dialog = MaterialAlertDialogBuilder(activity, R.style.CompanionDialog)
                 .setTitle("Voice Tuning")
                 .setView(container)
                 .setPositiveButton("Save") { _, _ ->
-                    val rate = 0.5f + rateSeek.progress / 100f
-                    val pitch = 0.5f + pitchSeek.progress / 100f
-                    settings.ttsSpeechRate = rate
-                    settings.ttsPitch = pitch
+                    settings.ttsSpeechRate = 0.5f + rateSeek.progress / 100f
+                    settings.ttsPitch = 0.5f + pitchSeek.progress / 100f
                     tts.release()
                 }
-                .setNeutralButton("Preview") { _, _ ->
-                    val rate = 0.5f + rateSeek.progress / 100f
-                    val pitch = 0.5f + pitchSeek.progress / 100f
-                    tts.setSpeechRate(rate)
-                    tts.setPitch(pitch)
-                    tts.speak("This is how I'll sound with these settings~")
-                }
+                // Placeholder handler — overridden below so Preview does NOT
+                // dismiss. The default button behavior closed the dialog (and
+                // leaked the manager, since only Save/Cancel release it).
+                .setNeutralButton("Preview", null)
                 .setNegativeButton("Cancel") { _, _ -> tts.release() }
                 .setOnCancelListener { tts.release() }
-                .show()
+                .create()
+
+            dialog.setOnShowListener {
+                dialog.getButton(AlertDialog.BUTTON_NEUTRAL)?.setOnClickListener {
+                    tts.setSpeechRate(0.5f + rateSeek.progress / 100f)
+                    tts.setPitch(0.5f + pitchSeek.progress / 100f)
+                    tts.speak("This is how I'll sound with these settings~")
+                }
+            }
+            dialog.show()
         }
     }
 }

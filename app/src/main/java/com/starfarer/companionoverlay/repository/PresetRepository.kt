@@ -73,8 +73,14 @@ class PresetRepository(
             cachedPresets = list
             list
         } catch (e: Exception) {
-            DebugLog.log(TAG, "Failed to parse presets: ${e.message}")
-            listOf(createDefault())
+            // Persist + cache the recovery default. The old path returned a
+            // fresh default WITHOUT saving or caching, so every subsequent
+            // loadAll() minted a new UUID and rewrote the active id — churning
+            // prefs on every read.
+            DebugLog.log(TAG, "Failed to parse presets, resetting to default: ${e.message}")
+            val list = listOf(createDefault())
+            saveAll(list)
+            list
         }
     }
 

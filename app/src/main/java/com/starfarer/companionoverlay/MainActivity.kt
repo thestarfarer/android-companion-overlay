@@ -1,7 +1,6 @@
 package com.starfarer.companionoverlay
 
 import android.Manifest
-import android.app.ActivityOptions
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
@@ -30,12 +29,12 @@ import com.starfarer.companionoverlay.ui.PresetDialogHelper
 import com.starfarer.companionoverlay.ui.PresetPagerAdapter
 import com.starfarer.companionoverlay.ui.SpritePickerHelper
 import com.starfarer.companionoverlay.ui.SpritePreviewAnimator
+import com.starfarer.companionoverlay.ui.TextEditorBottomSheet
 import com.starfarer.companionoverlay.viewmodel.MainViewModel
 import kotlinx.coroutines.launch
 import org.koin.android.ext.android.inject
 import org.koin.androidx.viewmodel.ext.android.viewModel
-import java.text.SimpleDateFormat
-import java.util.*
+import java.util.Date
 
 /**
  * Main launcher activity.
@@ -93,11 +92,28 @@ class MainActivity : AppCompatActivity() {
     // ══════════════════════════════════════════════════════════════════════
 
     private var pendingSpriteType: String? = null
+    // Frame count is committed only once an image is actually picked — applying
+    // it before the picker left the preset re-sliced for a sprite the user then
+    // cancelled. Survives process death via instance state.
+    private var pendingFrameCount: Int = 0
     private var lastDisplayedPresetId: String? = null
 
     private val spritePickerLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri -> uri?.let { handleSpriteSelected(it) } }
+
+    // Mark the tutorial seen only after it returns — setting the flag before
+    // launching meant a first-launch crash permanently skipped it.
+    private val tutorialLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { settings.tutorialSeen = true }
+
+    companion object {
+        private const val RK_SYSTEM_PROMPT = "edit_system_prompt"
+        private const val RK_USER_MESSAGE = "edit_user_message"
+        private const val KEY_PENDING_SPRITE_TYPE = "pending_sprite_type"
+        private const val KEY_PENDING_FRAME_COUNT = "pending_frame_count"
+    }
 
     // ══════════════════════════════════════════════════════════════════════
     // Overlay Permission (replaces deprecated onActivityResult)
@@ -131,18 +147,46 @@ class MainActivity : AppCompatActivity() {
 
         DebugLog.log("Main", "=== App started ===")
 
+        savedInstanceState?.let {
+            pendingSpriteType = it.getString(KEY_PENDING_SPRITE_TYPE)
+            pendingFrameCount = it.getInt(KEY_PENDING_FRAME_COUNT, 0)
+        }
+
         presetDialogHelper = PresetDialogHelper(this)
         spritePickerHelper = SpritePickerHelper(this)
 
+        registerTextEditorListeners()
         setupPagerAdapter()
         setupModelDropdown()
         setupClickListeners()
         observeState()
 
-        // First launch: show the interactive tutorial once.
+        // First launch: show the interactive tutorial once. Flag is set when it
+        // returns (see tutorialLauncher), not before.
         if (!settings.tutorialSeen) {
-            settings.tutorialSeen = true
-            startActivity(Intent(this, TutorialActivity::class.java))
+            tutorialLauncher.launch(Intent(this, TutorialActivity::class.java))
+        }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putString(KEY_PENDING_SPRITE_TYPE, pendingSpriteType)
+        outState.putInt(KEY_PENDING_FRAME_COUNT, pendingFrameCount)
+    }
+
+    /**
+     * Registered once here (not per-dialog) with the Activity as the result
+     * lifecycle owner, and one key per field. A rotation no longer drops the
+     * save or delivers a buffered edit into the wrong field.
+     */
+    private fun registerTextEditorListeners() {
+        supportFragmentManager.setFragmentResultListener(RK_SYSTEM_PROMPT, this) { _, bundle ->
+            val text = bundle.getString(TextEditorBottomSheet.RESULT_TEXT) ?: return@setFragmentResultListener
+            viewModel.updateActivePreset { it.copy(systemPrompt = text) }
+        }
+        supportFragmentManager.setFragmentResultListener(RK_USER_MESSAGE, this) { _, bundle ->
+            val text = bundle.getString(TextEditorBottomSheet.RESULT_TEXT) ?: return@setFragmentResultListener
+            viewModel.updateActivePreset { it.copy(userMessage = text) }
         }
     }
 
@@ -215,19 +259,19 @@ class MainActivity : AppCompatActivity() {
             modelSelector.setText(PromptSettings.MODEL_NAMES[idx], false)
         }
 
+        // Resolve by the selected NAME, not the adapter position: an
+        // AutoCompleteTextView filters its list, so a filtered position no
+        // longer maps 1:1 onto MODEL_IDS and could select the wrong model.
         modelSelector.setOnItemClickListener { _, _, position, _ ->
-            settings.model = PromptSettings.MODEL_IDS[position]
+            val name = adapter.getItem(position) ?: return@setOnItemClickListener
+            val modelIdx = PromptSettings.MODEL_NAMES.indexOf(name)
+            if (modelIdx >= 0) settings.model = PromptSettings.MODEL_IDS[modelIdx]
         }
     }
 
     private fun setupClickListeners() {
         binding.settingsButton.setOnClickListener {
-            val intent = Intent(this, SettingsActivity::class.java)
-            val options = ActivityOptions.makeSceneTransitionAnimation(
-                this,
-                android.util.Pair(authDot, "auth_dot")
-            )
-            startActivity(intent, options.toBundle())
+            startActivity(Intent(this, SettingsActivity::class.java))
         }
 
         binding.presetHeader.setOnClickListener { showPresetList() }
@@ -237,10 +281,9 @@ class MainActivity : AppCompatActivity() {
             SettingsDialogs.showTextEditor(this,
                 title = "System Prompt",
                 currentText = preset.systemPrompt,
-                defaultText = PromptSettings.DEFAULT_SYSTEM_PROMPT
-            ) { text ->
-                viewModel.updateActivePreset { it.copy(systemPrompt = text) }
-            }
+                defaultText = PromptSettings.DEFAULT_SYSTEM_PROMPT,
+                requestKey = RK_SYSTEM_PROMPT
+            )
         }
 
         binding.userMessageCard.setOnClickListener {
@@ -248,10 +291,9 @@ class MainActivity : AppCompatActivity() {
             SettingsDialogs.showTextEditor(this,
                 title = "User Message",
                 currentText = preset.userMessage,
-                defaultText = PromptSettings.DEFAULT_USER_MESSAGE
-            ) { text ->
-                viewModel.updateActivePreset { it.copy(userMessage = text) }
-            }
+                defaultText = PromptSettings.DEFAULT_USER_MESSAGE,
+                requestKey = RK_USER_MESSAGE
+            )
         }
 
         authButton.setOnClickListener { handleAuthClick() }
@@ -362,8 +404,11 @@ class MainActivity : AppCompatActivity() {
             }
             is MainViewModel.AuthState.Connected -> {
                 authDot.backgroundTintList = ColorStateList.valueOf(getColor(R.color.status_connected))
-                val fmt = SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault())
-                authStatusText.text = "Connected until ${fmt.format(Date(authState.expiresAt))}"
+                // Locale- and 12/24h-aware via the user's system formats.
+                val date = Date(authState.expiresAt)
+                val df = android.text.format.DateFormat.getMediumDateFormat(this)
+                val tf = android.text.format.DateFormat.getTimeFormat(this)
+                authStatusText.text = "Connected until ${df.format(date)} ${tf.format(date)}"
                 authButton.visibility = View.GONE
             }
             is MainViewModel.AuthState.Expired -> {
@@ -416,6 +461,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun deleteActivePreset() {
         val preset = viewModel.state.value.activePreset ?: return
+        // The VM refuses to delete the only preset; without this guard the
+        // confirmation dialog appeared and then silently did nothing.
+        if (viewModel.state.value.presets.size <= 1) {
+            Toast.makeText(this, "Can't delete your only preset~", Toast.LENGTH_SHORT).show()
+            return
+        }
         presetDialogHelper.showDeleteConfirmation(preset.name) {
             viewModel.deleteActivePreset()
             spriteAnimator.clearCache()
@@ -435,11 +486,11 @@ class MainActivity : AppCompatActivity() {
         spritePickerHelper.show(type, currentCount, hasCustom) { result ->
             when (result) {
                 is SpritePickerHelper.Result.PickImage -> {
-                    viewModel.updateActivePreset { p ->
-                        if (type == "idle") p.copy(idleFrameCount = result.frameCount)
-                        else p.copy(walkFrameCount = result.frameCount)
-                    }
+                    // Defer the frame-count commit until an image is actually
+                    // picked — committing now then cancelling re-sliced the
+                    // existing sprite for a frame count the user backed out of.
                     pendingSpriteType = type
+                    pendingFrameCount = result.frameCount
                     spritePickerLauncher.launch(arrayOf("image/*"))
                 }
                 is SpritePickerHelper.Result.SaveCount -> {
@@ -452,6 +503,8 @@ class MainActivity : AppCompatActivity() {
                     Toast.makeText(this, "Saved~", Toast.LENGTH_SHORT).show()
                 }
                 is SpritePickerHelper.Result.Reset -> {
+                    val old = if (type == "idle") preset.idleSpriteUri else preset.walkSpriteUri
+                    releasePersistedUri(old)
                     viewModel.updateActivePreset { p ->
                         if (type == "idle") {
                             p.copy(idleSpriteUri = null, idleFrameCount = PromptSettings.DEFAULT_IDLE_FRAME_COUNT)
@@ -470,6 +523,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun handleSpriteSelected(uri: Uri) {
         val type = pendingSpriteType ?: return
+        val frameCount = pendingFrameCount
         pendingSpriteType = null
 
         runCatching {
@@ -478,14 +532,29 @@ class MainActivity : AppCompatActivity() {
             DebugLog.log("Main", "Failed to take permission: ${it.message}")
         }
 
-        viewModel.updateActivePreset { preset ->
-            if (type == "idle") preset.copy(idleSpriteUri = uri.toString())
-            else preset.copy(walkSpriteUri = uri.toString())
+        // Release the URI grant of the sprite we're replacing, so revoked
+        // permissions don't pile up across changes.
+        val preset = viewModel.state.value.activePreset
+        val replaced = if (type == "idle") preset?.idleSpriteUri else preset?.walkSpriteUri
+        if (replaced != uri.toString()) releasePersistedUri(replaced)
+
+        viewModel.updateActivePreset { p ->
+            if (type == "idle") p.copy(idleSpriteUri = uri.toString(), idleFrameCount = frameCount)
+            else p.copy(walkSpriteUri = uri.toString(), walkFrameCount = frameCount)
         }
 
         spriteAnimator.clearCache()
         coordinator.reloadSprites()
         Toast.makeText(this, "Sprite updated~", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun releasePersistedUri(uriString: String?) {
+        if (uriString.isNullOrBlank()) return
+        runCatching {
+            contentResolver.releasePersistableUriPermission(
+                Uri.parse(uriString), Intent.FLAG_GRANT_READ_URI_PERMISSION
+            )
+        }
     }
 
     // ══════════════════════════════════════════════════════════════════════

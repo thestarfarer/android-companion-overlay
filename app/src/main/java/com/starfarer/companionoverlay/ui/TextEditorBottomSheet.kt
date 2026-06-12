@@ -16,15 +16,19 @@ import com.starfarer.companionoverlay.R
 /**
  * Bottom sheet for editing text content (system prompts, user messages).
  *
- * Results are delivered via the Fragment Result API ([setFragmentResult]),
- * which survives configuration changes (rotation). Callers register a
- * listener via [setFragmentResultListener] with [REQUEST_KEY].
+ * Results are delivered via the Fragment Result API ([setFragmentResult]) to a
+ * caller-supplied [ARG_REQUEST_KEY]. Each editable field uses its OWN key, and
+ * callers register the listener once at Activity-create time — registering at
+ * show-time with the Activity as owner meant a rotation dropped the listener
+ * (the save was lost) and the buffered result could later land in the wrong
+ * field, since both fields shared one key.
  */
 class TextEditorBottomSheet : BottomSheetDialogFragment() {
 
     private var title: String = ""
     private var currentText: String = ""
     private var defaultText: String = ""
+    private var requestKey: String = LEGACY_REQUEST_KEY
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -32,6 +36,7 @@ class TextEditorBottomSheet : BottomSheetDialogFragment() {
             title = it.getString(ARG_TITLE, "")
             currentText = it.getString(ARG_CURRENT_TEXT, "")
             defaultText = it.getString(ARG_DEFAULT_TEXT, "")
+            requestKey = it.getString(ARG_REQUEST_KEY, LEGACY_REQUEST_KEY)
         }
     }
 
@@ -72,7 +77,7 @@ class TextEditorBottomSheet : BottomSheetDialogFragment() {
                 return@setOnClickListener
             }
             parentFragmentManager.setFragmentResult(
-                REQUEST_KEY,
+                requestKey,
                 bundleOf(RESULT_TEXT to newText)
             )
             Toast.makeText(requireContext(), "Saved~", Toast.LENGTH_SHORT).show()
@@ -100,20 +105,23 @@ class TextEditorBottomSheet : BottomSheetDialogFragment() {
         private const val ARG_TITLE = "title"
         private const val ARG_CURRENT_TEXT = "currentText"
         private const val ARG_DEFAULT_TEXT = "defaultText"
+        private const val ARG_REQUEST_KEY = "requestKey"
 
-        const val REQUEST_KEY = "text_editor_result"
+        private const val LEGACY_REQUEST_KEY = "text_editor_result"
         const val RESULT_TEXT = "result_text"
 
         fun newInstance(
             title: String,
             currentText: String,
-            defaultText: String
+            defaultText: String,
+            requestKey: String
         ): TextEditorBottomSheet {
             return TextEditorBottomSheet().apply {
                 arguments = Bundle().apply {
                     putString(ARG_TITLE, title)
                     putString(ARG_CURRENT_TEXT, currentText)
                     putString(ARG_DEFAULT_TEXT, defaultText)
+                    putString(ARG_REQUEST_KEY, requestKey)
                 }
             }
         }

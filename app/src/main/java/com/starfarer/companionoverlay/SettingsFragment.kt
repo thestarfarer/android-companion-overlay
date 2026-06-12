@@ -99,10 +99,17 @@ class SettingsFragment : PreferenceFragmentCompat() {
         ActivityResultContracts.RequestMultiplePermissions()
     ) { results ->
         val ctx = context ?: return@registerForActivityResult
-        if (results.all { it.value }) {
-            Toast.makeText(ctx, "Voice input ready~", Toast.LENGTH_SHORT).show()
-        } else {
-            Toast.makeText(ctx, "Voice needs microphone permission", Toast.LENGTH_LONG).show()
+        when {
+            results.all { it.value } -> {
+                Toast.makeText(ctx, "Voice input ready~", Toast.LENGTH_SHORT).show()
+            }
+            results[Manifest.permission.RECORD_AUDIO] == false -> {
+                Toast.makeText(ctx, "Voice needs microphone permission", Toast.LENGTH_LONG).show()
+            }
+            else -> {
+                // Mic granted but Bluetooth denied — voice works, just not over BT.
+                Toast.makeText(ctx, "Granted — Bluetooth mic won't be used without that permission", Toast.LENGTH_LONG).show()
+            }
         }
         refreshPermissions()
     }
@@ -177,9 +184,21 @@ class SettingsFragment : PreferenceFragmentCompat() {
         }
     }
 
+    /** Read the live-toggleable settings back into their widgets (see [prefsListener]). */
+    private fun syncLiveWidgets() {
+        findPreference<ListPreference>("capture_mode")?.value = settings.captureMode.key
+        findPreference<SwitchPreferenceCompat>("volume_toggle_enabled")?.isChecked = settings.volumeToggleEnabled
+        findPreference<SwitchPreferenceCompat>("gemini_stt_enabled")?.isChecked = settings.geminiSttEnabled
+        findPreference<SwitchPreferenceCompat>("gemini_tts_enabled")?.isChecked = settings.geminiTtsEnabled
+    }
+
     override fun onResume() {
         super.onResume()
         preferenceManager.sharedPreferences?.registerOnSharedPreferenceChangeListener(prefsListener)
+        // The listener only catches changes made WHILE resumed — re-sync the
+        // live-toggleable widgets here so writes made while paused (radial menu)
+        // are reflected on return.
+        syncLiveWidgets()
         refreshPermissions()
         refreshAccount()
         refreshDebugTest()
@@ -353,8 +372,11 @@ class SettingsFragment : PreferenceFragmentCompat() {
     private fun setupSilenceTimeout() {
         findPreference<SeekBarPreference>("silence_timeout_seek")?.apply {
             val savedMs = settings.silenceTimeoutMs
-            // Range 1–50 maps to 100ms–5000ms in steps of 100
-            value = ((savedMs - 100) / 100).toInt().coerceIn(1, 50)
+            // Range 1–50 maps to 100ms–5000ms; step N = N×100ms. The load
+            // mapping must invert the save mapping (ms = step×100) exactly —
+            // it used (ms-100)/100, one step low, so the seekbar position
+            // drifted down by 100ms relative to the saved value.
+            value = (savedMs / 100).toInt().coerceIn(1, 50)
             summary = formatSilenceMs(savedMs)
 
             setOnPreferenceChangeListener { pref, newValue ->
@@ -525,7 +547,8 @@ class SettingsFragment : PreferenceFragmentCompat() {
                 accountTapCount++
                 val remaining = 10 - accountTapCount
                 if (remaining in 1..3) {
-                    Toast.makeText(requireContext(), "$remaining taps to go...", Toast.LENGTH_SHORT).show()
+                    val unit = if (remaining == 1) "tap" else "taps"
+                    Toast.makeText(requireContext(), "$remaining $unit to go...", Toast.LENGTH_SHORT).show()
                 }
                 if (accountTapCount >= 10) {
                     settings.advancedUnlocked = true
@@ -723,10 +746,12 @@ class SettingsFragment : PreferenceFragmentCompat() {
         }
         findPreference<Preference>("debug_test")?.apply {
             isEnabled = canTest
-            if (!canTest) {
-                summary = if (settings.isApiKeyMode) "Set Claude API key first"
-                    else "Connect to Claude first"
-            }
+            // Reset the summary when the connection becomes valid — the stale
+            // "Set Claude API key first" / "Connect to Claude first" lingered
+            // after the user fixed it.
+            summary = if (canTest) "Send a test message to verify the connection"
+                else if (settings.isApiKeyMode) "Set Claude API key first"
+                else "Connect to Claude first"
         }
     }
 
