@@ -88,7 +88,7 @@
         android:layout_height="wrap_content"
         android:layout_gravity="top|end"
         android:layout_margin="8dp"
-        android:text="Skip"/>
+        android:text="@string/tutorial_skip"/>
 
     <!-- Navigation buttons at the bottom: Previous (left) and Next (right), joined. -->
     <com.google.android.material.button.MaterialButtonToggleGroup
@@ -107,7 +107,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="Previous"/>
+            android:text="@string/tutorial_previous"/>
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/nextButton"
@@ -115,7 +115,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="Next"/>
+            android:text="@string/tutorial_next"/>
 
     </com.google.android.material.button.MaterialButtonToggleGroup>
 

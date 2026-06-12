@@ -46,10 +46,10 @@ class CompanionApplication : Application() {
     private fun createNotificationChannel() {
         val channel = NotificationChannel(
             NOTIFICATION_CHANNEL_ID,
-            "Companion Overlay",
+            getString(R.string.svc_channel_name),
             NotificationManager.IMPORTANCE_LOW
         ).apply {
-            description = "Keeps Senni alive on your screen"
+            description = getString(R.string.svc_channel_description)
         }
         getSystemService(NotificationManager::class.java)
             .createNotificationChannel(channel)

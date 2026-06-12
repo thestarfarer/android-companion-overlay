@@ -2,39 +2,39 @@
 <PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
 
     <!-- ════════ GEMINI API ════════ -->
-    <PreferenceCategory app:iconSpaceReserved="false" app:title="Gemini API">
+    <PreferenceCategory app:iconSpaceReserved="false" app:title="@string/pref_cat_gemini_api">
 
         <Preference
             app:iconSpaceReserved="false"
             app:key="gemini_api_key"
-            app:title="API Key"
-            app:summary="Required for Gemini speech-to-text and text-to-speech"/>
+            app:title="@string/pref_gemini_api_key_title"
+            app:summary="@string/pref_gemini_api_key_summary"/>
 
         <SwitchPreferenceCompat
             app:iconSpaceReserved="false"
             app:key="gemini_stt_enabled"
-            app:title="Speech-to-text"
-            app:summary="Use Gemini to transcribe voice input instead of on-device recognition"
+            app:title="@string/pref_gemini_stt_title"
+            app:summary="@string/pref_gemini_stt_summary"
             app:defaultValue="false"/>
 
         <SwitchPreferenceCompat
             app:iconSpaceReserved="false"
             app:key="gemini_tts_enabled"
-            app:title="Text-to-speech"
-            app:summary="Use Gemini to generate voice instead of on-device synthesis"
+            app:title="@string/pref_gemini_tts_title"
+            app:summary="@string/pref_gemini_tts_summary"
             app:defaultValue="false"/>
 
     </PreferenceCategory>
 
 
     <!-- ════════ DISPLAY ════════ -->
-    <PreferenceCategory app:iconSpaceReserved="false" app:title="Display">
+    <PreferenceCategory app:iconSpaceReserved="false" app:title="@string/pref_cat_display">
 
         <ListPreference
             app:iconSpaceReserved="false"
             app:key="overlay_mode"
-            app:title="Overlay mode"
-            app:summary="Choose between 2D sprite or 3D avatar"
+            app:title="@string/pref_overlay_mode_title"
+            app:summary="@string/pref_overlay_mode_summary"
             app:entries="@array/overlay_mode_entries"
             app:entryValues="@array/overlay_mode_values"
             app:defaultValue="sprite"
@@ -43,7 +43,7 @@
         <ListPreference
             app:iconSpaceReserved="false"
             app:key="capture_mode"
-            app:title="Long-press capture"
+            app:title="@string/pref_capture_mode_title"
             app:summary="%s"
             app:entries="@array/capture_mode_entries"
             app:entryValues="@array/capture_mode_values"
@@ -53,13 +53,13 @@
     </PreferenceCategory>
 
     <!-- ════════ VOICE INPUT ════════ -->
-    <PreferenceCategory app:iconSpaceReserved="false" app:title="Voice Input">
+    <PreferenceCategory app:iconSpaceReserved="false" app:title="@string/pref_cat_voice_input">
 
         <SeekBarPreference
             app:iconSpaceReserved="false"
             app:key="silence_timeout_seek"
-            app:title="Silence timeout"
-            app:summary="How long to wait after you stop talking before sending"
+            app:title="@string/pref_silence_timeout_title"
+            app:summary="@string/pref_silence_timeout_summary"
             android:max="50"
             app:min="1"
             app:defaultValue="15"
@@ -68,73 +68,73 @@
         <SwitchPreferenceCompat
             app:iconSpaceReserved="false"
             app:key="voice_screenshot_enabled"
-            app:title="Screenshot with voice"
-            app:summary="Automatically capture the screen when voice input starts"
+            app:title="@string/pref_voice_screenshot_title"
+            app:summary="@string/pref_voice_screenshot_summary"
             app:defaultValue="false"/>
 
         <SwitchPreferenceCompat
             app:iconSpaceReserved="false"
             app:key="volume_toggle_enabled"
-            app:title="Volume button shortcut"
-            app:summary="Double press volume down to show/hide avatar, triple — activate voice input"
+            app:title="@string/pref_volume_toggle_title"
+            app:summary="@string/pref_volume_toggle_summary"
             app:defaultValue="true"/>
 
     </PreferenceCategory>
 
     <!-- ════════ VOICE OUTPUT ════════ -->
-    <PreferenceCategory app:iconSpaceReserved="false" app:title="Voice Output">
+    <PreferenceCategory app:iconSpaceReserved="false" app:title="@string/pref_cat_voice_output">
 
         <SwitchPreferenceCompat
             app:iconSpaceReserved="false"
             app:key="tts_enabled"
-            app:title="Read aloud"
-            app:summary="Speak responses using text-to-speech"
+            app:title="@string/pref_tts_enabled_title"
+            app:summary="@string/pref_tts_enabled_summary"
             app:defaultValue="true"/>
 
         <SwitchPreferenceCompat
             app:iconSpaceReserved="false"
             app:key="beeps_enabled"
-            app:title="Feedback beeps"
-            app:summary="Short tones when listening starts, processing, and finishing"
+            app:title="@string/pref_beeps_title"
+            app:summary="@string/pref_beeps_summary"
             app:defaultValue="true"/>
 
         <Preference
             app:iconSpaceReserved="false"
             app:key="tts_voice_picker"
-            app:title="On-device voice"
-            app:summary="Choose the voice and adjust speed and pitch for on-device TTS"/>
+            app:title="@string/pref_tts_voice_picker_title"
+            app:summary="@string/pref_tts_voice_picker_summary"/>
 
     </PreferenceCategory>
 
     <!-- ════════ CONVERSATION ════════ -->
-    <PreferenceCategory app:iconSpaceReserved="false" app:title="Conversation">
+    <PreferenceCategory app:iconSpaceReserved="false" app:title="@string/pref_cat_conversation">
 
         <SwitchPreferenceCompat
             app:iconSpaceReserved="false"
             app:key="web_search_enabled"
-            app:title="Web search"
-            app:summary="Allow Claude to search the web for current information"
+            app:title="@string/pref_web_search_title"
+            app:summary="@string/pref_web_search_summary"
             app:defaultValue="false"/>
 
         <SwitchPreferenceCompat
             app:iconSpaceReserved="false"
             app:key="keep_dialogue"
-            app:title="Keep dialogue"
-            app:summary="Remember conversation history across overlay restarts"
+            app:title="@string/pref_keep_dialogue_title"
+            app:summary="@string/pref_keep_dialogue_summary"
             app:defaultValue="false"/>
 
         <SwitchPreferenceCompat
             app:iconSpaceReserved="false"
             app:key="auto_copy"
-            app:title="Auto-copy replies"
-            app:summary="Copy every response to the clipboard automatically"
+            app:title="@string/pref_auto_copy_title"
+            app:summary="@string/pref_auto_copy_summary"
             app:defaultValue="false"/>
 
         <ListPreference
             app:iconSpaceReserved="false"
             app:key="max_messages"
-            app:title="History length"
-            app:summary="How many messages to keep in the conversation context"
+            app:title="@string/pref_max_messages_title"
+            app:summary="@string/pref_max_messages_summary"
             app:entries="@array/history_labels"
             app:entryValues="@array/history_values"
             app:defaultValue="20"
@@ -143,8 +143,8 @@
         <ListPreference
             app:iconSpaceReserved="false"
             app:key="bubble_timeout"
-            app:title="Bubble timeout"
-            app:summary="How long the speech bubble stays visible"
+            app:title="@string/pref_bubble_timeout_title"
+            app:summary="@string/pref_bubble_timeout_summary"
             app:entries="@array/timeout_labels"
             app:entryValues="@array/timeout_values"
             app:defaultValue="30"
@@ -153,170 +153,170 @@
         <Preference
             app:iconSpaceReserved="false"
             app:key="clear_history"
-            app:title="Clear conversation history"
-            app:summary="Forget everything said so far (asks first)"/>
+            app:title="@string/pref_clear_history_title"
+            app:summary="@string/pref_clear_history_summary"/>
 
     </PreferenceCategory>
 
     <!-- ════════ MCP SERVERS ════════ -->
-    <PreferenceCategory app:iconSpaceReserved="false" app:title="MCP Servers">
+    <PreferenceCategory app:iconSpaceReserved="false" app:title="@string/pref_cat_mcp_servers">
 
         <SwitchPreferenceCompat
             app:iconSpaceReserved="false"
             app:key="mcp_enabled"
-            app:title="Enable MCP tools"
-            app:summary="Connect to external tool servers using Model Context Protocol"
+            app:title="@string/pref_mcp_enabled_title"
+            app:summary="@string/pref_mcp_enabled_summary"
             app:defaultValue="false"/>
 
         <SwitchPreferenceCompat
             app:iconSpaceReserved="false"
             app:key="mcp_show_tool_bubbles"
-            app:title="Show tool use bubbles"
-            app:summary="Display a notification when MCP tools are being used"
+            app:title="@string/pref_mcp_show_tool_bubbles_title"
+            app:summary="@string/pref_mcp_show_tool_bubbles_summary"
             app:defaultValue="true"
             app:dependency="mcp_enabled"/>
 
         <SwitchPreferenceCompat
             app:iconSpaceReserved="false"
             app:key="nexus_integration_enabled"
-            app:title="Nexus integration"
-            app:summary="Use nexus_emit_event and nexus_poll_results if available on servers"
+            app:title="@string/pref_nexus_integration_title"
+            app:summary="@string/pref_nexus_integration_summary"
             app:defaultValue="false"
             app:dependency="mcp_enabled"/>
 
         <Preference
             app:iconSpaceReserved="false"
             app:key="nexus_context_prompt"
-            app:title="Context prompt"
-            app:summary="Tap to edit the prompt sent to Sable"
+            app:title="@string/pref_nexus_context_prompt_title"
+            app:summary="@string/pref_nexus_context_prompt_summary"
             app:dependency="nexus_integration_enabled"/>
 
         <com.starfarer.companionoverlay.ui.LongClickPreference
             app:iconSpaceReserved="false"
             app:key="nexus_fetch_context"
-            app:title="Fetch Nexus context"
-            app:summary="Never fetched"
+            app:title="@string/pref_nexus_fetch_context_title"
+            app:summary="@string/pref_nexus_fetch_context_summary"
             app:dependency="nexus_integration_enabled"/>
 
         <SwitchPreferenceCompat
             app:iconSpaceReserved="false"
             app:key="nexus_context_append_to_prompt"
-            app:title="Include context in system prompt"
-            app:summary="Append cached Nexus context to the system prompt for every message"
+            app:title="@string/pref_nexus_context_append_title"
+            app:summary="@string/pref_nexus_context_append_summary"
             app:defaultValue="true"
             app:dependency="nexus_integration_enabled"/>
 
         <Preference
             app:iconSpaceReserved="false"
             app:key="mcp_manage_servers"
-            app:title="Manage servers"
-            app:summary="No servers configured"
+            app:title="@string/pref_mcp_manage_servers_title"
+            app:summary="@string/pref_mcp_manage_servers_summary"
             app:dependency="mcp_enabled"/>
 
     </PreferenceCategory>
 
     <!-- ════════ PERMISSIONS ════════ -->
-    <PreferenceCategory app:iconSpaceReserved="false" app:title="Permissions">
+    <PreferenceCategory app:iconSpaceReserved="false" app:title="@string/pref_cat_permissions">
 
         <Preference
             app:iconSpaceReserved="false"
             app:key="perm_accessibility"
-            app:title="Accessibility service"
-            app:summary="Required for screenshots and volume button shortcut"/>
+            app:title="@string/pref_perm_accessibility_title"
+            app:summary="@string/pref_perm_accessibility_summary"/>
 
         <Preference
             app:iconSpaceReserved="false"
             app:key="perm_voice"
-            app:title="Voice input"
-            app:summary="Microphone and Bluetooth permissions for voice recording"/>
+            app:title="@string/pref_perm_voice_title"
+            app:summary="@string/pref_perm_voice_summary"/>
 
         <Preference
             app:iconSpaceReserved="false"
             app:key="perm_camera"
-            app:title="Camera"
-            app:summary="Required for camera capture instead of screenshots"/>
+            app:title="@string/pref_perm_camera_title"
+            app:summary="@string/pref_perm_camera_summary"/>
 
         <Preference
             app:iconSpaceReserved="false"
             app:key="perm_notifications"
-            app:title="Notifications"
-            app:summary="Shows the overlay status and its Stop button"/>
+            app:title="@string/pref_perm_notifications_title"
+            app:summary="@string/pref_perm_notifications_summary"/>
 
     </PreferenceCategory>
 
     <!-- ════════ CLAUDE API ════════ -->
-    <PreferenceCategory app:iconSpaceReserved="false" app:key="account_category" app:title="Claude API">
+    <PreferenceCategory app:iconSpaceReserved="false" app:key="account_category" app:title="@string/pref_cat_claude_api">
 
         <Preference
             app:iconSpaceReserved="false"
             app:key="claude_api_key"
-            app:title="Claude API Key"
-            app:summary="Enter your sk-ant-... key"/>
+            app:title="@string/pref_claude_api_key_title"
+            app:summary="@string/pref_claude_api_key_summary"/>
 
         <Preference
             app:iconSpaceReserved="false"
             app:key="claude_connection_type"
-            app:title="Connection type"
-            app:summary="API Key"/>
+            app:title="@string/pref_claude_connection_type_title"
+            app:summary="@string/pref_claude_connection_type_summary"/>
 
         <Preference
             app:iconSpaceReserved="false"
             app:key="account_auth"
-            app:title="Claude connection"
-            app:summary="Not connected"/>
+            app:title="@string/pref_account_auth_title"
+            app:summary="@string/pref_account_auth_summary"/>
 
     </PreferenceCategory>
 
     <!-- ════════ ABOUT ════════ -->
-    <PreferenceCategory app:iconSpaceReserved="false" app:title="About">
+    <PreferenceCategory app:iconSpaceReserved="false" app:title="@string/pref_cat_about">
 
         <Preference
             app:iconSpaceReserved="false"
             app:key="tutorial"
-            app:title="Tutorial"
-            app:summary="Replay the interactive walkthrough"/>
+            app:title="@string/pref_tutorial_title"
+            app:summary="@string/pref_tutorial_summary"/>
 
         <Preference
             app:iconSpaceReserved="false"
             app:key="open_source_licenses"
-            app:title="Open source licenses"
-            app:summary="Third-party software used in this app"/>
+            app:title="@string/pref_open_source_licenses_title"
+            app:summary="@string/pref_open_source_licenses_summary"/>
 
     </PreferenceCategory>
 
     <!-- ════════ DEBUG ════════ -->
-    <PreferenceCategory app:iconSpaceReserved="false" app:title="Debug">
+    <PreferenceCategory app:iconSpaceReserved="false" app:title="@string/pref_cat_debug">
 
         <Preference
             app:iconSpaceReserved="false"
             app:key="debug_test"
-            app:title="Send test message"
-            app:summary="Send a test prompt to verify the connection"/>
+            app:title="@string/pref_debug_test_title"
+            app:summary="@string/pref_debug_test_summary"/>
 
         <SwitchPreferenceCompat
             app:iconSpaceReserved="false"
             app:key="save_sent_images"
-            app:title="Save sent images"
-            app:summary="Keep a copy of every screenshot/photo sent to Claude for inspection"
+            app:title="@string/pref_save_sent_images_title"
+            app:summary="@string/pref_save_sent_images_summary"
             app:defaultValue="false"/>
 
         <Preference
             app:iconSpaceReserved="false"
             app:key="debug_view_image"
-            app:title="View last sent image"
-            app:summary="Open the most recent image sent to Claude"/>
+            app:title="@string/pref_debug_view_image_title"
+            app:summary="@string/pref_debug_view_image_summary"/>
 
         <Preference
             app:iconSpaceReserved="false"
             app:key="debug_copy_log"
-            app:title="Copy log"
-            app:summary="Copy the debug log to clipboard"/>
+            app:title="@string/pref_debug_copy_log_title"
+            app:summary="@string/pref_debug_copy_log_summary"/>
 
         <Preference
             app:iconSpaceReserved="false"
             app:key="debug_clear_log"
-            app:title="Clear log"
-            app:summary="Erase all debug log entries"/>
+            app:title="@string/pref_debug_clear_log_title"
+            app:summary="@string/pref_debug_clear_log_summary"/>
 
     </PreferenceCategory>
 

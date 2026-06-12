@@ -34,7 +34,7 @@ class AssistActivity : Activity() {
         // Send the user to grant it instead.
         if (!OverlayController.canStart(this)) {
             DebugLog.log("Assist", "No overlay permission — opening settings")
-            Toast.makeText(this, "Grant 'Display over other apps' to use the companion~", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, getString(R.string.assist_toast_overlay_permission_needed), Toast.LENGTH_LONG).show()
             startActivity(
                 Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)

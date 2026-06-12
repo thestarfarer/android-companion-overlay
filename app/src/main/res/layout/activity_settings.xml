@@ -22,7 +22,7 @@
             android:src="@drawable/ic_back_arrow"
             android:padding="12dp"
             android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="Back"
+            android:contentDescription="@string/settings_back_button"
             app:tint="@color/gold"/>
 
         <TextView
@@ -30,7 +30,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="Settings"
+            android:text="@string/settings_title"
             android:textSize="18sp"
             android:textColor="@color/text_primary"
             android:textStyle="bold"

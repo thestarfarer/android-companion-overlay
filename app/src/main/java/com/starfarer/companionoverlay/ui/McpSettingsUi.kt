@@ -106,9 +106,9 @@ class McpSettingsUi(
         inputLayout.addView(editText)
 
         MaterialAlertDialogBuilder(ctx)
-            .setTitle("Context Prompt")
+            .setTitle(ctx.getString(R.string.mcp_context_prompt_title))
             .setView(inputLayout)
-            .setPositiveButton("Save") { _, _ ->
+            .setPositiveButton(ctx.getString(R.string.common_save)) { _, _ ->
                 val text = editText.text?.toString()?.trim()
                 if (!text.isNullOrEmpty()) {
                     settings.nexusContextPrompt = text
@@ -117,11 +117,11 @@ class McpSettingsUi(
                     }
                 }
             }
-            .setNeutralButton("Reset") { _, _ ->
-                settings.nexusContextPrompt = "What happened recently? What are we up to? What should I know?"
+            .setNeutralButton(ctx.getString(R.string.common_reset)) { _, _ ->
+                settings.nexusContextPrompt = ctx.getString(R.string.mcp_nexus_default_prompt)
                 pref.summary = settings.nexusContextPrompt.take(80)
             }
-            .setNegativeButton("Cancel", null)
+            .setNegativeButton(ctx.getString(R.string.common_cancel), null)
             .show()
 
         editText.requestFocus()
@@ -131,7 +131,7 @@ class McpSettingsUi(
         val ctx = fragment.context ?: return
         val cache = settings.nexusContextCache
         if (cache == null) {
-            Toast.makeText(ctx, "No cached context", Toast.LENGTH_SHORT).show()
+            Toast.makeText(ctx, ctx.getString(R.string.mcp_no_cached_context), Toast.LENGTH_SHORT).show()
             return
         }
 
@@ -146,14 +146,14 @@ class McpSettingsUi(
         scrollView.addView(textView)
 
         MaterialAlertDialogBuilder(ctx)
-            .setTitle("Nexus Context")
+            .setTitle(ctx.getString(R.string.mcp_nexus_context_title))
             .setView(scrollView)
-            .setPositiveButton("OK", null)
-            .setNeutralButton("Clear") { _, _ ->
+            .setPositiveButton(ctx.getString(R.string.common_ok), null)
+            .setNeutralButton(ctx.getString(R.string.mcp_clear)) { _, _ ->
                 settings.nexusContextCache = null
                 settings.nexusContextTimestamp = 0
                 refreshNexusContextSummary()
-                Toast.makeText(ctx, "Context cleared", Toast.LENGTH_SHORT).show()
+                Toast.makeText(ctx, ctx.getString(R.string.mcp_context_cleared), Toast.LENGTH_SHORT).show()
             }
             .show()
     }
@@ -165,12 +165,12 @@ class McpSettingsUi(
         val ts = settings.nexusContextTimestamp
         val cache = settings.nexusContextCache
         pref.summary = when {
-            ts == 0L || cache == null -> "Never fetched"
+            ts == 0L || cache == null -> pref.context.getString(R.string.mcp_never_fetched)
             else -> {
                 val date = SimpleDateFormat("EEE, MMM d HH:mm", Locale.getDefault())
                     .format(Date(ts))
                 val chars = cache.length
-                "Last fetched: $date (${chars} chars)"
+                pref.context.getString(R.string.mcp_last_fetched, date, chars)
             }
         }
     }
@@ -178,7 +178,7 @@ class McpSettingsUi(
     private fun fetchNexusContext(pref: Preference) {
         val fetcher = NexusContextFetcher(mcpManager, settings)
 
-        pref.summary = "Fetching..."
+        pref.summary = pref.context.getString(R.string.mcp_fetching)
         pref.isEnabled = false
 
         fragment.lifecycleScope.launch {
@@ -187,11 +187,11 @@ class McpSettingsUi(
             result.fold(
                 onSuccess = { context ->
                     refreshNexusContextSummary(pref)
-                    Toast.makeText(fragment.requireContext(), "Context fetched (${context.length} chars)", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(fragment.requireContext(), fragment.getString(R.string.mcp_context_fetched, context.length), Toast.LENGTH_SHORT).show()
                 },
                 onFailure = { error ->
-                    pref.summary = "Error: ${error.message?.take(60)}"
-                    Toast.makeText(fragment.requireContext(), "Fetch failed: ${error.message}", Toast.LENGTH_LONG).show()
+                    pref.summary = pref.context.getString(R.string.mcp_error_with_message, error.message?.take(60))
+                    Toast.makeText(fragment.requireContext(), fragment.getString(R.string.mcp_fetch_failed, error.message), Toast.LENGTH_LONG).show()
                 }
             )
         }
@@ -202,8 +202,8 @@ class McpSettingsUi(
     ) {
         pref ?: return
         val servers = mcpRepo.loadServers()
-        pref.summary = if (servers.isEmpty()) "No servers configured"
-        else "${servers.size} server(s) configured"
+        pref.summary = if (servers.isEmpty()) pref.context.getString(R.string.mcp_no_servers_configured)
+        else pref.context.getString(R.string.mcp_servers_configured, servers.size)
     }
 
     private fun showMcpServersDialog() {
@@ -242,7 +242,7 @@ class McpSettingsUi(
 
             val checkButton = android.widget.Button(ctx, null,
                 com.google.android.material.R.attr.borderlessButtonStyle).apply {
-                text = "Check"
+                text = ctx.getString(R.string.mcp_check)
                 textSize = 13f
                 minWidth = 0
                 minimumWidth = 0
@@ -258,19 +258,19 @@ class McpSettingsUi(
         scrollView.addView(listContainer)
 
         MaterialAlertDialogBuilder(ctx, R.style.CompanionDialog)
-            .setTitle("MCP Servers")
+            .setTitle(ctx.getString(R.string.mcp_servers_title))
             .setView(scrollView)
-            .setPositiveButton("Add server") { _, _ ->
+            .setPositiveButton(ctx.getString(R.string.mcp_add_server)) { _, _ ->
                 showMcpServerFormDialog(null)
             }
-            .setNegativeButton("Close", null)
+            .setNegativeButton(ctx.getString(R.string.common_close), null)
             .show()
     }
 
     private fun checkMcpServer(config: McpServerConfig) {
         val ctx = fragment.context ?: return
 
-        Toast.makeText(ctx, "Connecting to ${config.name}...", Toast.LENGTH_SHORT).show()
+        Toast.makeText(ctx, ctx.getString(R.string.mcp_connecting_to, config.name), Toast.LENGTH_SHORT).show()
 
         fragment.lifecycleScope.launch {
             val client = McpClient(
@@ -284,21 +284,24 @@ class McpSettingsUi(
 
             if (result.isSuccess) {
                 val tools = result.getOrDefault(emptyList())
-                val toolList = if (tools.isEmpty()) "No tools found."
-                else tools.joinToString("\n") { "• ${it.name}" +
-                    (it.description?.let { d -> " — $d" } ?: "") }
+                val toolList = if (tools.isEmpty()) ctx.getString(R.string.mcp_no_tools_found)
+                else tools.joinToString("\n") {
+                    val desc = it.description
+                    if (desc != null) ctx.getString(R.string.mcp_tool_list_item_with_desc, it.name, desc)
+                    else ctx.getString(R.string.mcp_tool_list_item, it.name)
+                }
 
                 MaterialAlertDialogBuilder(ctx, R.style.CompanionDialog)
-                    .setTitle("${config.name} — ${tools.size} tools")
+                    .setTitle(ctx.getString(R.string.mcp_server_tools_title, config.name, tools.size))
                     .setMessage(toolList)
-                    .setPositiveButton("OK", null)
+                    .setPositiveButton(ctx.getString(R.string.common_ok), null)
                     .show()
             } else {
-                val error = result.exceptionOrNull()?.message ?: "Unknown error"
+                val error = result.exceptionOrNull()?.message ?: ctx.getString(R.string.mcp_unknown_error)
                 MaterialAlertDialogBuilder(ctx, R.style.CompanionDialog)
-                    .setTitle("${config.name} — Failed")
+                    .setTitle(ctx.getString(R.string.mcp_server_failed_title, config.name))
                     .setMessage(error)
-                    .setPositiveButton("OK", null)
+                    .setPositiveButton(ctx.getString(R.string.common_ok), null)
                     .show()
             }
         }
@@ -318,7 +321,7 @@ class McpSettingsUi(
         // Name field
         val nameLayout = TextInputLayout(ctx, null,
             com.google.android.material.R.attr.textInputOutlinedStyle).apply {
-            hint = "Server name"
+            hint = ctx.getString(R.string.mcp_hint_server_name)
             setBoxCornerRadii(r, r, r, r)
         }
         val nameEdit = TextInputEditText(nameLayout.context).apply {
@@ -331,7 +334,7 @@ class McpSettingsUi(
         // URL field
         val urlLayout = TextInputLayout(ctx, null,
             com.google.android.material.R.attr.textInputOutlinedStyle).apply {
-            hint = "Server URL (https://...)"
+            hint = ctx.getString(R.string.mcp_hint_server_url)
             setBoxCornerRadii(r, r, r, r)
         }
         val urlEdit = TextInputEditText(urlLayout.context).apply {
@@ -349,11 +352,11 @@ class McpSettingsUi(
             setPadding(0, (8 * d).toInt(), 0, (8 * d).toInt())
         }
         val radioNone = RadioButton(ctx).apply {
-            text = "No auth"
+            text = ctx.getString(R.string.mcp_auth_none)
             id = android.view.View.generateViewId()
         }
         val radioCredentials = RadioButton(ctx).apply {
-            text = "Client Credentials"
+            text = ctx.getString(R.string.mcp_auth_client_credentials)
             id = android.view.View.generateViewId()
         }
         radioGroup.addView(radioNone)
@@ -363,7 +366,7 @@ class McpSettingsUi(
         // Client ID field
         val clientIdLayout = TextInputLayout(ctx, null,
             com.google.android.material.R.attr.textInputOutlinedStyle).apply {
-            hint = "Client ID"
+            hint = ctx.getString(R.string.mcp_hint_client_id)
             setBoxCornerRadii(r, r, r, r)
             visibility = if (existing?.authType == McpAuthType.CLIENT_CREDENTIALS)
                 android.view.View.VISIBLE else android.view.View.GONE
@@ -380,7 +383,7 @@ class McpSettingsUi(
         val hasStoredSecret = existing != null && mcpRepo.hasClientSecret(existing.id)
         val secretLayout = TextInputLayout(ctx, null,
             com.google.android.material.R.attr.textInputOutlinedStyle).apply {
-            hint = if (hasStoredSecret) "Client Secret (saved — leave blank to keep)" else "Client Secret"
+            hint = if (hasStoredSecret) ctx.getString(R.string.mcp_hint_client_secret_saved) else ctx.getString(R.string.mcp_hint_client_secret)
             endIconMode = TextInputLayout.END_ICON_PASSWORD_TOGGLE
             setBoxCornerRadii(r, r, r, r)
             visibility = clientIdLayout.visibility
@@ -408,9 +411,9 @@ class McpSettingsUi(
         }
 
         val builder = MaterialAlertDialogBuilder(ctx, R.style.CompanionDialog)
-            .setTitle(if (existing != null) "Edit Server" else "Add MCP Server")
+            .setTitle(if (existing != null) ctx.getString(R.string.mcp_edit_server_title) else ctx.getString(R.string.mcp_add_server_title))
             .setView(container)
-            .setPositiveButton("Save") { _, _ ->
+            .setPositiveButton(ctx.getString(R.string.common_save)) { _, _ ->
                 val name = nameEdit.text?.toString()?.trim() ?: return@setPositiveButton
                 val url = urlEdit.text?.toString()?.trim() ?: return@setPositiveButton
                 if (name.isBlank() || url.isBlank()) return@setPositiveButton
@@ -438,14 +441,14 @@ class McpSettingsUi(
                 refreshMcpServersSummary()
                 coordinator.reloadMcp()
             }
-            .setNegativeButton("Cancel", null)
+            .setNegativeButton(ctx.getString(R.string.common_cancel), null)
 
         if (existing != null) {
-            builder.setNeutralButton("Delete") { _, _ ->
+            builder.setNeutralButton(ctx.getString(R.string.common_delete)) { _, _ ->
                 mcpRepo.removeServer(existing.id)
                 refreshMcpServersSummary()
                 coordinator.reloadMcp()
-                Toast.makeText(ctx, "Server removed", Toast.LENGTH_SHORT).show()
+                Toast.makeText(ctx, ctx.getString(R.string.mcp_server_removed), Toast.LENGTH_SHORT).show()
             }
         }
 

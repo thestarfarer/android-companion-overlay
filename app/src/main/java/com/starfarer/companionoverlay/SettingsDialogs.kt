@@ -56,7 +56,7 @@ object SettingsDialogs {
         // AND the manager leaked. Surface it and release.
         tts.onInitFailed = {
             if (!activity.isFinishing && !activity.isDestroyed) {
-                Toast.makeText(activity, "Text-to-speech engine unavailable", Toast.LENGTH_LONG).show()
+                Toast.makeText(activity, activity.getString(R.string.dialog_tts_unavailable), Toast.LENGTH_LONG).show()
             }
             tts.release()
         }
@@ -69,7 +69,7 @@ object SettingsDialogs {
 
             val voices = tts.getAvailableVoices()
             if (voices.isEmpty()) {
-                Toast.makeText(activity, "No voices available on this device", Toast.LENGTH_LONG).show()
+                Toast.makeText(activity, activity.getString(R.string.dialog_no_voices), Toast.LENGTH_LONG).show()
                 tts.release()
             } else {
                 val currentVoice = settings.ttsVoice
@@ -79,22 +79,22 @@ object SettingsDialogs {
                 var selectedIndex = checkedIndex
 
                 MaterialAlertDialogBuilder(activity, R.style.CompanionDialog)
-                    .setTitle("Voice")
+                    .setTitle(activity.getString(R.string.dialog_voice_title))
                     .setSingleChoiceItems(labels, checkedIndex) { _, which ->
                         selectedIndex = which
                         tts.setVoice(names[which])
-                        tts.speak("Hello~ I'm Senni, your companion.")
+                        tts.speak(activity.getString(R.string.dialog_voice_preview))
                     }
-                    .setPositiveButton("Select") { _, _ ->
+                    .setPositiveButton(activity.getString(R.string.dialog_select)) { _, _ ->
                         settings.ttsVoice = names[selectedIndex]
                         tts.release()
                     }
-                    .setNeutralButton("Tune") { _, _ ->
+                    .setNeutralButton(activity.getString(R.string.dialog_tune)) { _, _ ->
                         settings.ttsVoice = names[selectedIndex]
                         tts.release()
                         onTuneRequested()
                     }
-                    .setNegativeButton("Cancel") { _, _ -> tts.release() }
+                    .setNegativeButton(activity.getString(R.string.common_cancel)) { _, _ -> tts.release() }
                     .setOnCancelListener { tts.release() }
                     .show()
             }
@@ -111,7 +111,7 @@ object SettingsDialogs {
 
         tts.onInitFailed = {
             if (!activity.isFinishing && !activity.isDestroyed) {
-                Toast.makeText(activity, "Text-to-speech engine unavailable", Toast.LENGTH_LONG).show()
+                Toast.makeText(activity, activity.getString(R.string.dialog_tts_unavailable), Toast.LENGTH_LONG).show()
             }
             tts.release()
         }
@@ -126,26 +126,26 @@ object SettingsDialogs {
         }
 
         val rateLabel = TextView(activity).apply {
-            text = "Speed: %.1fx".format(currentRate)
+            text = activity.getString(R.string.dialog_speed_label, currentRate)
             textSize = 13f
             setTextColor(activity.getColor(R.color.text_primary))
         }
         val pitchLabel = TextView(activity).apply {
-            text = "Pitch: %.1fx".format(currentPitch)
+            text = activity.getString(R.string.dialog_pitch_label, currentPitch)
             textSize = 13f
             setTextColor(activity.getColor(R.color.text_primary))
         }
 
         rateSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
-                rateLabel.text = "Speed: %.1fx".format(0.5f + progress / 100f)
+                rateLabel.text = activity.getString(R.string.dialog_speed_label, 0.5f + progress / 100f)
             }
             override fun onStartTrackingTouch(sb: SeekBar?) {}
             override fun onStopTrackingTouch(sb: SeekBar?) {}
         })
         pitchSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
-                pitchLabel.text = "Pitch: %.1fx".format(0.5f + progress / 100f)
+                pitchLabel.text = activity.getString(R.string.dialog_pitch_label, 0.5f + progress / 100f)
             }
             override fun onStartTrackingTouch(sb: SeekBar?) {}
             override fun onStopTrackingTouch(sb: SeekBar?) {}
@@ -173,9 +173,9 @@ object SettingsDialogs {
             }
 
             val dialog = MaterialAlertDialogBuilder(activity, R.style.CompanionDialog)
-                .setTitle("Voice Tuning")
+                .setTitle(activity.getString(R.string.dialog_voice_tuning_title))
                 .setView(container)
-                .setPositiveButton("Save") { _, _ ->
+                .setPositiveButton(activity.getString(R.string.common_save)) { _, _ ->
                     settings.ttsSpeechRate = 0.5f + rateSeek.progress / 100f
                     settings.ttsPitch = 0.5f + pitchSeek.progress / 100f
                     tts.release()
@@ -183,8 +183,8 @@ object SettingsDialogs {
                 // Placeholder handler — overridden below so Preview does NOT
                 // dismiss. The default button behavior closed the dialog (and
                 // leaked the manager, since only Save/Cancel release it).
-                .setNeutralButton("Preview", null)
-                .setNegativeButton("Cancel") { _, _ -> tts.release() }
+                .setNeutralButton(activity.getString(R.string.dialog_preview), null)
+                .setNegativeButton(activity.getString(R.string.common_cancel)) { _, _ -> tts.release() }
                 .setOnCancelListener { tts.release() }
                 .create()
 
@@ -192,7 +192,7 @@ object SettingsDialogs {
                 dialog.getButton(AlertDialog.BUTTON_NEUTRAL)?.setOnClickListener {
                     tts.setSpeechRate(0.5f + rateSeek.progress / 100f)
                     tts.setPitch(0.5f + pitchSeek.progress / 100f)
-                    tts.speak("This is how I'll sound with these settings~")
+                    tts.speak(activity.getString(R.string.dialog_tuning_preview))
                 }
             }
             dialog.show()

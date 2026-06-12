@@ -165,7 +165,7 @@ class TutorialActivity : AppCompatActivity() {
             override fun onTtsStop() {}
             override fun onSendReply(text: String) {
                 // Folds the reply feature into the capture step: a canned follow-up.
-                bubbleManager.showResponse(CANNED_FOLLOWUP, RESPONSE_TIMEOUT)
+                bubbleManager.showResponse(getString(R.string.tutorial_canned_followup), RESPONSE_TIMEOUT)
                 beepManager.play(BeepManager.Beep.DONE)
             }
             override fun onVoiceToggle() {}
@@ -231,51 +231,52 @@ class TutorialActivity : AppCompatActivity() {
 
     /** Top ⅔ long-press: capture the screen, listen so you can talk about it, then answer aloud. */
     private fun runShowAndTell() {
-        bubbleManager.showBrief("Let me see~", 2000L)
+        bubbleManager.showBrief(getString(R.string.tutorial_bubble_let_me_see), 2000L)
         // Screenshot-with-voice: she listens so you can talk about what you grabbed.
         schedule(700L) {
-            bubbleManager.showVoice("🎙 Listening...")
+            bubbleManager.showVoice(getString(R.string.tutorial_status_listening))
             beepManager.play(BeepManager.Beep.READY)
         }
         schedule(1900L) {
             bubbleManager.hideVoice()
             beepManager.play(BeepManager.Beep.STEP)
-            bubbleManager.showBrief("🧠 Thinking…", 30000L)
+            bubbleManager.showBrief(getString(R.string.tutorial_status_thinking), 30000L)
         }
         // Reply is spoken, not bubbled (onResponseReceived → hideSpeechBubble + speak).
         schedule(3100L) {
             beepManager.play(BeepManager.Beep.STEP)
             bubbleManager.hideSpeechBubble(animate = false)
-            ttsManager.speak(CANNED_RESPONSE)
+            val response = getString(R.string.tutorial_canned_response)
+            ttsManager.speak(response)
             beepManager.play(BeepManager.Beep.DONE)
-            lastResponse = CANNED_RESPONSE
+            lastResponse = response
             complete()
         }
     }
 
     /** Bottom ⅓ long-press: recall her last message as a bubble (handleBubbleReopen). */
     private fun runRecall() {
-        bubbleManager.showResponse(lastResponse ?: "This is where my last reply would appear!", RESPONSE_TIMEOUT)
+        bubbleManager.showResponse(lastResponse ?: getString(R.string.tutorial_recall_placeholder), RESPONSE_TIMEOUT)
         complete()
     }
 
     /** Voice round-trip: listening → transcribing → thinking → reply, then she speaks it aloud. */
     private fun runVoiceDemo() {
-        bubbleManager.showVoice("🎙 Listening...")
+        bubbleManager.showVoice(getString(R.string.tutorial_status_listening))
         beepManager.play(BeepManager.Beep.READY)
         schedule(800L) {
-            bubbleManager.updateVoice("✒️ Transcribing...")
+            bubbleManager.updateVoice(getString(R.string.tutorial_status_transcribing))
             beepManager.play(BeepManager.Beep.STEP)
         }
         schedule(2000L) {
             bubbleManager.hideVoice()
-            bubbleManager.showBrief("🧠 Thinking…", 30000L)
+            bubbleManager.showBrief(getString(R.string.tutorial_status_thinking), 30000L)
         }
         // Reply is spoken aloud with NO bubble (onResponseReceived → hideSpeechBubble + speak).
         schedule(3200L) {
             beepManager.play(BeepManager.Beep.STEP)
             bubbleManager.hideSpeechBubble(animate = false)
-            ttsManager.speak(CANNED_VOICE_REPLY)   // real, on-device, permission-free
+            ttsManager.speak(getString(R.string.tutorial_canned_voice_reply))   // real, on-device, permission-free
             beepManager.play(BeepManager.Beep.DONE)
             complete()
         }
@@ -305,12 +306,12 @@ class TutorialActivity : AppCompatActivity() {
 
     /** MCP tool-call indicator (verbatim 🔧 format), then the reply spoken aloud (no bubble). */
     private fun runToolsDemo() {
-        bubbleManager.showBrief("🧠 Thinking…", 30000L)
-        schedule(1500L) { bubbleManager.showBrief("🔧 get_weather", 30000L) }
+        bubbleManager.showBrief(getString(R.string.tutorial_status_thinking), 30000L)
+        schedule(1500L) { bubbleManager.showBrief(getString(R.string.tutorial_status_tool_call), 30000L) }
         schedule(3000L) {
             beepManager.play(BeepManager.Beep.STEP)
             bubbleManager.hideSpeechBubble(animate = false)
-            ttsManager.speak(CANNED_SEARCH_REPLY)
+            ttsManager.speak(getString(R.string.tutorial_canned_search_reply))
             beepManager.play(BeepManager.Beep.DONE)
             complete()
         }
@@ -433,71 +434,71 @@ class TutorialActivity : AppCompatActivity() {
     private fun buildSteps(): List<Step> = listOf(
         // ── Intro ──
         Step(
-            title = "Meet your companion",
-            body = "This is your overlay companion — she floats over other apps so you can chat any time. The next few screens teach her gestures; you can try each one live.",
+            title = getString(R.string.tutorial_step_intro_title),
+            body = getString(R.string.tutorial_step_intro_body),
         ),
         // ── Core gestures ──
         Step(
-            title = "Tap to walk",
-            body = "Tap her — she'll stroll across the screen. Give it a go.",
+            title = getString(R.string.tutorial_step_tap_title),
+            body = getString(R.string.tutorial_step_tap_body),
             autoAdvance = true,
             onTap = { spriteAnimator.handleTouch(); complete() },
         ),
         Step(
-            title = "Pester her to escape",
-            body = "Keep tapping and she gets startled, bolting off one edge and back in from the other. Pester her until she escapes.",
+            title = getString(R.string.tutorial_step_escape_title),
+            body = getString(R.string.tutorial_step_escape_body),
             autoAdvance = true,
             onTap = { spriteAnimator.handleTouch() },
             onEscape = { complete() },
         ),
         Step(
-            title = "Long-press to talk",
-            body = "Long-press her upper body to start a conversation — just speak and she'll answer aloud. If capture is on (set it in the quick menu), she also grabs your screen or snaps a photo so you can ask about what you see.",
+            title = getString(R.string.tutorial_step_talk_title),
+            body = getString(R.string.tutorial_step_talk_body),
             onLongPress = {
                 if (touchDownY < spriteView.height * 2f / 3f) runShowAndTell()
             },
         ),
         Step(
-            title = "Long-press: recall",
-            body = "Missed what she said? Long-press her lower body to pop open her last reply. You can dismiss it, or type a follow-up right there.",
+            title = getString(R.string.tutorial_step_recall_title),
+            body = getString(R.string.tutorial_step_recall_body),
             onLongPress = {
                 if (touchDownY >= spriteView.height * 2f / 3f) runRecall()
             },
         ),
         Step(
-            title = "Swipe up: quick menu",
-            body = "Swipe up to open the quick-settings dial. You can toggle capture mode, the volume-button shortcut, and Gemini vs on-device voice. Swipe down (or tap away) to close.",
+            title = getString(R.string.tutorial_step_radial_title),
+            body = getString(R.string.tutorial_step_radial_body),
             onSwipeUp = { openRadial() },
             onSwipeDown = { closeRadial() },
         ),
         // ── Hardware shortcuts ──
         Step(
-            title = "Hide & show",
-            body = "Double-press Volume Down to hide her; double-press again to bring her back.",
+            title = getString(R.string.tutorial_step_visibility_title),
+            body = getString(R.string.tutorial_step_visibility_body),
             onEnter = { runVisibilityDemo() },
         ),
         Step(
-            title = "Hands-free listening",
-            body = "Triple-press Volume Down or press an assistant button to start listening — no screen tap needed. She transcribes, thinks, and answers aloud. Tap her to replay.",
+            title = getString(R.string.tutorial_step_voice_title),
+            body = getString(R.string.tutorial_step_voice_body),
             onEnter = { runVoiceDemo() },
             onTap = { replay { runVoiceDemo() } },
         ),
         // ── Advanced ──
         Step(
-            title = "Web search & tools",
-            body = "Ask about current events and she'll search the web. If you've connected tool servers (MCP), she can call those too — watch for the 🔧 badge. Tap her to replay.",
+            title = getString(R.string.tutorial_step_tools_title),
+            body = getString(R.string.tutorial_step_tools_body),
             onEnter = { runToolsDemo() },
             onTap = { replay { runToolsDemo() } },
         ),
         Step(
-            title = "Ghost mode",
-            body = "When a keyboard appears she turns semi-transparent and lets taps pass through, so she never blocks what you're typing.",
+            title = getString(R.string.tutorial_step_ghost_title),
+            body = getString(R.string.tutorial_step_ghost_body),
             onEnter = { runGhostDemo() },
         ),
         // ── Outro ──
         Step(
-            title = "You're all set",
-            body = "That's the tour. Tap to walk, long-press to talk or recall, swipe up for quick settings. Have fun!",
+            title = getString(R.string.tutorial_step_outro_title),
+            body = getString(R.string.tutorial_step_outro_body),
         ),
     )
 
@@ -527,10 +528,10 @@ class TutorialActivity : AppCompatActivity() {
         resetSandbox()
 
         val s = steps[i]
-        binding.stepProgress.text = "${i + 1} / ${steps.size}"
+        binding.stepProgress.text = getString(R.string.tutorial_step_progress, i + 1, steps.size)
         binding.stepTitle.text = s.title
         binding.stepBody.text = s.body
-        binding.nextButton.text = if (i == steps.lastIndex) "Finish" else "Next"
+        binding.nextButton.text = if (i == steps.lastIndex) getString(R.string.tutorial_finish) else getString(R.string.tutorial_next)
         binding.nextButton.isEnabled = true
         binding.prevButton.isEnabled = i > 0
 
@@ -586,18 +587,5 @@ class TutorialActivity : AppCompatActivity() {
         const val RADIAL_RADIUS_DP = 96f           // matches RadialMenuManager
         const val RADIAL_PAD_DP = 9.6f
         const val RESPONSE_TIMEOUT = 60000L
-
-        val CANNED_RESPONSE =
-            "Ooh, a code editor~ Looks like you're deep in a Kotlin file. " +
-            "Want me to explain what's on screen, or just keep you company?"
-        val CANNED_FOLLOWUP =
-            "Got it! That's exactly how a real reply works — I'd read it and answer. " +
-            "Try the next gesture when you're ready. ✨"
-        val CANNED_VOICE_REPLY =
-            "You said that out loud and I heard you~ This very reply is my on-device voice — " +
-            "no internet required. Handy when you'd rather talk than type."
-        val CANNED_SEARCH_REPLY =
-            "It's sunny and 72 degrees~ That came from a weather tool. In the real app " +
-            "I can call tools and search the web for you."
     }
 }

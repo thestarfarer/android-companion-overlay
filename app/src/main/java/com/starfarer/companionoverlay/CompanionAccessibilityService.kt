@@ -67,7 +67,7 @@ class CompanionAccessibilityService : AccessibilityService() {
         }
 
         DebugLog.log(TAG, "Senni's eyes are open~ (flags: ${serviceInfo.flags})")
-        Toast.makeText(this, "Accessibility enabled~ Reboot if volume button toggle doesn't work", Toast.LENGTH_LONG).show()
+        Toast.makeText(this, getString(R.string.access_toast_enabled), Toast.LENGTH_LONG).show()
     }
 
     override fun onKeyEvent(event: KeyEvent): Boolean {
@@ -108,7 +108,7 @@ class CompanionAccessibilityService : AccessibilityService() {
                     // then toggles voice. Only prompt for permission when a start is required.
                     if (!coordinator.overlayRunning.value && !OverlayController.canStart(this)) {
                         DebugLog.log(TAG, "No overlay permission, can't start for voice")
-                        Toast.makeText(this, "Grant overlay permission in the app first~", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this, getString(R.string.access_toast_overlay_permission_needed), Toast.LENGTH_SHORT).show()
                     } else {
                         OverlayController.ensureRunning(this, coordinator, thenStartVoice = true)
                     }
@@ -165,7 +165,7 @@ class CompanionAccessibilityService : AccessibilityService() {
         } else {
             if (!OverlayController.canStart(this)) {
                 DebugLog.log(TAG, "No overlay permission, ignoring toggle")
-                Toast.makeText(this, "Grant overlay permission in the app first~", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, getString(R.string.access_toast_overlay_permission_needed), Toast.LENGTH_SHORT).show()
                 return
             }
             DebugLog.log(TAG, "Summoning Senni~")

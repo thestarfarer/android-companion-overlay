@@ -161,7 +161,7 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
         // but still satisfy the foreground-service contract before stopping.
         if (!Settings.canDrawOverlays(this)) {
             DebugLog.log("Overlay", "Overlay permission missing — aborting service start")
-            Toast.makeText(this, "Grant 'Display over other apps' to show the companion~", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, getString(R.string.svc_toast_overlay_permission_needed), Toast.LENGTH_LONG).show()
             startForeground(1, createNotification(), baseForegroundType())
             stopSelf()
             return
@@ -286,7 +286,7 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
         conversationManager.listener = this
         conversationManager.isTtsSpeaking = { audioCoordinator.isSpeaking }
 
-        audioCoordinator.onSynthesisStarted = { bubbleManager.showBrief("🔊 Generating voice...", 30000L) }
+        audioCoordinator.onSynthesisStarted = { bubbleManager.showBrief(getString(R.string.svc_bubble_generating_voice), 30000L) }
         audioCoordinator.onSynthesisEnded = { bubbleManager.hideSpeechBubble() }
 
         audioCoordinator.warmUp()
@@ -572,18 +572,18 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
         }
 
         if (!coordinator.accessibilityRunning.value) {
-            bubbleManager.showBrief("Grant screenshot permission in the app first~", 4000L)
+            bubbleManager.showBrief(getString(R.string.svc_bubble_grant_screenshot_permission), 4000L)
             return
         }
 
-        bubbleManager.showBrief("Let me see~", 2000L)
+        bubbleManager.showBrief(getString(R.string.svc_bubble_let_me_see), 2000L)
 
         handler.postDelayed({
             screenshotManager.takeScreenshot { base64 ->
                 if (base64 != null) {
                     dispatchCapturedImage(base64)
                 } else {
-                    handler.post { bubbleManager.showBrief("Couldn't peek at your screen...") }
+                    handler.post { bubbleManager.showBrief(getString(R.string.svc_bubble_screenshot_failed)) }
                 }
             }
         }, 150)
@@ -592,11 +592,11 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
     private fun handleCameraRequest() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
             != PackageManager.PERMISSION_GRANTED) {
-            bubbleManager.showBrief("Grant camera permission in the app first~", 4000L)
+            bubbleManager.showBrief(getString(R.string.svc_bubble_grant_camera_permission), 4000L)
             return
         }
 
-        bubbleManager.showBrief("Let me look~", 2000L)
+        bubbleManager.showBrief(getString(R.string.svc_bubble_let_me_look), 2000L)
 
         // Promote the foreground service to include the camera type so the OS
         // permits capture while another app is in the foreground, then revert.
@@ -607,7 +607,7 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
                 if (base64 != null) {
                     dispatchCapturedImage(base64)
                 } else {
-                    bubbleManager.showBrief("Couldn't get a good shot...")
+                    bubbleManager.showBrief(getString(R.string.svc_bubble_camera_failed))
                 }
             }
         }, 150)
@@ -687,7 +687,7 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
         if (lastMessage != null) {
             bubbleManager.showResponse(lastMessage, settings.bubbleTimeoutSeconds * 1000L)
         } else {
-            bubbleManager.showResponse("Ask me anything~", settings.bubbleTimeoutSeconds * 1000L)
+            bubbleManager.showResponse(getString(R.string.svc_bubble_ask_me_anything), settings.bubbleTimeoutSeconds * 1000L)
         }
     }
 
@@ -701,7 +701,7 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
             ImageAudit.save(this, imageBase64, source)
         }
         audioCoordinator.playBeep(BeepManager.Beep.STEP)
-        bubbleManager.showBrief("🧠 Thinking...", 30000L)
+        bubbleManager.showBrief(getString(R.string.svc_bubble_thinking), 30000L)
         conversationManager.sendWithScreenshot(imageBase64, voiceText)
     }
 
@@ -709,7 +709,7 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
         bubbleManager.cancelPendingDismiss()
         bubbleManager.hideSpeechBubble()
         audioCoordinator.playBeep(BeepManager.Beep.STEP)
-        bubbleManager.showBrief("🧠 Thinking...", 30000L)
+        bubbleManager.showBrief(getString(R.string.svc_bubble_thinking), 30000L)
         conversationManager.sendText(text)
     }
 
@@ -747,7 +747,7 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
     override fun onError(message: String) {
         audioCoordinator.playBeep(BeepManager.Beep.ERROR)
         pendingVoiceReply = false
-        bubbleManager.showBrief("Hmph! $message")
+        bubbleManager.showBrief(getString(R.string.svc_bubble_error, message))
         voiceController.onVoiceResponseComplete()
     }
 
@@ -761,12 +761,12 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
     override fun onToolUseProgress(toolNames: List<String>) {
         if (!settings.mcpShowToolBubbles) return
         val toolList = toolNames.joinToString(", ")
-        bubbleManager.showBrief("🔧 $toolList", 30000L)
+        bubbleManager.showBrief(getString(R.string.svc_bubble_tool_use, toolList), 30000L)
     }
 
     override fun onAsyncResultsInjecting() {
         audioCoordinator.playBeep(BeepManager.Beep.QUEUE)
-        bubbleManager.showBrief("📨 Queue results...", 30000L)
+        bubbleManager.showBrief(getString(R.string.svc_bubble_queue_results), 30000L)
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -921,15 +921,15 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Senni is here~")
-            .setContentText("Tap to open the app")
+            .setContentTitle(getString(R.string.svc_notification_title))
+            .setContentText(getString(R.string.svc_notification_text))
             .setSmallIcon(R.drawable.ic_notification)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             // Without IMMEDIATE the system may defer showing an FGS notification
             // for ~10s, which hides the abort-path notification entirely.
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
-            .addAction(0, "Stop", stopPendingIntent)
+            .addAction(0, getString(R.string.svc_notification_action_stop), stopPendingIntent)
             .build()
     }
 }
