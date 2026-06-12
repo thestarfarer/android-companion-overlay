@@ -12,8 +12,8 @@ import android.widget.ImageView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import com.starfarer.companionoverlay.databinding.ActivityTutorialBinding
-import com.starfarer.companionoverlay.repository.CaptureMode
-import com.starfarer.companionoverlay.repository.SettingsRepository
+import com.starfarer.companionoverlay.event.OverlayCoordinator
+import com.starfarer.companionoverlay.repository.TutorialSettings
 import org.koin.android.ext.android.inject
 import kotlin.math.abs
 import kotlin.math.hypot
@@ -24,14 +24,17 @@ import kotlin.math.hypot
  * no overlay window, no service, no permissions, no network. Inputs/outputs are scripted mocks.
  *
  * Steps are data-driven [Step] objects: each owns its copy, its gesture handlers, and its
- * enter/exit/gating behavior. Gesture steps auto-advance when performed; demo steps auto-play on
- * enter and unlock Next when finished. Radial-menu toggles write to real prefs, so the four
- * affected settings are snapshotted on entry and restored on exit — nothing the user flips persists.
+ * enter/exit behavior. Next is always available; gesture steps additionally auto-advance the
+ * moment the gesture lands. Settings are sandboxed through [TutorialSettings] — radial-menu
+ * toggles mutate in-memory copies, never real prefs, so nothing the user flips can leak no
+ * matter how the Activity dies. A running real overlay is dismissed for the duration (two
+ * sprites otherwise) and brought back on finish.
  */
 class TutorialActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityTutorialBinding
-    private val settings: SettingsRepository by inject()
+    private val settings: TutorialSettings by inject()
+    private val coordinator: OverlayCoordinator by inject()
 
     private val handler = Handler(Looper.getMainLooper())
     private val density get() = resources.displayMetrics.density
@@ -54,11 +57,14 @@ class TutorialActivity : AppCompatActivity() {
     private var isLongPress = false
     private var swipeConsumed = false
 
-    // Settings snapshot (restored on finish so tutorial toggles don't leak).
-    private var snapCapture: CaptureMode = CaptureMode.SCREENSHOT
-    private var snapVolume = false
-    private var snapStt = false
-    private var snapTts = false
+    /** The real overlay was up when the tutorial opened — bring it back on exit. */
+    private var overlayWasRunning = false
+
+    /** Set when leaving the foreground; the step is cleanly re-entered on return. */
+    private var pausedMidTutorial = false
+
+    /** On-device TTS engine init failed — spoken-reply demos fall back to bubbles. */
+    private var ttsFailed = false
 
     // ── Step machine ──
     private lateinit var steps: List<Step>
@@ -100,7 +106,12 @@ class TutorialActivity : AppCompatActivity() {
         binding = ActivityTutorialBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        snapshotSettings()
+        // The real overlay would float over the sandbox — two sprites. Dismiss it
+        // for the duration; onDestroy brings it back on a true finish.
+        overlayWasRunning = savedInstanceState?.getBoolean(KEY_OVERLAY_WAS_RUNNING)
+            ?: coordinator.overlayRunning.value
+        if (coordinator.overlayRunning.value) coordinator.dismissOverlay()
+
         setupSprite()
         setupBubbles()
         setupGestureRouter()
@@ -110,26 +121,13 @@ class TutorialActivity : AppCompatActivity() {
         binding.prevButton.setOnClickListener { goBack() }
         binding.nextButton.setOnClickListener { advance() }
 
-        goToStep(0)
+        lastResponse = savedInstanceState?.getString(KEY_LAST_RESPONSE)
+        goToStep((savedInstanceState?.getInt(KEY_STEP) ?: 0).coerceIn(0, steps.lastIndex))
     }
 
     // ══════════════════════════════════════════════════════════════════════
     // Setup
     // ══════════════════════════════════════════════════════════════════════
-
-    private fun snapshotSettings() {
-        snapCapture = settings.captureMode
-        snapVolume = settings.volumeToggleEnabled
-        snapStt = settings.geminiSttEnabled
-        snapTts = settings.geminiTtsEnabled
-    }
-
-    private fun restoreSettings() {
-        settings.captureMode = snapCapture
-        settings.volumeToggleEnabled = snapVolume
-        settings.geminiSttEnabled = snapStt
-        settings.geminiTtsEnabled = snapTts
-    }
 
     private fun setupSprite() {
         val dm = resources.displayMetrics
@@ -160,13 +158,19 @@ class TutorialActivity : AppCompatActivity() {
     private fun setupBubbles() {
         beepManager = BeepManager(this)
         ttsManager = TtsManager(this, settings)
+        // Engine missing/broken: flag it so speakReply uses bubbles, and surface a reply
+        // already queued into the failed engine instead of letting it die silently.
+        ttsManager.onInitFailed = {
+            ttsFailed = true
+            lastResponse?.let { bubbleManager.showResponse(it, RESPONSE_TIMEOUT) }
+        }
         val surface = ViewGroupBubbleSurface(binding.sandbox, density)
         bubbleManager = BubbleManager(this, surface, handler, object : BubbleManager.Host {
             override fun onTtsStop() {}
             override fun onSendReply(text: String) {
                 // Folds the reply feature into the capture step: a canned follow-up.
                 bubbleManager.showResponse(getString(R.string.tutorial_canned_followup), RESPONSE_TIMEOUT)
-                beepManager.play(BeepManager.Beep.DONE)
+                beep(BeepManager.Beep.DONE)
             }
             override fun onVoiceToggle() {}
             override fun onKeyboardShown() {}
@@ -190,7 +194,8 @@ class TutorialActivity : AppCompatActivity() {
                     swipeConsumed = false
                     touchDownX = event.x
                     touchDownY = event.y
-                    handler.postDelayed(longPressRunnable, LONG_PRESS_TIMEOUT_MS)
+                    // Step-token-scoped so a pending long-press dies with the step.
+                    handler.postDelayed(longPressRunnable, stepToken, LONG_PRESS_TIMEOUT_MS)
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
@@ -213,6 +218,13 @@ class TutorialActivity : AppCompatActivity() {
                 else -> true
             }
         }
+
+        // FLAG_WATCH_OUTSIDE_TOUCH stand-in: ACTION_OUTSIDE never reaches a child view,
+        // so taps on empty sandbox space close the dial here instead.
+        binding.sandbox.setOnTouchListener { _, event ->
+            if (event.actionMasked == MotionEvent.ACTION_DOWN && radialView != null) closeRadial()
+            false
+        }
     }
 
     private val longPressRunnable = Runnable {
@@ -229,27 +241,57 @@ class TutorialActivity : AppCompatActivity() {
     // Mocked pipelines (reproduce real beat sequences with canned text)
     // ══════════════════════════════════════════════════════════════════════
 
+    /** Beep only if enabled — mirrors VoiceInputController's gating. */
+    private fun beep(b: BeepManager.Beep) {
+        if (settings.beepsEnabled) beepManager.play(b)
+    }
+
+    /** Production picks the label by engine: Gemini transcription "records", on-device "listens". */
+    private fun listeningLabel() = getString(
+        if (settings.geminiSttEnabled) R.string.status_recording else R.string.status_listening
+    )
+
+    /**
+     * Deliver a spoken reply with production beats (onResponseReceived): STEP beep, bubble
+     * down, a "Generating voice..." brief when the ✨ toggle selected the Gemini voice,
+     * speech, then the DONE beep on completion — not at enqueue. Falls back to a bubble
+     * when the on-device engine failed so the demo isn't silent.
+     */
+    private fun speakReply(text: String) {
+        lastResponse = text
+        beep(BeepManager.Beep.STEP)
+        bubbleManager.hideSpeechBubble(animate = false)
+        if (ttsFailed) {
+            bubbleManager.showResponse(text, RESPONSE_TIMEOUT)
+            beep(BeepManager.Beep.DONE)
+            return
+        }
+        if (settings.geminiTtsEnabled) {
+            bubbleManager.showBrief(getString(R.string.svc_bubble_generating_voice), 2000L)
+        }
+        ttsManager.onSpeechDone = {
+            ttsManager.onSpeechDone = null
+            beep(BeepManager.Beep.DONE)
+        }
+        ttsManager.speak(text)
+    }
+
     /** Top ⅔ long-press: capture the screen, listen so you can talk about it, then answer aloud. */
     private fun runShowAndTell() {
-        bubbleManager.showBrief(getString(R.string.tutorial_bubble_let_me_see), 2000L)
+        bubbleManager.showBrief(getString(R.string.svc_bubble_let_me_see), 2000L)
         // Screenshot-with-voice: she listens so you can talk about what you grabbed.
         schedule(700L) {
-            bubbleManager.showVoice(getString(R.string.tutorial_status_listening))
-            beepManager.play(BeepManager.Beep.READY)
+            bubbleManager.showVoice(listeningLabel())
+            beep(BeepManager.Beep.READY)
         }
         schedule(1900L) {
             bubbleManager.hideVoice()
-            beepManager.play(BeepManager.Beep.STEP)
-            bubbleManager.showBrief(getString(R.string.tutorial_status_thinking), 30000L)
+            beep(BeepManager.Beep.STEP)
+            bubbleManager.showBrief(getString(R.string.svc_bubble_thinking), 30000L)
         }
         // Reply is spoken, not bubbled (onResponseReceived → hideSpeechBubble + speak).
         schedule(3100L) {
-            beepManager.play(BeepManager.Beep.STEP)
-            bubbleManager.hideSpeechBubble(animate = false)
-            val response = getString(R.string.tutorial_canned_response)
-            ttsManager.speak(response)
-            beepManager.play(BeepManager.Beep.DONE)
-            lastResponse = response
+            speakReply(getString(R.string.tutorial_canned_response))
             complete()
         }
     }
@@ -262,22 +304,19 @@ class TutorialActivity : AppCompatActivity() {
 
     /** Voice round-trip: listening → transcribing → thinking → reply, then she speaks it aloud. */
     private fun runVoiceDemo() {
-        bubbleManager.showVoice(getString(R.string.tutorial_status_listening))
-        beepManager.play(BeepManager.Beep.READY)
+        bubbleManager.showVoice(listeningLabel())
+        beep(BeepManager.Beep.READY)
         schedule(800L) {
-            bubbleManager.updateVoice(getString(R.string.tutorial_status_transcribing))
-            beepManager.play(BeepManager.Beep.STEP)
+            bubbleManager.updateVoice(getString(R.string.status_transcribing))
+            beep(BeepManager.Beep.STEP)
         }
         schedule(2000L) {
             bubbleManager.hideVoice()
-            bubbleManager.showBrief(getString(R.string.tutorial_status_thinking), 30000L)
+            bubbleManager.showBrief(getString(R.string.svc_bubble_thinking), 30000L)
         }
         // Reply is spoken aloud with NO bubble (onResponseReceived → hideSpeechBubble + speak).
         schedule(3200L) {
-            beepManager.play(BeepManager.Beep.STEP)
-            bubbleManager.hideSpeechBubble(animate = false)
-            ttsManager.speak(getString(R.string.tutorial_canned_voice_reply))   // real, on-device, permission-free
-            beepManager.play(BeepManager.Beep.DONE)
+            speakReply(getString(R.string.tutorial_canned_voice_reply))   // real, on-device, permission-free
             complete()
         }
     }
@@ -304,15 +343,14 @@ class TutorialActivity : AppCompatActivity() {
         loop()
     }
 
-    /** MCP tool-call indicator (verbatim 🔧 format), then the reply spoken aloud (no bubble). */
+    /** MCP tool-call indicator (production's 🔧 format string), then the reply spoken aloud. */
     private fun runToolsDemo() {
-        bubbleManager.showBrief(getString(R.string.tutorial_status_thinking), 30000L)
-        schedule(1500L) { bubbleManager.showBrief(getString(R.string.tutorial_status_tool_call), 30000L) }
+        bubbleManager.showBrief(getString(R.string.svc_bubble_thinking), 30000L)
+        schedule(1500L) {
+            bubbleManager.showBrief(getString(R.string.svc_bubble_tool_use, "get_weather"), 30000L)
+        }
         schedule(3000L) {
-            beepManager.play(BeepManager.Beep.STEP)
-            bubbleManager.hideSpeechBubble(animate = false)
-            ttsManager.speak(getString(R.string.tutorial_canned_search_reply))
-            beepManager.play(BeepManager.Beep.DONE)
+            speakReply(getString(R.string.tutorial_canned_search_reply))
             complete()
         }
     }
@@ -330,42 +368,13 @@ class TutorialActivity : AppCompatActivity() {
         loop()
     }
 
-    private fun fadeSpriteOutIn() {
-        spriteView.animate().alpha(0f).setDuration(300L).withEndAction {
-            spriteView.animate().alpha(1f).setStartDelay(300L).setDuration(300L).start()
-        }.start()
-    }
-
     /** Restart a demo step's auto-play from a tap, clearing anything mid-flight first. */
     private fun replay(run: () -> Unit) {
         resetSandbox()
         run()
     }
 
-    // ── Press-count badge (controls step) ──
-
-    private fun showBadge(text: String) {
-        val tv = badgeView ?: TextView(this).apply {
-            textSize = 64f
-            setTextColor(getColor(R.color.gold))
-            gravity = Gravity.CENTER
-            binding.sandbox.addView(this, FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.WRAP_CONTENT,
-                FrameLayout.LayoutParams.WRAP_CONTENT,
-                Gravity.CENTER
-            ))
-            badgeView = this
-        }
-        tv.text = text
-        tv.animate().cancel()
-        tv.alpha = 0f
-        tv.scaleX = 0.6f
-        tv.scaleY = 0.6f
-        tv.animate().alpha(1f).scaleX(1f).scaleY(1f).setStartDelay(0L).setDuration(250L)
-            .withEndAction {
-                tv.animate().alpha(0f).setStartDelay(750L).setDuration(400L).start()
-            }.start()
-    }
+    // ── Press-count badge (visibility demo) ──
 
     /** Show badge centered in the bottom half of the screen (between narration and buttons). */
     private fun showBadgeCentered(text: String) {
@@ -409,8 +418,8 @@ class TutorialActivity : AppCompatActivity() {
     private fun openRadial() {
         if (radialView != null) return
         val v = RadialMenuView(this, settings, onRequestClose = { closeRadial() })
-        val w = ((RADIAL_RADIUS_DP + RADIAL_PAD_DP) * density).toInt()
-        val h = ((2 * RADIAL_RADIUS_DP + 2 * RADIAL_PAD_DP) * density).toInt()
+        val w = ((RadialMenuManager.RADIUS_DP + RadialMenuManager.PAD_DP) * density).toInt()
+        val h = ((2 * RadialMenuManager.RADIUS_DP + 2 * RadialMenuManager.PAD_DP) * density).toInt()
         val lp = FrameLayout.LayoutParams(w, h, Gravity.CENTER_VERTICAL or Gravity.END)
         v.alpha = 0f
         binding.sandbox.addView(v, lp)
@@ -532,7 +541,6 @@ class TutorialActivity : AppCompatActivity() {
         binding.stepTitle.text = s.title
         binding.stepBody.text = s.body
         binding.nextButton.text = if (i == steps.lastIndex) getString(R.string.tutorial_finish) else getString(R.string.tutorial_next)
-        binding.nextButton.isEnabled = true
         binding.prevButton.isEnabled = i > 0
 
         s.onEnter()
@@ -544,6 +552,7 @@ class TutorialActivity : AppCompatActivity() {
         bubbleManager.hideSpeechBubble(animate = false)
         bubbleManager.hideVoice()
         closeRadial()
+        ttsManager.onSpeechDone = null   // a stale DONE beep must not outlive its step
         ttsManager.stop()
         spriteAnimator.setGhostMode(false)
         spriteView.animate().cancel()
@@ -559,16 +568,27 @@ class TutorialActivity : AppCompatActivity() {
         super.onResume()
         spriteAnimator.startTime = SystemClock.elapsedRealtime()
         handler.post(frameRunnable)
+        if (pausedMidTutorial) {
+            pausedMidTutorial = false
+            goToStep(stepIndex)   // clean re-enter: demos restart instead of resuming half-done
+        }
     }
 
     override fun onPause() {
         super.onPause()
+        pausedMidTutorial = true
         handler.removeCallbacks(frameRunnable)
+        // Demos must not keep talking/beeping while backgrounded.
+        handler.removeCallbacksAndMessages(stepToken)
+        ttsManager.onSpeechDone = null
+        ttsManager.stop()
     }
 
-    override fun finish() {
-        restoreSettings()
-        super.finish()
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putInt(KEY_STEP, stepIndex)
+        outState.putString(KEY_LAST_RESPONSE, lastResponse)
+        outState.putBoolean(KEY_OVERLAY_WAS_RUNNING, overlayWasRunning)
     }
 
     override fun onDestroy() {
@@ -578,14 +598,21 @@ class TutorialActivity : AppCompatActivity() {
         spriteAnimator.release()
         beepManager.release()
         ttsManager.release()
+        // Bring the real overlay back only on a true exit, not a rotation.
+        if (isFinishing && overlayWasRunning && OverlayController.canStart(this)) {
+            OverlayController.ensureRunning(this, coordinator)
+        }
     }
 
     private companion object {
         const val FRAME_MS = 16L
-        const val LONG_PRESS_TIMEOUT_MS = 500L     // matches CompanionOverlayService
-        const val SWIPE_MIN_DISTANCE_DP = 56f      // matches CompanionOverlayService
-        const val RADIAL_RADIUS_DP = 96f           // matches RadialMenuManager
-        const val RADIAL_PAD_DP = 9.6f
+        // Gesture thresholds and dial geometry come from the production classes
+        // (CompanionOverlayService / RadialMenuManager) so the sandbox can't drift.
+        const val LONG_PRESS_TIMEOUT_MS = CompanionOverlayService.LONG_PRESS_TIMEOUT_MS
+        const val SWIPE_MIN_DISTANCE_DP = CompanionOverlayService.SWIPE_MIN_DISTANCE_DP
         const val RESPONSE_TIMEOUT = 60000L
+        const val KEY_STEP = "tutorial_step"
+        const val KEY_LAST_RESPONSE = "tutorial_last_response"
+        const val KEY_OVERLAY_WAS_RUNNING = "tutorial_overlay_was_running"
     }
 }

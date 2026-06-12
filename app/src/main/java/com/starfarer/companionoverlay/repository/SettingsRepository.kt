@@ -34,7 +34,7 @@ enum class CaptureMode(val key: String) {
  *
  * Injected via Koin as a singleton.
  */
-class SettingsRepository(
+open class SettingsRepository(
     private val settingsPrefs: SharedPreferences,
     private val securePrefs: SharedPreferences,
     private val presetProvider: () -> CharacterPreset
@@ -134,11 +134,12 @@ class SettingsRepository(
             editor.apply()
         }
 
-    var geminiSttEnabled: Boolean
+    // open: the tutorial sandboxes the radial-menu-mutable settings ([TutorialSettings]).
+    open var geminiSttEnabled: Boolean
         get() = settingsPrefs.getBoolean(KEY_GEMINI_STT, false)
         set(value) = settingsPrefs.edit().putBoolean(KEY_GEMINI_STT, value).apply()
 
-    var geminiTtsEnabled: Boolean
+    open var geminiTtsEnabled: Boolean
         get() = settingsPrefs.getBoolean(KEY_GEMINI_TTS, false)
         set(value) = settingsPrefs.edit().putBoolean(KEY_GEMINI_TTS, value).apply()
 
@@ -170,7 +171,7 @@ class SettingsRepository(
         get() = settingsPrefs.getBoolean(KEY_AUTO_COPY, false)
         set(value) = settingsPrefs.edit().putBoolean(KEY_AUTO_COPY, value).apply()
 
-    var volumeToggleEnabled: Boolean
+    open var volumeToggleEnabled: Boolean
         get() = settingsPrefs.getBoolean(KEY_VOLUME_TOGGLE, true)
         set(value) = settingsPrefs.edit().putBoolean(KEY_VOLUME_TOGGLE, value).apply()
 
@@ -183,7 +184,7 @@ class SettingsRepository(
         set(value) = settingsPrefs.edit().putBoolean(KEY_VOICE_SCREENSHOT, value).apply()
 
     /** What an upper-body long-press does: Off (reopen last bubble), Screenshot, or Camera. */
-    var captureMode: CaptureMode
+    open var captureMode: CaptureMode
         get() = CaptureMode.fromKey(settingsPrefs.getString(KEY_CAPTURE_MODE, null))
         set(value) = settingsPrefs.edit().putString(KEY_CAPTURE_MODE, value.key).apply()
 

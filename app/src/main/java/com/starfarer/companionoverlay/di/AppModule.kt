@@ -7,6 +7,7 @@ import com.starfarer.companionoverlay.mcp.McpManager
 import com.starfarer.companionoverlay.mcp.McpRepository
 import com.starfarer.companionoverlay.repository.PresetRepository
 import com.starfarer.companionoverlay.repository.SettingsRepository
+import com.starfarer.companionoverlay.repository.TutorialSettings
 import okhttp3.OkHttpClient
 import org.koin.android.ext.koin.androidContext
 import org.koin.core.qualifier.named
@@ -41,6 +42,15 @@ val appModule = module {
         )
     }
     
+    // Tutorial sandbox settings — fresh per tutorial run; radial-toggle writes stay in memory
+    factory {
+        TutorialSettings(
+            settingsPrefs = get(named("settings")),
+            securePrefs = get(named("auth")),
+            presetProvider = { get<PresetRepository>().getActive() }
+        )
+    }
+
     // Auth — shares the app's HTTP client and encrypted prefs
     single { ClaudeAuth(androidContext(), get(), get(named("auth"))) }
     

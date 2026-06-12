@@ -39,7 +39,7 @@ class RadialMenuView(
     }
 
     private val density = resources.displayMetrics.density
-    private val padPx = 9.6f * density   // matches RadialMenuManager.PAD_DP
+    private val padPx = RadialMenuManager.PAD_DP * density
 
     // Arc on the left side (screen coords: 0°=right, +clockwise). 100°..260° = lower-left → upper-left.
     private val arcStart = 100f
