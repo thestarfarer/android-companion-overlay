@@ -73,18 +73,18 @@ android {
         targetCompatibility JavaVersion.VERSION_17
     }
 
-    packaging {
-        jniLibs {
-            useLegacyPackaging = true  // Compress native libs instead of page-aligning
-        }
-    }
-
     kotlinOptions {
         jvmTarget = '17'
     }
 
     buildFeatures {
         viewBinding = true
+    }
+
+    testOptions {
+        // Android framework calls in JVM unit tests (Log.d, Handler, …) return
+        // defaults instead of throwing — lets manager/repository tests run unmocked.
+        unitTests.returnDefaultValues = true
     }
 }
 
@@ -96,7 +96,10 @@ dependencies {
     implementation 'androidx.viewpager2:viewpager2:1.1.0'
     implementation 'androidx.coordinatorlayout:coordinatorlayout:1.2.0'
     implementation 'androidx.cardview:cardview:1.0.0'
-    implementation 'androidx.security:security-crypto:1.1.0-alpha06'
+    // 1.1.0 stable deprecates EncryptedSharedPreferences/MasterKey but keeps them
+    // functional — preferable to shipping an alpha. Migration off Jetpack Security
+    // is a separate decision.
+    implementation 'androidx.security:security-crypto:1.1.0'
     implementation 'androidx.browser:browser:1.8.0'
 
     // CameraX — headless back-camera capture for "look at this" shots
@@ -135,6 +138,5 @@ dependencies {
     // Testing
     testImplementation 'junit:junit:4.13.2'
     testImplementation 'org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0'
-    testImplementation 'io.insert-koin:koin-test:4.1.1'
     testImplementation 'io.mockk:mockk:1.13.13'
 }

@@ -36,7 +36,7 @@ An animated sprite companion powered by Claude AI that lives on your Android scr
 ### Controls
 - **Swipe gestures** — swipe up on the avatar to open the radial quick menu, swipe down to close (tap still walks her, long-press still captures — no added tap delay)
 - **Radial quick menu** — three toggles you can flip without opening Settings: capture mode (off / screenshot / camera), volume-button shortcut on/off, and Gemini voice (Gemini ↔ on-device, both STT+TTS at once). Changes apply live
-- **Volume down button shortcut** — double-press: show/hide overlay, triple-press: voice input (off by default, interjects with long press for volume down functionality)
+- **Volume down button shortcut** — double-press: show/hide overlay, triple-press: voice input (on by default, interjects with long press for volume down functionality)
 - **Headset button** — long-press triggers voice input
 - **Ghost mode** — semi-transparent and click-through when keyboard is visible
 - **Auto-copy** — optionally copy responses to clipboard
