@@ -110,10 +110,17 @@
         <item name="android:textSize">15sp</item>
     </style>
 
-    <style name="CompanionButton.Large.Left" parent="CompanionButton.Secondary">
-        <item name="android:paddingTop">14dp</item>
-        <item name="android:paddingBottom">14dp</item>
-        <item name="android:textSize">15sp</item>
+    <!-- Outlined twin of CompanionButton.Large. Parented on the FILLED large style
+         (not Secondary/OutlinedButton) so every metric — insets, min height,
+         paddings — is identical to its right-hand sibling by construction; the
+         outlined look is recreated manually. Stroke uses the same color as the
+         sibling's fill, in both themes. -->
+    <style name="CompanionButton.Large.Left" parent="CompanionButton.Large">
+        <item name="backgroundTint">@android:color/transparent</item>
+        <item name="strokeColor">@color/button_toggle_background</item>
+        <item name="strokeWidth">1dp</item>
+        <item name="android:textColor">@color/gold</item>
+        <item name="rippleColor">@color/gold_ripple</item>
         <item name="shapeAppearanceOverlay">@style/ShapeAppearance.LeftButton</item>
     </style>
 

@@ -1,22 +1,34 @@
 package com.starfarer.companionoverlay
 
+import android.animation.ValueAnimator
+import android.content.res.ColorStateList
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.view.Gravity
 import android.view.MotionEvent
+import android.view.View
 import android.view.ViewConfiguration
+import android.view.animation.AnimationUtils
 import android.widget.FrameLayout
 import android.widget.ImageView
-import android.widget.TextView
+import android.widget.LinearLayout
 import androidx.appcompat.app.AppCompatActivity
 import com.starfarer.companionoverlay.databinding.ActivityTutorialBinding
 import com.starfarer.companionoverlay.event.OverlayCoordinator
 import com.starfarer.companionoverlay.repository.TutorialSettings
+import com.starfarer.companionoverlay.ui.GestureHintView
+import com.starfarer.companionoverlay.ui.MockAppWindowView
+import com.starfarer.companionoverlay.ui.MockKeyboardToggleView
+import com.starfarer.companionoverlay.ui.MockKeyboardView
+import com.starfarer.companionoverlay.ui.MockVolumeKeyView
+import com.starfarer.companionoverlay.ui.SparkleBurstView
 import org.koin.android.ext.android.inject
 import kotlin.math.abs
 import kotlin.math.hypot
+import kotlin.math.sin
 
 /**
  * Self-contained interactive tutorial. Hosts the **real** [SpriteAnimator], [BubbleManager],
@@ -45,8 +57,47 @@ class TutorialActivity : AppCompatActivity() {
     private lateinit var beepManager: BeepManager
     private lateinit var ttsManager: TtsManager
     private lateinit var spriteView: ImageView
+    private lateinit var hintView: GestureHintView
+    private lateinit var sparkleView: SparkleBurstView
     private var radialView: RadialMenuView? = null
-    private var badgeView: TextView? = null
+    private var badgeView: ImageView? = null
+
+    // Stage props (per-step set dressing, torn down by resetSandbox).
+    private var mockKeyboard: MockKeyboardView? = null
+    private var mockWindow: MockAppWindowView? = null
+    private var mockVolumeKey: MockVolumeKeyView? = null
+    private var mockKbdToggle: MockKeyboardToggleView? = null
+
+    // Volume-key press counting (production double/triple-press window).
+    private var volPresses = 0
+    private var volTarget = 0
+    private var volAction: (() -> Unit)? = null
+    private val volResolve = Runnable {
+        if (volPresses == volTarget) volAction?.invoke()
+        volPresses = 0
+    }
+
+    // Ghost-page playground state.
+    private var mockKeyboardUp = false
+    private var kbdUserPresses = 0
+
+    /** Visibility-page state: she's mock-hidden until the next double-press. */
+    private var mockHidden = false
+
+    /** Pulses Next while we wait on a manual advance — "you can move on now". */
+    private var nextPulse: ValueAnimator? = null
+    private val fastOutSlowIn by lazy {
+        AnimationUtils.loadInterpolator(this, android.R.interpolator.fast_out_slow_in)
+    }
+
+    /** First narration bind reveals instead of crossfading (there's nothing to fade out). */
+    private var firstNarration = true
+
+    /** She greets once per tutorial run, not on every revisit of step 1. */
+    private var greeted = false
+
+    /** Finish pressed — her exit animation is playing; ignore repeats. */
+    private var finaleRunning = false
 
     /** Last thing she "said" — recalled by a lower-third long-press (mirrors lastAssistantMessage). */
     private var lastResponse: String? = null
@@ -86,11 +137,18 @@ class TutorialActivity : AppCompatActivity() {
         val onEnter: () -> Unit = {},
         val onExit: () -> Unit = {},
         val autoAdvance: Boolean = false,
-        val onTap: () -> Unit = {},
+        // She's alive on every page by default: taps walk her, pestering bolts her
+        // (the router already ignores her in ghost mode). Pages override for
+        // replays (tools) or celebration (outro).
+        val onTap: () -> Unit = { spriteAnimator.handleTouch() },
         val onLongPress: () -> Unit = {},
         val onSwipeUp: () -> Unit = {},
         val onSwipeDown: () -> Unit = {},
         val onEscape: () -> Unit = {},
+        /** Animated affordance showing where/how to touch her; appears after a beat. */
+        val hint: GestureHintView.Hint? = null,
+        /** Pure-gesture step: success earns a gold ✓ + STEP beep (demo steps' spoken reply is their own reward). */
+        val reward: Boolean = false,
     )
 
     // ── Frame loop (mirrors the service's ~vsync ticker) ──
@@ -112,16 +170,19 @@ class TutorialActivity : AppCompatActivity() {
             ?: coordinator.overlayRunning.value
         if (coordinator.overlayRunning.value) coordinator.dismissOverlay()
 
-        setupSprite()
+        setupSprite(savedInstanceState)
         setupBubbles()
+        setupOverlays()
         setupGestureRouter()
         steps = buildSteps()
+        setupNarration()
 
         binding.skipButton.setOnClickListener { finish() }
         binding.prevButton.setOnClickListener { goBack() }
         binding.nextButton.setOnClickListener { advance() }
 
         lastResponse = savedInstanceState?.getString(KEY_LAST_RESPONSE)
+        greeted = savedInstanceState?.getBoolean(KEY_GREETED) ?: false
         goToStep((savedInstanceState?.getInt(KEY_STEP) ?: 0).coerceIn(0, steps.lastIndex))
     }
 
@@ -129,14 +190,24 @@ class TutorialActivity : AppCompatActivity() {
     // Setup
     // ══════════════════════════════════════════════════════════════════════
 
-    private fun setupSprite() {
+    private fun setupSprite(saved: Bundle?) {
         val dm = resources.displayMetrics
         val config = SpriteAnimator.Config(dm.widthPixels, dm.heightPixels, dm.density)
         spriteAnimator = SpriteAnimator(this, config, settings).apply { loadSprites() }
 
         val w = spriteAnimator.viewWidth
         val h = spriteAnimator.viewHeight
-        val initialX = dm.widthPixels - w - spriteAnimator.marginRightPx
+        // Walk-distance inset matches the service's spawn position — without it her
+        // first (rightward) walk clamps to her own start and she strides in place.
+        val defaultX = dm.widthPixels - w - spriteAnimator.marginRightPx - spriteAnimator.walkDistancePx
+        // A recreate (theme switch, rotation) must not teleport her home; clamp in
+        // case the metrics changed — or she was saved mid-escape, off-screen.
+        val savedX = saved?.getInt(KEY_SPRITE_X, -1) ?: -1
+        val initialX = if (savedX >= 0) savedX.coerceIn(0, maxOf(0, dm.widthPixels - w)) else defaultX
+        saved?.let {
+            spriteAnimator.position = if (it.getBoolean(KEY_SPRITE_POS_LEFT))
+                SpriteAnimator.OverlayPosition.Left else SpriteAnimator.OverlayPosition.Right
+        }
 
         spriteView = ImageView(this).apply {
             scaleType = ImageView.ScaleType.FIT_CENTER
@@ -149,6 +220,9 @@ class TutorialActivity : AppCompatActivity() {
         val extraMarginPx = (48 * density).toInt()
         binding.sandbox.post {
             spriteView.y = (binding.sandbox.height - h - spriteAnimator.marginBottomPx - extraMarginPx).toFloat()
+            // The floor glow hugs her walk line — its Y depends on sprite metrics.
+            binding.floorGlow.y = spriteView.y + h - 80 * density
+            binding.floorGlow.visibility = View.VISIBLE
         }
 
         spriteAnimator.attach(ViewGroupSpriteSurface(spriteView, w, h, initialX))
@@ -164,7 +238,7 @@ class TutorialActivity : AppCompatActivity() {
             ttsFailed = true
             lastResponse?.let { bubbleManager.showResponse(it, RESPONSE_TIMEOUT) }
         }
-        val surface = ViewGroupBubbleSurface(binding.sandbox, density)
+        val surface = DimmingBubbleSurface(ViewGroupBubbleSurface(binding.sandbox, density))
         bubbleManager = BubbleManager(this, surface, handler, object : BubbleManager.Host {
             override fun onTtsStop() {}
             override fun onSendReply(text: String) {
@@ -179,6 +253,79 @@ class TutorialActivity : AppCompatActivity() {
         })
     }
 
+    /**
+     * Senni's script bubble and the live response dialog share the same Monet color — both
+     * at full brightness is clutter. The script steps back (0.25 alpha) whenever a centered
+     * response bubble is on stage and returns when it leaves. Keying on the surface's
+     * attach/detach catches every path: recall, reply follow-ups, TTS-fallback bubbles,
+     * auto-dismiss timeouts, and tap-to-dismiss — with no timeline bookkeeping to go stale.
+     */
+    private inner class DimmingBubbleSurface(
+        private val delegate: BubbleSurface
+    ) : BubbleSurface {
+        private var centered: View? = null
+
+        override fun attach(view: View, placement: BubblePlacement, maxWidth: Int) {
+            delegate.attach(view, placement, maxWidth)
+            if (placement == BubblePlacement.CENTERED_DIALOG) {
+                centered = view
+                dimNarration(true)
+            }
+        }
+
+        override fun makeFocusable(view: View): Boolean = delegate.makeFocusable(view)
+        override fun makeUnfocusable(view: View) = delegate.makeUnfocusable(view)
+
+        override fun detach(view: View) {
+            delegate.detach(view)
+            if (view === centered) {
+                centered = null
+                dimNarration(false)
+            }
+        }
+    }
+
+    /** Gesture hints and the finale sparkle live above the sprite; touches pass through both. */
+    private fun setupOverlays() {
+        hintView = GestureHintView(this)
+        sparkleView = SparkleBurstView(this)
+        val lp = { FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT) }
+        binding.sandbox.addView(hintView, lp())
+        binding.sandbox.addView(sparkleView, lp())
+    }
+
+    /**
+     * Dress the narration as Senni's own speech bubble — Monet bubble colors (full-opacity,
+     * vs the live bubbles' 0xFA, so script and live dialogue read differently), a tail toward
+     * her corner, and the main screen's dot language for progress. Bubble text must use
+     * [BubbleStyle] colors, not theme attrs: accent1_100 stays pastel-light in dark mode.
+     */
+    private fun setupNarration() {
+        val c = BubbleStyle.colors(this)
+        binding.narrationBubble.background = GradientDrawable().apply {
+            setColor(c.bg)
+            cornerRadius = 24f * density
+        }
+        binding.bubbleTail.background?.mutate()?.setTint(c.bg)
+        binding.senniLabel.setTextColor(c.text)
+        binding.senniLabel.alpha = 0.65f
+        binding.stepTitle.setTextColor(c.text)
+        binding.stepBody.setTextColor(c.text)
+
+        val size = (8 * density).toInt()
+        val margin = (4 * density).toInt()
+        repeat(steps.size) {
+            binding.stepDots.addView(View(this).apply {
+                layoutParams = LinearLayout.LayoutParams(size, size).apply {
+                    marginStart = margin
+                    marginEnd = margin
+                }
+                setBackgroundResource(R.drawable.page_indicator_unselected)
+            })
+        }
+    }
+
     // ══════════════════════════════════════════════════════════════════════
     // Gesture router — same thresholds as CompanionOverlayService.setupTouchHandling
     // ══════════════════════════════════════════════════════════════════════
@@ -188,6 +335,9 @@ class TutorialActivity : AppCompatActivity() {
         val swipeThreshold = SWIPE_MIN_DISTANCE_DP * density
         spriteView.isClickable = true
         spriteView.setOnTouchListener { _, event ->
+            // Production ghost mode sets FLAG_NOT_TOUCHABLE — taps pass through her.
+            // Mirror it: while ghosted, her touches fall through to the keys beneath.
+            if (spriteAnimator.isGhostMode) return@setOnTouchListener false
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
                     isLongPress = false
@@ -276,23 +426,33 @@ class TutorialActivity : AppCompatActivity() {
         ttsManager.speak(text)
     }
 
+    /** Step the script bubble back while a same-colored response bubble holds the stage. */
+    private fun dimNarration(dim: Boolean) {
+        binding.narrationBlock.animate()
+            .alpha(if (dim) 0.25f else 1f).setDuration(200L).start()
+    }
+
     /** Top ⅔ long-press: capture the screen, listen so you can talk about it, then answer aloud. */
     private fun runShowAndTell() {
         bubbleManager.showBrief(getString(R.string.svc_bubble_let_me_see), 2000L)
         // Screenshot-with-voice: she listens so you can talk about what you grabbed.
+        // Production (dispatchCapturedImage) hides the capture brief before voice
+        // starts, so the listening bubble takes the primary top-right slot.
         schedule(700L) {
+            bubbleManager.hideSpeechBubble()
             bubbleManager.showVoice(listeningLabel())
             beep(BeepManager.Beep.READY)
         }
+        // Listening → thinking has no beep in production (the STEP beep belongs
+        // to the Transcribing status — see the voice demo and speakReply).
         schedule(1900L) {
             bubbleManager.hideVoice()
-            beep(BeepManager.Beep.STEP)
             bubbleManager.showBrief(getString(R.string.svc_bubble_thinking), 30000L)
         }
         // Reply is spoken, not bubbled (onResponseReceived → hideSpeechBubble + speak).
+        // Completion is the gesture itself (onLongPress), not the demo's end.
         schedule(3100L) {
             speakReply(getString(R.string.tutorial_canned_response))
-            complete()
         }
     }
 
@@ -315,32 +475,91 @@ class TutorialActivity : AppCompatActivity() {
             bubbleManager.showBrief(getString(R.string.svc_bubble_thinking), 30000L)
         }
         // Reply is spoken aloud with NO bubble (onResponseReceived → hideSpeechBubble + speak).
+        // Completion belongs to the triple-press, not the demo's end.
         schedule(3200L) {
             speakReply(getString(R.string.tutorial_canned_voice_reply))   // real, on-device, permission-free
-            complete()
         }
     }
 
-    /** Looping volume ×2 hide/show demo until user advances. */
-    private fun runVisibilityDemo() {
-        fun loop() {
-            if (stepComplete) return
-            // Show ×2, then fade her out
-            showBadgeCentered("×2")
-            schedule(800L) {
-                spriteView.animate().alpha(0f).setDuration(300L).start()
-            }
-            // Wait, then show ×2 again, then fade her back in
-            schedule(2200L) {
-                if (stepComplete) return@schedule
-                showBadgeCentered("×2")
-                schedule(800L) {
-                    spriteView.animate().alpha(1f).setDuration(300L).start()
-                }
-                schedule(2200L) { loop() }
+    /** A successful double-press on the mock key hides her; the next brings her back. */
+    private fun toggleMockVisibility() {
+        mockHidden = !mockHidden
+        spriteView.animate().alpha(if (mockHidden) 0f else 1f).setDuration(300L).start()
+        if (mockHidden) complete()   // first successful hide is the achievement
+    }
+
+    // ── Mock volume key (production press window) ──
+
+    /**
+     * Show the edge-mounted volume key. [presses] in quick succession (the real
+     * [VOLUME_PRESS_WINDOW_MS] window) trigger [action]: a triple fires on the third
+     * press immediately, a double resolves when the window closes — exactly the
+     * accessibility service's rhythm.
+     */
+    private fun showVolumeKey(presses: Int, action: () -> Unit) {
+        volTarget = presses
+        volAction = action
+        volPresses = 0
+        if (mockVolumeKey != null) return
+        val v = MockVolumeKeyView(this) { onVolumeKeyPress() }
+        val lp = FrameLayout.LayoutParams(
+            (28 * density).toInt(), (84 * density).toInt(),
+            Gravity.END or Gravity.CENTER_VERTICAL
+        ).apply { marginEnd = (6 * density).toInt() }
+        v.alpha = 0f
+        binding.sandbox.addView(v, lp)
+        v.animate().alpha(1f).setDuration(200L).start()
+        mockVolumeKey = v
+    }
+
+    private fun removeVolumeKey() {
+        mockVolumeKey?.let { it.animate().cancel(); binding.sandbox.removeView(it) }
+        mockVolumeKey = null
+        volAction = null
+        handler.removeCallbacks(volResolve)
+    }
+
+    private fun onVolumeKeyPress() {
+        handler.removeCallbacks(volResolve)
+        volPresses++
+        if (volTarget >= 3 && volPresses >= volTarget) {
+            volPresses = 0
+            volAction?.invoke()
+        } else {
+            handler.postDelayed(volResolve, stepToken, VOLUME_PRESS_WINDOW_MS)
+        }
+    }
+
+    // ── Ghost-page keyboard playground ──
+
+    /** An edge key summons the keyboard; she ghosts; three real key presses through her complete it. */
+    private fun setupKeyboardPlayground() {
+        if (mockKbdToggle != null) return
+        val v = MockKeyboardToggleView(this) {
+            mockKeyboardUp = !mockKeyboardUp
+            mockKbdToggle?.active = mockKeyboardUp
+            if (mockKeyboardUp) {
+                showMockKeyboard()
+                schedule(KBD_SLIDE_MS) { spriteAnimator.setGhostMode(true) }
+            } else {
+                hideMockKeyboard()
+                spriteAnimator.setGhostMode(false)
             }
         }
-        loop()
+        // The same edge spot as the volume key — the tutorial's "hardware" lives there.
+        val lp = FrameLayout.LayoutParams(
+            (44 * density).toInt(), (44 * density).toInt(),
+            Gravity.END or Gravity.CENTER_VERTICAL
+        ).apply { marginEnd = (6 * density).toInt() }
+        v.alpha = 0f
+        binding.sandbox.addView(v, lp)
+        v.animate().alpha(1f).setDuration(200L).start()
+        mockKbdToggle = v
+    }
+
+    private fun removeKbdToggle() {
+        mockKbdToggle?.let { it.animate().cancel(); binding.sandbox.removeView(it) }
+        mockKbdToggle = null
     }
 
     /** MCP tool-call indicator (production's 🔧 format string), then the reply spoken aloud. */
@@ -355,17 +574,66 @@ class TutorialActivity : AppCompatActivity() {
         }
     }
 
-    /** Looping ghost-mode fade until the user advances. */
-    private fun runGhostDemo() {
-        fun loop() {
-            if (stepComplete) return
-            spriteAnimator.setGhostMode(true)
-            schedule(2400L) {
-                spriteAnimator.setGhostMode(false)
-                schedule(1200L) { loop() }
+    // ── Stage props ──
+
+    /**
+     * Slide the mock keyboard up behind her, its bottom edge on the stage floor (her
+     * walk line) so it stays clear of the Prev/Next buttons. She stands in front,
+     * ghosted — the phantom key presses read right through her.
+     */
+    private fun showMockKeyboard() {
+        val v = mockKeyboard ?: MockKeyboardView(this).also { kb ->
+            val h = (190 * density).toInt()
+            // Clipping host pinned at the keyboard's final bounds: the keyboard
+            // slides inside it, emerging from the stage floor — nothing ever
+            // shows below the floor line (the bare slide used to be visible
+            // rising past the nav buttons).
+            val host = FrameLayout(this)
+            host.addView(kb, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT
+            ))
+            val lp = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, h, Gravity.BOTTOM
+            ).apply {
+                // Rest exactly on the floor glow's bright bottom edge.
+                bottomMargin = (binding.sandbox.height
+                        - (binding.floorGlow.y + binding.floorGlow.height)).toInt()
             }
+            binding.sandbox.addView(host, 0, lp)   // index 0: set dressing, behind her
+            kb.translationY = h.toFloat()
+            kb.onUserKeyPress = {
+                kbdUserPresses++
+                if (kbdUserPresses == KBD_PRESSES_TO_COMPLETE) complete()
+            }
+            mockKeyboard = kb
         }
-        loop()
+        v.animate().translationY(0f).setDuration(KBD_SLIDE_MS)
+            .setInterpolator(fastOutSlowIn).start()
+        v.startTyping(spriteView)
+    }
+
+    private fun hideMockKeyboard() {
+        mockKeyboard?.let {
+            it.stopTyping()
+            it.animate().translationY(it.height.toFloat()).setDuration(KBD_SLIDE_MS)
+                .setInterpolator(fastOutSlowIn).start()
+        }
+    }
+
+    /** The capture demo's "something on screen": a little code-editor window, behind her. */
+    private fun showMockWindow() {
+        if (mockWindow != null) return
+        val v = MockAppWindowView(this)
+        val lp = FrameLayout.LayoutParams(
+            (190 * density).toInt(), (130 * density).toInt(), Gravity.TOP or Gravity.START
+        ).apply {
+            marginStart = (20 * density).toInt()
+            topMargin = (binding.sandbox.height * 0.47f).toInt()
+        }
+        v.alpha = 0f
+        binding.sandbox.addView(v, 0, lp)   // index 0: set dressing renders behind her
+        v.animate().alpha(1f).setDuration(200L).start()
+        mockWindow = v
     }
 
     /** Restart a demo step's auto-play from a tap, clearing anything mid-flight first. */
@@ -374,32 +642,31 @@ class TutorialActivity : AppCompatActivity() {
         run()
     }
 
-    // ── Press-count badge (visibility demo) ──
+    // ── Step-complete check badge ──
 
-    /** Show badge centered in the bottom half of the screen (between narration and buttons). */
-    private fun showBadgeCentered(text: String) {
-        val tv = badgeView ?: TextView(this).apply {
-            textSize = 64f
-            setTextColor(getColor(R.color.gold))
-            gravity = Gravity.CENTER
-            // Position in bottom half, vertically centered between screen center and bottom
+    /** Pop the gold checkmark in the gap between her head and the narration bubble. */
+    private fun showCheckBadge() {
+        val iv = badgeView ?: ImageView(this).apply {
+            setImageResource(R.drawable.ic_tutorial_check)
+            imageTintList = ColorStateList.valueOf(getColor(R.color.gold))
+            val size = (72 * density).toInt()
             val lp = FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.WRAP_CONTENT,
-                FrameLayout.LayoutParams.WRAP_CONTENT,
-                Gravity.CENTER_HORIZONTAL or Gravity.BOTTOM
+                size, size, Gravity.CENTER_HORIZONTAL or Gravity.BOTTOM
             )
-            lp.bottomMargin = (binding.sandbox.height * 0.25f).toInt()
+            // Anchor just above her top edge — a fixed spot sat right where she
+            // stands once she's walked toward screen center.
+            lp.bottomMargin =
+                (binding.sandbox.height - spriteView.y + 12 * density).toInt()
             binding.sandbox.addView(this, lp)
             badgeView = this
         }
-        tv.text = text
-        tv.animate().cancel()
-        tv.alpha = 0f
-        tv.scaleX = 0.6f
-        tv.scaleY = 0.6f
-        tv.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(200L)
+        iv.animate().cancel()
+        iv.alpha = 0f
+        iv.scaleX = 0.6f
+        iv.scaleY = 0.6f
+        iv.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(200L)
             .withEndAction {
-                tv.animate().alpha(0f).setStartDelay(600L).setDuration(300L).start()
+                iv.animate().alpha(0f).setStartDelay(600L).setDuration(300L).start()
             }.start()
     }
 
@@ -445,52 +712,86 @@ class TutorialActivity : AppCompatActivity() {
         Step(
             title = getString(R.string.tutorial_step_intro_title),
             body = getString(R.string.tutorial_step_intro_body),
+            onEnter = {
+                // She greets aloud once per run — rotation and Prev stay quiet.
+                if (!greeted && !ttsFailed) {
+                    greeted = true
+                    ttsManager.speak(getString(R.string.tutorial_intro_spoken))
+                }
+            },
         ),
         // ── Core gestures ──
         Step(
             title = getString(R.string.tutorial_step_tap_title),
             body = getString(R.string.tutorial_step_tap_body),
             autoAdvance = true,
+            reward = true,
+            hint = GestureHintView.Hint.TAP,
             onTap = { spriteAnimator.handleTouch(); complete() },
         ),
         Step(
             title = getString(R.string.tutorial_step_escape_title),
             body = getString(R.string.tutorial_step_escape_body),
             autoAdvance = true,
+            reward = true,
+            hint = GestureHintView.Hint.TAP,
             onTap = { spriteAnimator.handleTouch() },
             onEscape = { complete() },
         ),
         Step(
             title = getString(R.string.tutorial_step_talk_title),
             body = getString(R.string.tutorial_step_talk_body),
+            // Set dressing: something on screen for the capture to "see" — her
+            // canned reply comments on a code editor, so show one.
+            onEnter = { showMockWindow() },
+            reward = true,
+            hint = GestureHintView.Hint.LONG_PRESS_UPPER,
             onLongPress = {
-                if (touchDownY < spriteView.height * 2f / 3f) runShowAndTell()
+                if (touchDownY < spriteView.height * 2f / 3f) {
+                    runShowAndTell()
+                    complete()   // the gesture is the achievement; the demo plays on
+                }
             },
         ),
         Step(
             title = getString(R.string.tutorial_step_recall_title),
             body = getString(R.string.tutorial_step_recall_body),
+            reward = true,
+            hint = GestureHintView.Hint.LONG_PRESS_LOWER,
             onLongPress = {
-                if (touchDownY >= spriteView.height * 2f / 3f) runRecall()
+                if (touchDownY >= spriteView.height * 2f / 3f) {
+                    runRecall()
+                }
             },
         ),
         Step(
             title = getString(R.string.tutorial_step_radial_title),
             body = getString(R.string.tutorial_step_radial_body),
+            reward = true,
+            hint = GestureHintView.Hint.SWIPE_UP,
             onSwipeUp = { openRadial() },
             onSwipeDown = { closeRadial() },
         ),
-        // ── Hardware shortcuts ──
+        // ── Hardware shortcuts (practiced on the mock edge key) ──
         Step(
             title = getString(R.string.tutorial_step_visibility_title),
             body = getString(R.string.tutorial_step_visibility_body),
-            onEnter = { runVisibilityDemo() },
+            reward = true,
+            onEnter = { showVolumeKey(presses = 2) { toggleMockVisibility() } },
         ),
         Step(
             title = getString(R.string.tutorial_step_voice_title),
             body = getString(R.string.tutorial_step_voice_body),
-            onEnter = { runVoiceDemo() },
-            onTap = { replay { runVoiceDemo() } },
+            reward = true,
+            onEnter = {
+                showVolumeKey(presses = 3) {
+                    complete()
+                    // A beat between the ✓/STEP and the demo's READY beep — and
+                    // production's engine spin-up has the same small gap.
+                    schedule(300L) { runVoiceDemo() }
+                }
+            },
+            // No tap-replay here — the edge key is the replay; taps just walk her.
         ),
         // ── Advanced ──
         Step(
@@ -502,14 +803,38 @@ class TutorialActivity : AppCompatActivity() {
         Step(
             title = getString(R.string.tutorial_step_ghost_title),
             body = getString(R.string.tutorial_step_ghost_body),
-            onEnter = { runGhostDemo() },
+            reward = true,
+            onEnter = { setupKeyboardPlayground() },
         ),
         // ── Outro ──
         Step(
             title = getString(R.string.tutorial_step_outro_title),
             body = getString(R.string.tutorial_step_outro_body),
+            onEnter = {
+                // The burst punctuates her sign-off — it fires when she finishes
+                // speaking, not while she's mid-sentence.
+                if (!ttsFailed) {
+                    ttsManager.onSpeechDone = {
+                        ttsManager.onSpeechDone = null
+                        celebrate()
+                    }
+                    ttsManager.speak(getString(R.string.tutorial_outro_spoken))
+                } else {
+                    schedule(350L) { celebrate() }
+                }
+            },
+            onTap = { celebrate() },   // sparkles on demand — cheap delight
         ),
     )
+
+    /** Gold sparkle burst around her + the DONE beep — reserved for the finale. */
+    private fun celebrate() {
+        sparkleView.burst(
+            spriteView.x + spriteView.width / 2f,
+            spriteView.y + spriteView.height * 0.3f
+        )
+        beep(BeepManager.Beep.DONE)
+    }
 
     // ══════════════════════════════════════════════════════════════════════
     // Step driver
@@ -518,11 +843,22 @@ class TutorialActivity : AppCompatActivity() {
     private fun complete() {
         if (stepComplete) return
         stepComplete = true
-        if (current.autoAdvance) advance()
+        hintView.hide()
+        if (current.reward) {
+            // Success is legible: a gold ✓ pop + the STEP beep.
+            showCheckBadge()
+            beep(BeepManager.Beep.STEP)
+        }
+        if (current.autoAdvance) {
+            // Let the ✓ land before the transition wipes it.
+            schedule(REWARD_ADVANCE_DELAY_MS) { advance() }
+        } else {
+            startNextPulse()
+        }
     }
 
     private fun advance() {
-        if (stepIndex >= steps.lastIndex) { finish(); return }
+        if (stepIndex >= steps.lastIndex) { runFinale(); return }
         goToStep(stepIndex + 1)
     }
 
@@ -530,34 +866,154 @@ class TutorialActivity : AppCompatActivity() {
         if (stepIndex > 0) goToStep(stepIndex - 1)
     }
 
+    /** Finish pressed: she bolts off-screen the way she escapes, then the Activity follows. */
+    private fun runFinale() {
+        if (finaleRunning) return
+        finaleRunning = true
+        beep(BeepManager.Beep.DONE)
+        spriteAnimator.escape()
+        binding.narrationBlock.animate().cancel()
+        binding.narrationBlock.animate().alpha(0f).setDuration(300L).start()
+        binding.prevButton.isEnabled = false
+        binding.nextButton.isEnabled = false
+        // Her exit walk is ~800ms; finish just after she clears the edge (the Enter
+        // half of the escape hasn't visibly re-entered yet).
+        schedule(FINALE_EXIT_MS) { finish() }
+    }
+
     private fun goToStep(i: Int) {
+        val dir = if (i >= stepIndex) 1f else -1f
         if (i != stepIndex) steps[stepIndex].onExit()
         stepIndex = i
         stepComplete = false
+        finaleRunning = false
+        // The edge "hardware" survives in-step replays (resetSandbox), not step changes.
+        removeVolumeKey()
+        removeKbdToggle()
         resetSandbox()
 
-        val s = steps[i]
-        binding.stepProgress.text = getString(R.string.tutorial_step_progress, i + 1, steps.size)
+        binding.narrationBlock.animate().cancel()
+        if (firstNarration) {
+            // Nothing to fade out yet — just reveal.
+            firstNarration = false
+            applyNarration()
+            binding.narrationBlock.alpha = 0f
+            binding.narrationBlock.translationX = 20 * density
+            binding.narrationBlock.animate().alpha(1f).translationX(0f)
+                .setDuration(NARRATION_IN_MS).setInterpolator(fastOutSlowIn).start()
+            enterStep()
+        } else {
+            // Two beats: narration slides out, then (token-scheduled — withEndAction is
+            // skipped on cancel, the token isn't) the new step binds and slides in.
+            // Next-spam is safe: each pass's resetSandbox drops the previous pending bind.
+            binding.narrationBlock.animate().alpha(0f).translationX(-20 * density * dir)
+                .setDuration(NARRATION_OUT_MS).setInterpolator(fastOutSlowIn).start()
+            schedule(NARRATION_OUT_MS + 20) {
+                applyNarration()
+                binding.narrationBlock.translationX = 20 * density * dir
+                binding.narrationBlock.animate().alpha(1f).translationX(0f)
+                    .setDuration(NARRATION_IN_MS).setInterpolator(fastOutSlowIn).start()
+                enterStep()
+            }
+        }
+    }
+
+    /** Bind the current step's copy, dots, and button states. */
+    private fun applyNarration() {
+        val s = current
         binding.stepTitle.text = s.title
         binding.stepBody.text = s.body
-        binding.nextButton.text = if (i == steps.lastIndex) getString(R.string.tutorial_finish) else getString(R.string.tutorial_next)
-        binding.prevButton.isEnabled = i > 0
+        binding.nextButton.text = if (stepIndex == steps.lastIndex)
+            getString(R.string.tutorial_finish) else getString(R.string.tutorial_next)
+        binding.nextButton.isEnabled = true
+        binding.prevButton.isEnabled = stepIndex > 0
+        // The static gold backgroundTint hides Material's disabled state — without
+        // the alpha cue, a disabled Previous on page 1 looks perfectly pressable.
+        binding.prevButton.alpha = if (stepIndex > 0) 1f else 0.4f
+        updateDots()
+    }
 
-        s.onEnter()
+    private fun updateDots() {
+        for (j in 0 until binding.stepDots.childCount) {
+            val dot = binding.stepDots.getChildAt(j)
+            val active = j == stepIndex
+            dot.setBackgroundResource(
+                if (active) R.drawable.page_indicator_selected
+                else R.drawable.page_indicator_unselected
+            )
+            dot.animate().cancel()
+            val target = if (active) 1.25f else 1f
+            dot.animate().scaleX(target).scaleY(target).setDuration(150L).start()
+        }
+        // The dots replace the "2 / 11" text visually; keep the count for TalkBack.
+        binding.stepDots.contentDescription =
+            getString(R.string.tutorial_step_progress, stepIndex + 1, steps.size)
+    }
+
+    private fun enterStep() {
+        current.onEnter()
+        current.hint?.let { h ->
+            // A beat of patience first — the hint reads as "she's waiting for you".
+            schedule(HINT_DELAY_MS) { hintView.show(h, spriteView, LONG_PRESS_TIMEOUT_MS) }
+        }
+    }
+
+    // ── Next-button pulse: "you can move on now" ──
+
+    private fun startNextPulse() {
+        if (nextPulse != null) return
+        nextPulse = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 1100L
+            repeatCount = ValueAnimator.INFINITE
+            addUpdateListener {
+                val s = 1f + 0.04f * sin(Math.PI * (it.animatedValue as Float)).toFloat()
+                binding.nextButton.scaleX = s
+                binding.nextButton.scaleY = s
+            }
+            start()
+        }
+    }
+
+    private fun cancelNextPulse() {
+        nextPulse?.cancel()
+        nextPulse = null
+        binding.nextButton.scaleX = 1f
+        binding.nextButton.scaleY = 1f
     }
 
     /** Clear all transient sandbox state between (or on replay within) steps. */
     private fun resetSandbox() {
         handler.removeCallbacksAndMessages(stepToken)
-        bubbleManager.hideSpeechBubble(animate = false)
+        bubbleManager.hideSpeechBubble(animate = true)   // 250ms fade; ref is nulled at once
         bubbleManager.hideVoice()
         closeRadial()
         ttsManager.onSpeechDone = null   // a stale DONE beep must not outlive its step
         ttsManager.stop()
-        spriteAnimator.setGhostMode(false)
         spriteView.animate().cancel()
-        spriteView.alpha = 1f
+        spriteAnimator.setGhostMode(false)
+        // setGhostMode's alpha restore only runs when the ghost flag was actually set —
+        // the visibility demo fades her with plain view.animate(), so leaving that step
+        // mid-"hidden" left her invisible. Restore explicitly, softly.
+        if (spriteView.alpha != 1f) {
+            spriteView.animate().alpha(1f).setDuration(200L).start()
+        }
+        hintView.hide(animated = false)
+        sparkleView.cancel()
+        cancelNextPulse()
         removeBadge()
+        mockKeyboard?.let {
+            it.stopTyping()
+            it.animate().cancel()
+            binding.sandbox.removeView(it.parent as? View)   // its clipping host
+        }
+        mockKeyboard = null
+        mockWindow?.let { it.animate().cancel(); binding.sandbox.removeView(it) }
+        mockWindow = null
+        mockKeyboardUp = false
+        kbdUserPresses = 0
+        volPresses = 0
+        mockHidden = false
+        mockKbdToggle?.active = false
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -582,6 +1038,18 @@ class TutorialActivity : AppCompatActivity() {
         handler.removeCallbacksAndMessages(stepToken)
         ttsManager.onSpeechDone = null
         ttsManager.stop()
+        // A killed mid-transition narration would stay half-faded; snap to identity
+        // (onResume's clean re-enter animates it again anyway). NOT when finishing —
+        // the finale just faded it out, and this snap flashed it back during the
+        // window's exit transition.
+        if (!isFinishing) {
+            binding.narrationBlock.animate().cancel()
+            binding.narrationBlock.alpha = 1f
+            binding.narrationBlock.translationX = 0f
+        }
+        hintView.hide(animated = false)
+        sparkleView.cancel()
+        cancelNextPulse()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -589,6 +1057,12 @@ class TutorialActivity : AppCompatActivity() {
         outState.putInt(KEY_STEP, stepIndex)
         outState.putString(KEY_LAST_RESPONSE, lastResponse)
         outState.putBoolean(KEY_OVERLAY_WAS_RUNNING, overlayWasRunning)
+        outState.putBoolean(KEY_GREETED, greeted)
+        outState.putInt(KEY_SPRITE_X, spriteView.x.toInt())
+        outState.putBoolean(
+            KEY_SPRITE_POS_LEFT,
+            spriteAnimator.position == SpriteAnimator.OverlayPosition.Left
+        )
     }
 
     override fun onDestroy() {
@@ -611,8 +1085,24 @@ class TutorialActivity : AppCompatActivity() {
         const val LONG_PRESS_TIMEOUT_MS = CompanionOverlayService.LONG_PRESS_TIMEOUT_MS
         const val SWIPE_MIN_DISTANCE_DP = CompanionOverlayService.SWIPE_MIN_DISTANCE_DP
         const val RESPONSE_TIMEOUT = 60000L
+
+        // Step-transition choreography.
+        const val NARRATION_OUT_MS = 160L
+        const val NARRATION_IN_MS = 220L
+        const val HINT_DELAY_MS = 900L
+        const val REWARD_ADVANCE_DELAY_MS = 600L
+        /** Escape's exit walk is ~800ms (4 × 200ms frames); finish just past the edge. */
+        const val FINALE_EXIT_MS = 820L
+        const val KBD_SLIDE_MS = 250L
+        const val KBD_PRESSES_TO_COMPLETE = 3
+        /** The accessibility service's real double/triple-press window. */
+        const val VOLUME_PRESS_WINDOW_MS = CompanionAccessibilityService.DOUBLE_TAP_WINDOW_MS
+
         const val KEY_STEP = "tutorial_step"
         const val KEY_LAST_RESPONSE = "tutorial_last_response"
         const val KEY_OVERLAY_WAS_RUNNING = "tutorial_overlay_was_running"
+        const val KEY_GREETED = "tutorial_greeted"
+        const val KEY_SPRITE_X = "tutorial_sprite_x"
+        const val KEY_SPRITE_POS_LEFT = "tutorial_sprite_pos_left"
     }
 }

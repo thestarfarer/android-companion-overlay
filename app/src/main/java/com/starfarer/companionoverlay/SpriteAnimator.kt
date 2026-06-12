@@ -334,6 +334,9 @@ class SpriteAnimator(
         }
     }
 
+    /** Scripted escape — deterministic trigger for the tutorial finale (handleTouch's is randomized). */
+    fun escape() = triggerEscape()
+
     fun dismissAnimated(onComplete: () -> Unit) {
         val view = surface?.view ?: run { onComplete(); return }
         view.animate()

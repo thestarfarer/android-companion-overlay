@@ -45,4 +45,11 @@
 
     <!-- Sprite card divider (darker than card for visibility) -->
     <color name="sprite_divider">@color/background</color>
+
+    <!-- Tutorial stage floor glow (the radial glow is a dithered bitmap) -->
+    <color name="tutorial_floor">#26FFD700</color>
+
+    <!-- Tutorial mock keyboard (ghost-mode demo prop) -->
+    <color name="tutorial_kbd_panel">#2B2D30</color>
+    <color name="tutorial_kbd_key">#3F4145</color>
 </resources>
