@@ -61,9 +61,10 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
         // Notification "Stop" action — the only way to dismiss the overlay
         // without opening the app.
         const val ACTION_STOP = "com.starfarer.companionoverlay.action.STOP"
-        private const val LONG_PRESS_TIMEOUT_MS = 500L
+        // internal: the tutorial's gesture router mirrors these 1:1.
+        internal const val LONG_PRESS_TIMEOUT_MS = 500L
         // Vertical travel (dp) that commits a swipe — opens/closes the radial menu.
-        private const val SWIPE_MIN_DISTANCE_DP = 56f
+        internal const val SWIPE_MIN_DISTANCE_DP = 56f
     }
 
     // ══════════════════════════════════════════════════════════════════════

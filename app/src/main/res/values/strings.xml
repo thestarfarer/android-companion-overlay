@@ -220,11 +220,6 @@
     <string name="tutorial_step_ghost_body">When a keyboard appears she turns semi-transparent and lets taps pass through, so she never blocks what you\'re typing.</string>
     <string name="tutorial_step_outro_title">You\'re all set</string>
     <string name="tutorial_step_outro_body">That\'s the tour. Tap to walk, long-press to talk or recall, swipe up for quick settings. Have fun!</string>
-    <string name="tutorial_bubble_let_me_see">Let me see~</string>
-    <string name="tutorial_status_listening">🎙 Listening...</string>
-    <string name="tutorial_status_transcribing">✒️ Transcribing...</string>
-    <string name="tutorial_status_thinking">🧠 Thinking…</string>
-    <string name="tutorial_status_tool_call">🔧 get_weather</string>
     <string name="tutorial_recall_placeholder">This is where my last reply would appear!</string>
     <string name="tutorial_canned_response">Ooh, a code editor~ Looks like you\'re deep in a Kotlin file. Want me to explain what\'s on screen, or just keep you company?</string>
     <string name="tutorial_canned_followup">Got it! That\'s exactly how a real reply works — I\'d read it and answer. Try the next gesture when you\'re ready. ✨</string>

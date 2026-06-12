@@ -21,8 +21,9 @@ class RadialMenuManager(
 
     companion object {
         private const val TAG = "RadialMenu"
-        private const val RADIUS_DP = 96f    // 0.8 × 120
-        private const val PAD_DP = 9.6f      // 0.8 × 12
+        // internal: shared with RadialMenuView's padding and the tutorial's hosted dial.
+        internal const val RADIUS_DP = 96f    // 0.8 × 120
+        internal const val PAD_DP = 9.6f      // 0.8 × 12
     }
 
     private val density = context.resources.displayMetrics.density
