@@ -2,13 +2,19 @@ package com.starfarer.companionoverlay.mcp
 
 import com.starfarer.companionoverlay.DebugLog
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.*
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
+import java.io.IOException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -28,6 +34,8 @@ class McpClient(
 ) {
     companion object {
         private const val TAG = "MCP"
+        private const val PROTOCOL_VERSION = "2025-03-26"
+        private const val SSE_MAX_EVENTS = 1000
     }
 
     private val json = Json {
@@ -45,9 +53,20 @@ class McpClient(
     private val requestIdCounter = AtomicInteger(1)
     @Volatile private var sessionId: String? = null
     @Volatile private var initialized = false
+    @Volatile private var negotiatedProtocol: String = PROTOCOL_VERSION
 
     @Volatile private var cachedToken: String? = null
     @Volatile private var tokenExpiresAt: Long = 0
+
+    // Serializes the initialize handshake against concurrent callTool reinits —
+    // two tool calls hitting !initialized at once used to interleave handshakes
+    // on the shared sessionId/tools state.
+    private val initMutex = Mutex()
+
+    // Current in-flight HTTP call, so an external cancel can abort the blocking
+    // execute() (and the server-side tool effect) instead of waiting out the
+    // 120s read timeout.
+    @Volatile private var activeCall: Call? = null
 
     @Volatile var tools: List<McpToolDefinition> = emptyList()
         private set
@@ -58,19 +77,30 @@ class McpClient(
 
     /** Full initialization: handshake + tool discovery. Call on IO dispatcher. */
     suspend fun initialize(): Result<List<McpToolDefinition>> = withContext(Dispatchers.IO) {
+        initMutex.withLock { initializeLocked() }
+    }
+
+    private fun initializeLocked(): Result<List<McpToolDefinition>> {
         try {
+            // A fresh handshake must not carry a stale session id from a prior
+            // partial init — the server would reject it.
+            sessionId = null
+            initialized = false
+
             // Step 1: Send initialize request
             val initParams = json.encodeToJsonElement(McpInitializeParams())
             val initResponse = sendRequest("initialize", initParams as JsonObject)
             if (initResponse.error != null) {
-                return@withContext Result.failure(
+                return Result.failure(
                     McpException("Initialize failed: ${initResponse.error.message}")
                 )
             }
 
             val initResult = initResponse.result?.let {
                 json.decodeFromJsonElement<McpInitializeResult>(it)
-            } ?: return@withContext Result.failure(McpException("Empty initialize response"))
+            } ?: return Result.failure(McpException("Empty initialize response"))
+
+            negotiatedProtocol = initResult.protocolVersion.ifBlank { PROTOCOL_VERSION }
 
             DebugLog.log(TAG, "Initialized ${config.name}: " +
                 "server=${initResult.serverInfo?.name}, " +
@@ -82,7 +112,7 @@ class McpClient(
             // Step 3: Discover tools
             val toolsResponse = sendRequest("tools/list")
             if (toolsResponse.error != null) {
-                return@withContext Result.failure(
+                return Result.failure(
                     McpException("tools/list failed: ${toolsResponse.error.message}")
                 )
             }
@@ -97,10 +127,10 @@ class McpClient(
             DebugLog.log(TAG, "Discovered ${tools.size} tools from ${config.name}: " +
                 tools.joinToString { it.name })
 
-            Result.success(tools)
+            return Result.success(tools)
         } catch (e: Exception) {
             DebugLog.log(TAG, "Initialize error for ${config.name}: ${e.message}")
-            Result.failure(e)
+            return Result.failure(e)
         }
     }
 
@@ -109,10 +139,13 @@ class McpClient(
         toolName: String,
         arguments: JsonObject?
     ): Result<McpToolCallResult> = withContext(Dispatchers.IO) {
-        // Auto-reinitialize if session was lost
+        // Auto-reinitialize if session was lost (mutex-guarded; double-checked
+        // so concurrent callers don't each run a handshake).
         if (!initialized) {
             DebugLog.log(TAG, "Session lost, reinitializing before tool call...")
-            val reinit = initialize()
+            val reinit = initMutex.withLock {
+                if (initialized) Result.success(tools) else initializeLocked()
+            }
             if (reinit.isFailure) {
                 return@withContext Result.failure(
                     McpException("Reinit failed: ${reinit.exceptionOrNull()?.message}")
@@ -126,27 +159,21 @@ class McpClient(
                 if (arguments != null) put("arguments", arguments)
             }
 
-            val response = sendRequest("tools/call", params)
+            var response = sendRequest("tools/call", params)
 
-            // If we got a session error during the call, reinit and retry once
-            if (response.error != null && response.error.code == 400 && !initialized) {
+            // Session expired mid-call (cleared by sendRequest on 404/400) —
+            // re-handshake and retry once.
+            if (response.error != null && !initialized) {
                 DebugLog.log(TAG, "Session died mid-call, reinitializing and retrying...")
-                val reinit = initialize()
+                val reinit = initMutex.withLock {
+                    if (initialized) Result.success(tools) else initializeLocked()
+                }
                 if (reinit.isFailure) {
                     return@withContext Result.failure(
                         McpException("Reinit failed on retry: ${reinit.exceptionOrNull()?.message}")
                     )
                 }
-                val retryResponse = sendRequest("tools/call", params)
-                if (retryResponse.error != null) {
-                    return@withContext Result.failure(
-                        McpException("tools/call error after retry: ${retryResponse.error.message}")
-                    )
-                }
-                val retryResult = retryResponse.result?.let {
-                    json.decodeFromJsonElement<McpToolCallResult>(it)
-                } ?: McpToolCallResult()
-                return@withContext Result.success(retryResult)
+                response = sendRequest("tools/call", params)
             }
 
             if (response.error != null) {
@@ -168,10 +195,34 @@ class McpClient(
             Result.failure(e)
         }
     }
+
+    /** Abort any in-flight HTTP call (user cancelled the conversation). */
+    fun cancelInFlight() {
+        activeCall?.cancel()
+    }
+
     fun disconnect() {
+        val sid = sessionId
         sessionId = null
         initialized = false
         tools = emptyList()
+        activeCall?.cancel()
+        activeCall = null
+        // Per spec, terminate the session server-side. Best-effort, async — a
+        // blocking DELETE on every reconnect would add latency for nothing.
+        if (sid != null) {
+            val request = Request.Builder()
+                .url(config.url)
+                .delete()
+                .header("Mcp-Session-Id", sid)
+                .header("MCP-Protocol-Version", negotiatedProtocol)
+                .apply { getAuthHeader()?.let { header("Authorization", it) } }
+                .build()
+            httpClient.newCall(request).enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {}
+                override fun onResponse(call: Call, response: Response) { response.close() }
+            })
+        }
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -180,15 +231,11 @@ class McpClient(
 
     private fun sendRequest(
         method: String,
-        params: JsonObject? = null
+        params: JsonObject? = null,
+        allowAuthRetry: Boolean = true
     ): JsonRpcResponse {
         val id = requestIdCounter.getAndIncrement()
-        val rpcRequest = JsonRpcRequest(
-            id = id,
-            method = method,
-            params = params
-        )
-
+        val rpcRequest = JsonRpcRequest(id = id, method = method, params = params)
         val bodyJson = json.encodeToString(rpcRequest)
 
         val requestBuilder = Request.Builder()
@@ -196,90 +243,76 @@ class McpClient(
             .post(bodyJson.toRequestBody("application/json".toMediaType()))
             .header("Content-Type", "application/json")
             .header("Accept", "application/json, text/event-stream")
+            .header("MCP-Protocol-Version", negotiatedProtocol)
 
         sessionId?.let { requestBuilder.header("Mcp-Session-Id", it) }
         getAuthHeader()?.let { requestBuilder.header("Authorization", it) }
 
-        val request = requestBuilder.build()
-        val response = httpClient.newCall(request).execute()
-
-        // On 400 (invalid session) — clear session so next call re-initializes
-        if (response.code == 400) {
-            val errorBody = response.body?.string() ?: ""
-            response.close()
-            sessionId = null
-            initialized = false
-            return JsonRpcResponse(
-                id = id,
-                error = JsonRpcError(code = 400, message = "Session invalid: $errorBody")
-            )
+        val call = httpClient.newCall(requestBuilder.build())
+        activeCall = call
+        val response = try {
+            call.execute()
+        } finally {
+            if (activeCall === call) activeCall = null
         }
 
-        // On 401 — clear token and session, retry once with fresh credentials
-        if (response.code == 401 && config.authType == McpAuthType.CLIENT_CREDENTIALS) {
-            response.close()
-            cachedToken = null
-            tokenExpiresAt = 0
-            sessionId = null
-            initialized = false
+        response.use {
+            response.header("Mcp-Session-Id")?.let { sessionId = it }
 
-            val freshAuth = getAuthHeader()
-            if (freshAuth != null) {
-                val retryBuilder = Request.Builder()
-                    .url(config.url)
-                    .post(bodyJson.toRequestBody("application/json".toMediaType()))
-                    .header("Content-Type", "application/json")
-                    .header("Accept", "application/json, text/event-stream")
-                    .header("Authorization", freshAuth)
-                // Don't send old session ID on retry
-
-                val retryResponse = httpClient.newCall(retryBuilder.build()).execute()
-                retryResponse.header("Mcp-Session-Id")?.let { sessionId = it }
-                val retryBody = retryResponse.body?.string() ?: ""
-
-                if (!retryResponse.isSuccessful) {
-                    return JsonRpcResponse(
-                        id = id,
-                        error = JsonRpcError(code = retryResponse.code, message = "HTTP ${retryResponse.code}: $retryBody")
+            // 404/400 with a session header in play = expired/invalid session.
+            // The spec mandates a 404 for a terminated session and that the
+            // client start a new one; treat both the same — clear and signal
+            // the caller to re-handshake.
+            if (response.code == 404 || response.code == 400) {
+                val body = response.body?.string() ?: ""
+                sessionId = null
+                initialized = false
+                return JsonRpcResponse(
+                    id = id,
+                    error = JsonRpcError(
+                        code = response.code,
+                        message = "Session invalid (HTTP ${response.code}): $body"
                     )
-                }
-
-                val contentType = retryResponse.header("Content-Type") ?: ""
-                return if (contentType.contains("text/event-stream")) {
-                    parseSseResponse(retryBody, id)
-                } else {
-                    json.decodeFromString<JsonRpcResponse>(retryBody)
-                }
+                )
             }
 
-            return JsonRpcResponse(
-                id = id,
-                error = JsonRpcError(code = 401, message = "Auth failed after retry")
-            )
-        }
-
-        response.header("Mcp-Session-Id")?.let { sessionId = it }
-
-        val responseBody = response.body?.string() ?: ""
-
-        if (!response.isSuccessful) {
-            return JsonRpcResponse(
-                id = id,
-                error = JsonRpcError(
-                    code = response.code,
-                    message = "HTTP ${response.code}: $responseBody"
+            // 401 — refresh the bearer and retry once. Keep the session: only
+            // the token expired, not the MCP session.
+            if (response.code == 401 && config.authType == McpAuthType.CLIENT_CREDENTIALS) {
+                cachedToken = null
+                tokenExpiresAt = 0
+                if (allowAuthRetry) {
+                    DebugLog.log(TAG, "401 — refreshing token and retrying")
+                    return sendRequest(method, params, allowAuthRetry = false)
+                }
+                return JsonRpcResponse(
+                    id = id,
+                    error = JsonRpcError(code = 401, message = "Auth failed after retry")
                 )
-            )
-        }
+            }
 
-        val contentType = response.header("Content-Type") ?: ""
+            if (!response.isSuccessful) {
+                val body = response.body?.string() ?: ""
+                return JsonRpcResponse(
+                    id = id,
+                    // Negative code marks a transport (HTTP) error, distinct from
+                    // a JSON-RPC error.code the server actually sent.
+                    error = JsonRpcError(code = -response.code, message = "HTTP ${response.code}: $body")
+                )
+            }
 
-        return if (contentType.contains("text/event-stream")) {
-            parseSseResponse(responseBody, id)
-        } else {
-            json.decodeFromString<JsonRpcResponse>(responseBody)
+            val contentType = response.header("Content-Type") ?: ""
+            return if (contentType.contains("text/event-stream")) {
+                parseSseStream(response, id)
+            } else {
+                val body = response.body?.string() ?: ""
+                runCatching { json.decodeFromString<JsonRpcResponse>(body) }.getOrElse {
+                    JsonRpcResponse(id = id, error = JsonRpcError(code = -1, message = "Malformed response: ${it.message}"))
+                }
+            }
         }
     }
+
     private fun sendNotification(method: String, params: JsonObject? = null) {
         val notification = JsonRpcNotification(method = method, params = params)
         val bodyJson = json.encodeToString(notification)
@@ -289,6 +322,7 @@ class McpClient(
             .post(bodyJson.toRequestBody("application/json".toMediaType()))
             .header("Content-Type", "application/json")
             .header("Accept", "application/json, text/event-stream")
+            .header("MCP-Protocol-Version", negotiatedProtocol)
 
         sessionId?.let { requestBuilder.header("Mcp-Session-Id", it) }
         getAuthHeader()?.let { requestBuilder.header("Authorization", it) }
@@ -301,31 +335,53 @@ class McpClient(
     }
 
     /**
-     * Parse SSE stream to extract the JSON-RPC response matching our request ID.
-     * SSE format: lines starting with "data: " contain JSON payloads.
+     * Read the SSE stream line by line and return as soon as the JSON-RPC
+     * response with our id arrives — the server may hold the stream open
+     * afterward, and reading it whole used to block until the 120s timeout.
+     * Multi-line `data:` fields are joined per the SSE spec.
      */
-    private fun parseSseResponse(sseBody: String, expectedId: Int): JsonRpcResponse {
-        var matched: JsonRpcResponse? = null
-        var lastParsed: JsonRpcResponse? = null
+    private fun parseSseStream(response: Response, expectedId: Int): JsonRpcResponse {
+        val source = response.body?.source()
+            ?: return JsonRpcResponse(id = expectedId, error = JsonRpcError(code = -1, message = "Empty SSE body"))
 
-        for (line in sseBody.lines()) {
-            if (line.startsWith("data: ")) {
-                val data = line.removePrefix("data: ").trim()
-                try {
-                    val parsed = json.decodeFromString<JsonRpcResponse>(data)
-                    lastParsed = parsed
-                    if (parsed.id == expectedId) {
-                        matched = parsed
-                    }
-                } catch (_: Exception) { /* skip malformed lines */ }
+        var lastParsed: JsonRpcResponse? = null
+        val data = StringBuilder()
+        var events = 0
+
+        fun flush(): JsonRpcResponse? {
+            if (data.isEmpty()) return null
+            val payload = data.toString()
+            data.clear()
+            val parsed = runCatching { json.decodeFromString<JsonRpcResponse>(payload) }.getOrNull()
+            if (parsed != null) {
+                lastParsed = parsed
+                if (parsed.id == expectedId) return parsed
             }
+            return null
         }
 
-        return matched
-            ?: lastParsed
-            ?: JsonRpcResponse(
-                error = JsonRpcError(code = -1, message = "No data in SSE response")
-            )
+        while (events < SSE_MAX_EVENTS) {
+            val line = source.readUtf8Line() ?: break
+            when {
+                line.isEmpty() -> {
+                    // Event boundary — dispatch.
+                    flush()?.let { return it }
+                    events++
+                }
+                line.startsWith("data:") -> {
+                    val chunk = line.substring(5).removePrefix(" ")
+                    if (data.isNotEmpty()) data.append('\n')
+                    data.append(chunk)
+                }
+                // Other SSE fields (event:, id:, retry:, comments) ignored.
+            }
+        }
+        flush()?.let { return it }
+
+        return lastParsed ?: JsonRpcResponse(
+            id = expectedId,
+            error = JsonRpcError(code = -1, message = "No matching response in SSE stream")
+        )
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -361,22 +417,22 @@ class McpClient(
                 ))
                 .build()
 
-            val response = httpClient.newCall(request).execute()
-            if (!response.isSuccessful) {
-                response.close()
-                DebugLog.log(TAG, "Token fetch failed: ${response.code}")
-                return null
+            httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    DebugLog.log(TAG, "Token fetch failed: ${response.code}")
+                    return null
+                }
+
+                val tokenResponse = json.decodeFromString<OAuthTokenResponse>(
+                    response.body?.string() ?: ""
+                )
+
+                cachedToken = tokenResponse.accessToken
+                tokenExpiresAt = System.currentTimeMillis() + (tokenResponse.expiresIn * 1000)
+
+                DebugLog.log(TAG, "Got token for ${config.name}, expires in ${tokenResponse.expiresIn}s")
+                return cachedToken
             }
-
-            val tokenResponse = json.decodeFromString<OAuthTokenResponse>(
-                response.body?.string() ?: ""
-            )
-
-            cachedToken = tokenResponse.accessToken
-            tokenExpiresAt = System.currentTimeMillis() + (tokenResponse.expiresIn * 1000)
-
-            DebugLog.log(TAG, "Got token for ${config.name}, expires in ${tokenResponse.expiresIn}s")
-            return cachedToken
         } catch (e: Exception) {
             DebugLog.log(TAG, "Token fetch error: ${e.message}")
             return null
@@ -387,6 +443,10 @@ class McpClient(
      * Derive the OAuth token endpoint from the MCP server URL.
      * Takes the base URL (scheme + authority) and appends /token.
      * e.g., "https://mcp.example.com/v1/mcp" -> "https://mcp.example.com/token"
+     *
+     * KNOWN WEAK POINT (accepted): no OAuth metadata discovery — the endpoint
+     * is assumed to live at /token on the server's authority. Contract with
+     * the server.
      */
     private fun deriveTokenUrl(mcpUrl: String): String {
         val uri = java.net.URI(mcpUrl)

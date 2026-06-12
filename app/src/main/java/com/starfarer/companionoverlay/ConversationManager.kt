@@ -94,6 +94,9 @@ class ConversationManager(
                 DebugLog.log(TAG, "Cancelling active request")
                 job.cancel()
                 claudeApi.cancelPending()
+                // Abort any in-flight MCP tool call too — otherwise the blocking
+                // HTTP call (and the server-side effect) runs to completion.
+                mcpManager.cancelActiveToolCalls()
             }
         }
         activeJob = null
