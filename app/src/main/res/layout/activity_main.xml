@@ -237,20 +237,6 @@
                 </com.google.android.material.card.MaterialCardView>
 
                 <!-- ════════════════════════════════════════════════════════
-                     Auth Button (when needed)
-                     ════════════════════════════════════════════════════════ -->
-
-                <Button
-                    android:id="@+id/authButton"
-                    style="@style/CompanionButton.Secondary"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginHorizontal="24dp"
-                    android:layout_marginBottom="12dp"
-                    android:text="@string/main_connect_to_claude"
-                    android:visibility="gone"/>
-
-                <!-- ════════════════════════════════════════════════════════
                      Status + Toggle
                      ════════════════════════════════════════════════════════ -->
 
@@ -272,6 +258,24 @@
                     android:layout_height="wrap_content"
                     android:layout_marginHorizontal="24dp"
                     android:text="@string/main_toggle_wake"/>
+
+                <!-- ════════════════════════════════════════════════════════
+                     Auth Button (when needed)
+                     Anchored last so its show/hide never reflows the controls
+                     above it — only grows the scroll content at the bottom.
+                     marginTop (not Bottom) gives the gap from the toggle, so a
+                     gone button leaves no dangling space.
+                     ════════════════════════════════════════════════════════ -->
+
+                <Button
+                    android:id="@+id/authButton"
+                    style="@style/CompanionButton.Secondary"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginHorizontal="24dp"
+                    android:layout_marginTop="12dp"
+                    android:text="@string/main_connect_to_claude"
+                    android:visibility="gone"/>
 
             </LinearLayout>
         </ScrollView>
