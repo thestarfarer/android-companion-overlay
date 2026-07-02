@@ -15,3 +15,6 @@ app/src/main/assets/custom_walk_sheet.png
 senni-release.jks
 godot-avatar/
 *.hprof
+
+# Internal review/refactor working doc — never tracked
+REVIEW-PLAN.md
