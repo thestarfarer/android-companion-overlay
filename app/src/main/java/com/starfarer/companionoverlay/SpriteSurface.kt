@@ -97,6 +97,11 @@ class ViewGroupSpriteSurface(
     }
 
     override fun setGhost(ghost: Boolean): Boolean {
+        // The overlay surface passes touches through via FLAG_NOT_TOUCHABLE at the window
+        // level. Here the sprite is a plain child view, so mirror that by making it
+        // non-clickable while ghosted — otherwise its clickable ImageView.onTouchEvent
+        // swallows the DOWN and it never reaches the keyboard sitting behind her.
+        view.isClickable = !ghost
         view.animate().alpha(if (ghost) 0.5f else 1f).setDuration(200).start()
         return true
     }
