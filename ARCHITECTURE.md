@@ -1,18 +1,22 @@
 # Architecture
 
-Companion Overlay is a single-activity Android app backed by two long-running services:
+Companion Overlay is a **presence endpoint** for the Nexus companion system: it renders Senni, captures voice and images, and exposes device capabilities. All intelligence — persona, conversation state, memory, tools — lives server-side in Nexus, reached over one WebSocket speaking **presence protocol v1** (`docs/PRESENCE_PROTOCOL.md` in the Nexus repo).
 
-- **CompanionOverlayService** — a foreground service that owns the sprite overlay, speech bubbles, conversation state, and voice pipeline
+Two long-running services back the single-activity app:
+
+- **CompanionOverlayService** — a foreground service that owns the sprite overlay, speech bubbles, the gateway connection, and the voice pipeline
 - **CompanionAccessibilityService** — captures screenshots, intercepts volume buttons, and detects keyboard visibility
 
-All dependencies are wired through **Koin** DI. Cross-component communication goes through **OverlayCoordinator** (StateFlows + SharedFlows). App state lives in Koin-managed singletons; the only top-level `object`s are stateless helpers (serializers, styling, constants, debug) — `DebugLog`, `ImageAudit`, `OverlayController`, `PromptSettings`, `TtsTextCleaner`, `BubbleStyle`, `SettingsDialogs`, `AudioUtils`, `api/ClaudeBilling`, and the `MessageContentSerializer` in `api/ClaudeModels`.
+All dependencies are wired through **Koin** DI. Cross-component communication goes through **OverlayCoordinator** (StateFlows + SharedFlows). App state lives in Koin-managed singletons; the only top-level `object`s are stateless helpers (`DebugLog`, `ImageAudit`, `OverlayController`, `PromptSettings`, `TtsTextCleaner`, `BubbleStyle`, `SettingsDialogs`, `AudioUtils`).
+
+**Design invariant:** presence never depends on connectivity. The sprite animates, reacts to taps, and escapes with the network down; only conversation needs the gateway. Avatar sprites render from a local cache (or bundled assets) indefinitely.
 
 ## Layers
 
 ```
 ┌──────────────────────────────────────────────────────┐
 │  UI                                                  │
-│  MainActivity · SettingsFragment · AssistActivity     │
+│  MainActivity · SettingsFragment · TutorialActivity  │
 └────────────────────────┬─────────────────────────────┘
                          │
 ┌────────────────────────┴─────────────────────────────┐
@@ -21,24 +25,49 @@ All dependencies are wired through **Koin** DI. Cross-component communication go
 └────────────────────────┬─────────────────────────────┘
                          │
 ┌────────────────────────┴─────────────────────────────┐
-│  Business logic                                      │
-│  ConversationManager · VoiceInputController          │
-│  AudioCoordinator · SpriteAnimator · BubbleManager   │
+│  Presence & rendering                                │
+│  GatewayClient · AvatarRepository                    │
+│  SpriteAnimator · BubbleManager · VoiceInputController│
+│  AudioCoordinator                                    │
 └────────────────────────┬─────────────────────────────┘
                          │
 ┌────────────────────────┴─────────────────────────────┐
-│  Integration                                         │
-│  ClaudeApi · TtsManager · McpManager                  │
-│  GeminiSpeechRecognizer · GeminiTtsManager           │
+│  Device integration                                  │
+│  ScreenshotManager · CameraManager · TtsManager      │
 │  SpeechRecognitionManager · BluetoothAudioRouter     │
 └────────────────────────┬─────────────────────────────┘
                          │
 ┌────────────────────────┴─────────────────────────────┐
 │  Data                                                │
-│  SettingsRepository · PresetRepository               │
-│  ConversationStorage                                 │
+│  SettingsRepository (= GatewayConfig)                │
+│  PresetRepository                                    │
 └──────────────────────────────────────────────────────┘
 ```
+
+## The gateway (presence protocol v1)
+
+| Class | Role |
+|---|---|
+| `gateway/GatewayClient` | OkHttp WebSocket client, pure JVM (unit-testable off-device). `hello`/`welcome` handshake, outbound `text`/`image`/`event`/`status`/`cap_result`/`ping`, inbound `token`/`message`/`speak`/`animate`/`status`/`session`/`error`/`cap_request`/`pong`. App-level ping every 30s; jittered exponential reconnect 1s→60s; bounded drop-oldest offline queue for `text`/`event` (flushed after `welcome`); per-name event rate limiting (≤1/2s). Listener callbacks are posted to the main thread via an injected executor |
+| `gateway/GatewayConfig` | Interface the client reads its server URL, bearer token, and device identity from — implemented by `SettingsRepository`, faked in tests |
+| `gateway/AvatarRepository` | Versioned sprite cache under `filesDir/avatar`. On `welcome.avatar_version` mismatch: `GET /avatar/manifest`, download changed files, verify sha256, swap the cache directory atomically (with crash recovery). Frame counts come from the manifest, never constants |
+
+### Protocol mapping in `CompanionOverlayService`
+
+| Wire | App behavior |
+|---|---|
+| `hello` | Sent on every (re)connect with `kind: "phone"`, a stable per-install `device_id`, and capabilities: screenshot, camera (front/back), notify, mic, stt, tts |
+| `text` → | Typed replies (`source: "typed"`) and transcribed voice (`source: "voice"`); queued while offline |
+| `image` → | Long-press screenshot/camera capture (base64 JPEG q80/95, downscaled) with the spoken caption when voice+screenshot is on; never queued offline |
+| `event` → | `tapped` (avatar tap) and `keyboard_visible` (ghost mode edge) |
+| `status` → | Battery/network/muted snapshot after each `welcome` |
+| ← `token` | Ignored — the app waits for the authoritative `message` |
+| ← `message` | Speech bubble via `BubbleManager` (also auto-copy, last-reply recall) |
+| ← `speak` | Local `TtsManager` speech (when TTS is enabled or the turn was voice); `speak.audio` playback is the future server-side-TTS slot |
+| ← `animate` | Advisory mapping onto `SpriteAnimator`: `walk`→walk, `escape`/`alert`→escape; unrenderable states ignored. Local reactive animation continues underneath |
+| ← `status` | `thinking`/`tool_running` → brief thinking/🔧 toast |
+| ← `cap_request` | screenshot (accessibility path), camera (respects `facing`), notify (system notification); failures answer `{ok:false, error}` |
+| ← `session`, `error` | Logged; errors surface as a brief bubble and reset voice state |
 
 ## Components
 
@@ -46,10 +75,10 @@ All dependencies are wired through **Koin** DI. Cross-component communication go
 
 | Class | Role |
 |---|---|
-| `CompanionOverlayService` | Foreground service — sprite rendering, touch handling, speech bubbles, conversation orchestration, TTS routing. Implements `VoiceInputHost`. Runs as a `specialUse` FGS and promotes to the `microphone`/`camera` types only while recording/capturing (see below) |
+| `CompanionOverlayService` | Foreground service — sprite rendering, touch handling, speech bubbles, gateway lifecycle (start on create, stop on destroy), capability handlers, TTS routing. Implements `VoiceInputHost` and `GatewayClient.Listener`. Runs as a `specialUse` FGS and promotes to the `microphone`/`camera` types only while recording/capturing (see below) |
 | `CompanionAccessibilityService` | Screenshot capture via accessibility API, volume button interception (double/triple-tap detection), keyboard visibility detection |
 | `AssistActivity` | Transparent trampoline for `ACTION_VOICE_COMMAND` from headset buttons — starts overlay and toggles voice |
-| `OverlayController` | Single entry point for starting the overlay service — permission check (`canStart`) plus the start-then-optionally-toggle-voice ceremony. Every surface (main button, volume gestures, assistant) routes through it so the start logic can't drift |
+| `OverlayController` | Single entry point for starting the overlay service — permission check (`canStart`) plus the start-then-optionally-toggle-voice ceremony |
 | `CompanionApplication` | App entry point — initializes Koin, creates notification channel |
 
 #### Foreground service types (Android 14+/17 compatibility)
@@ -58,116 +87,79 @@ All dependencies are wired through **Koin** DI. Cross-component communication go
 
 So the service starts as `specialUse` only and dynamically promotes:
 - `setMicrophoneActive(true/false)` — driven by `VoiceInputController` state; the `microphone` type is added on entering `LISTENING` and dropped on every exit.
-- `setCameraForeground(true/false)` — wraps a camera capture.
+- `setCameraForeground(true/false)` — wraps a camera capture (user long-press or server `cap_request`).
 
 Promotion is permitted because the companion's visible overlay window is the while-in-use exemption. All type changes go through `applyForegroundType()`, which is wrapped so a rejected promotion degrades (logs) instead of crashing. The types remain declared in the manifest so they can be promoted into.
 
 The service also self-guards: if "Display over other apps" is missing, `onCreate` shows a message and stops cleanly rather than throwing `BadTokenException` from `addView`.
 
-### AI and API
-
-| Class | Role |
-|---|---|
-| `ClaudeApi` | Anthropic Messages API client — multi-turn conversation, web search, image attachments, MCP tools parameter, cancellable requests |
-| `api/ClaudeModels` | kotlinx.serialization models for Claude API — polymorphic content blocks (text, image, tool_use, tool_result), `Message.timestamp`, request/response types |
-| `api/ClaudeBilling` | Billing header computation for Claude API requests, client version tracking |
-| `ConversationManager` | In-memory conversation history (thread-safe). Builds API requests, MCP tool use loop (up to 10 iterations), Nexus session summary emission, timestamp tracking, auto-copy |
-
-### MCP subsystem
-
-| Class | Role |
-|---|---|
-| `mcp/McpClient` | Single MCP server connection via Streamable HTTP transport — initialization handshake, tool discovery, tool execution, session management, optional client credentials auth |
-| `mcp/McpManager` | Aggregates tool definitions from all connected servers, routes tool_use calls to the correct server, broadcast `emitEventToAll` for Nexus |
-| `mcp/McpModels` | kotlinx.serialization models for JSON-RPC 2.0, MCP initialize params, tool definitions, server configs |
-| `mcp/McpRepository` | Server config persistence (SharedPreferences) and client secrets (EncryptedSharedPreferences) |
-| `mcp/AsyncResultPoller` | Polls MCP servers for completed async job results (`nexus_poll_results`), queues for conversation injection |
-| `mcp/NexusContextFetcher` | Fetches Nexus context via `McpManager` (`nexus_get_context`) and caches it in `SettingsRepository` for reuse across conversations (not session-scoped) |
-
 ### Voice pipeline
 
 | Class | Role |
 |---|---|
-| `VoiceInputController` | State machine (`IDLE` → `LISTENING` → `PROCESSING`). Orchestrates STT, transcription, API calls. Safety timeouts, request cancellation |
-| `VoiceInputHost` | Interface defining the voice controller's contract with the service (show/hide bubbles, send input, get context) |
-| `SpeechRecognitionManager` | Wraps Android `SpeechRecognizer` with manual silence timeout and segment accumulation across recognizer restarts |
-| `GeminiSpeechRecognizer` | `AudioRecord` → WAV → Gemini flash-lite transcription. Conversation context injected via `systemInstruction`. Uses Silero VAD for silence detection |
-| `SileroVadDetector` | ONNX Runtime wrapper for Silero VAD v5 — 16kHz mono PCM in 512-sample windows, maintains LSTM state across calls |
+| `VoiceInputController` | State machine (`IDLE` → `LISTENING` → `PROCESSING`). Orchestrates on-device STT and ships transcripts to the gateway. Safety timeouts |
+| `VoiceInputHost` | Interface defining the voice controller's contract with the service (show/hide bubbles, send input, mic FGS promotion) |
+| `SpeechRecognitionManager` | Wraps Android `SpeechRecognizer` with manual silence timeout and segment accumulation across recognizer restarts. The local/fallback STT path — the protocol's primary voice path (`audio` frames, server-side transcription) activates when the server grows an audio backend |
+| `SileroVadDetector` | ONNX Runtime wrapper for Silero VAD v5 — 16kHz mono PCM in 512-sample windows, maintains LSTM state across calls. Kept for the future `audio`-frame path (currently unwired) |
 
 ### Audio output
 
 | Class | Role |
 |---|---|
-| `AudioCoordinator` | Routes audio to the active TTS engine. Gemini → on-device fallback on error. Beep playback, speech completion callbacks. Integrates `SilenceKeepAlive` for BT A2DP keep-alive |
+| `AudioCoordinator` | Routes `speak` text to the on-device TTS engine, audio focus around speech/recording, beep playback, BT A2DP keep-alive via `SilenceKeepAlive` |
 | `TtsManager` | Android `TextToSpeech` wrapper — lazy init, voice selection, text chunking at sentence boundaries, utterance tracking |
-| `GeminiTtsManager` | Gemini TTS API → base64 PCM → `AudioTrack` playback. Markdown cleanup, background synthesis, on-device fallback |
-| `BeepManager` | Synthesized sine wave tones via persistent `SoundPool` (`USAGE_ASSISTANCE_SONIFICATION`) — ready, step, done, error, queue |
+| `BeepManager` | Synthesized sine wave tones via persistent `SoundPool` (`USAGE_ASSISTANCE_SONIFICATION`) — ready, step, done, error |
 | `SilenceKeepAlive` | Near-silent audio stream keeping BT A2DP codec warm — prevents power-down and leading-edge clipping |
-| `BluetoothAudioRouter` | Routes mic capture to a connected BT headset via `setCommunicationDevice` (API 31+), preferring BLE then classic SCO. Codec selection (mSBC wideband vs. CVSD) is negotiated by the OS/HFP link, not by this class |
-| `AudioUtils` | Audio format conversion utilities |
+| `BluetoothAudioRouter` | Routes mic capture to a connected BT headset via `setCommunicationDevice` (API 31+), preferring BLE then classic SCO |
+| `AudioUtils` | Audio format conversion utilities (PCM→WAV) — retained for the future `audio`-frame path |
 
 ### UI and rendering
 
 | Class | Role |
 |---|---|
-| `SpriteAnimator` | Animation state machine (idle breathing, walk, escape). Pre-extracts frames to avoid per-tick allocations. Ghost mode when keyboard is visible. Position/ghost applied through a `SpriteSurface`, so it runs on the overlay window or a plain view group unchanged |
-| `SpriteSurface` | Seam between `SpriteAnimator` and where it draws — `OverlaySpriteSurface` (real `TYPE_APPLICATION_OVERLAY` window, position via `updateViewLayout`, ghost via window flags) vs. `ViewGroupSpriteSurface` (a `View` in a `FrameLayout`, position via `view.x`). Mirrors `BubbleSurface` |
-| `BubbleManager` | Manages speech bubbles — main response dialog, brief notifications, voice indicator. Touch and keyboard handling. Placement/removal delegated to a `BubbleSurface`, so it never touches `WindowManager` directly |
-| `BubbleSurface` | Seam between `BubbleManager` and its surface — `OverlayBubbleSurface` (one overlay window per bubble, incl. the reply-input focus promotion) vs. `ViewGroupBubbleSurface` (bubbles as `FrameLayout` children, for the in-app tutorial) |
-| `BubbleStyle` | Centralized bubble styling — Monet Material You colors (API 31+), fallback warm cream, rounded backgrounds |
-| `ScreenshotManager` | Screenshot request API — delegates to accessibility service via `OverlayCoordinator` |
-| `CameraManager` | Headless back-camera still capture via CameraX — binds `ImageCapture` to a throwaway `LifecycleOwner`, waits for focus, returns a downscaled (1568px), EXIF-uprighted base64 JPEG. Same artifact as `ScreenshotManager`, so the send pipeline is shared |
-| `RadialMenuManager` / `RadialMenuView` | Quick-access settings disk — a material-styled sector overlay (center-right edge) opened by swipe-up / closed by swipe-down or tap-away. Three emoji toggles (capture mode, volume shortcut, Gemini voice) write straight to `SettingsRepository`; live reads mean changes apply with no restart. `RadialMenuManager` owns the window lifecycle (mirrors `BubbleManager`); `RadialMenuView` draws the sector + glyphs and hit-tests by angle |
+| `SpriteAnimator` | Animation state machine (idle breathing, walk, escape). Sheet load order: user-picked custom URI > Nexus avatar cache (manifest frame counts) > bundled custom asset > bundled default. Pre-extracts frames to avoid per-tick allocations. Ghost mode when keyboard is visible. `walk()`/`escape()` double as `animate` directive handlers |
+| `SpriteSurface` | Seam between `SpriteAnimator` and where it draws — overlay window vs. plain view group (tutorial) |
+| `BubbleManager` | Manages speech bubbles — main response dialog with reply input, brief notifications, voice indicator. Placement/removal delegated to a `BubbleSurface` |
+| `BubbleSurface` / `BubbleStyle` | Surface seam and centralized styling (Monet Material You, API 31+) |
+| `ScreenshotManager` | Screenshot request API — delegates to accessibility service via `OverlayCoordinator`. Produces base64 JPEG (quality 80, downscaled) |
+| `CameraManager` | Headless still capture via CameraX (front or back per the `facing` param) — binds `ImageCapture` to a throwaway `LifecycleOwner`, waits for focus, returns a downscaled (1568px), EXIF-uprighted base64 JPEG |
+| `RadialMenuManager` / `RadialMenuView` | Quick-access settings disk — capture mode, volume shortcut, voice output toggle. Live prefs reads mean changes apply with no restart |
 
 ### Settings and storage
 
 | Class | Role |
 |---|---|
-| `repository/SettingsRepository` | Repository over `SharedPreferences`. Single source of truth for all settings |
-| `repository/PresetRepository` | Character preset persistence — in-memory cache, JSON serialization, immutable list return |
-| `ConversationStorage` | File-based JSON persistence of conversation history. Atomic writes via temp file + rename |
-| `CharacterPreset` | Data class — name, system/user prompts, sprite URIs, frame counts, timestamp |
-| `PromptSettings` | Constants — defaults, model IDs, timeouts, system prompt template |
+| `repository/SettingsRepository` | Repository over `SharedPreferences`; single source of truth for all settings. Implements `GatewayConfig`: server URL + device name/id in plain prefs, bearer token in `EncryptedSharedPreferences`. `deviceId` is generated once per install (`phone-xxxxxxxx`) — the server keys session resume on it |
+| `repository/TutorialSettings` | Tutorial-scoped sandbox — radial-mutable settings (capture mode, volume shortcut, TTS) overridden in memory |
+| `repository/PresetRepository` | Character preset persistence — in-memory cache, JSON serialization |
+| `CharacterPreset` | Data class — name, prompts (local flavor; the persona lives in Nexus), sprite URIs, frame counts |
+| `PromptSettings` | Constants — defaults and the preset prompt template |
 
 ### State management
 
 | Class | Role |
 |---|---|
-| `event/OverlayCoordinator` | Central event hub — `StateFlow` for overlay/accessibility status, `SharedFlow` for fire-and-forget events (screenshots, voice toggle, keyboard) |
+| `event/OverlayCoordinator` | Central event hub — `StateFlow` for overlay/accessibility status, `SharedFlow` for fire-and-forget events (screenshots, voice toggle, keyboard, sprite reload, gateway config changes) |
 | `event/OverlayEvent` | Sealed class for pure data events — no callbacks or lambdas in event stream |
-| `viewmodel/MainViewModel` | `ViewModel` for `MainActivity` state |
+| `viewmodel/MainViewModel` | `ViewModel` for `MainActivity` state (presets, overlay running, gateway configured) |
 
 ### UI helpers
 
 | Class | Role |
 |---|---|
-| `MainActivity` | Settings UI, character preset carousel (ViewPager2), prompt/sprite editing, model selection dropdown (`PromptSettings.MODEL_NAMES`/`MODEL_IDS` → `settings.model`). Launches the tutorial on first run |
-| `SettingsActivity` / `SettingsFragment` | `PreferenceFragmentCompat` host — all toggles, Gemini API key, silence timeout, debug tools, tutorial replay, open-source licenses |
-| `TutorialActivity` | Self-contained interactive walkthrough — hosts the real `SpriteAnimator`, `BubbleManager`, `RadialMenuView`, `BeepManager`, and on-device `TtsManager` in a normal Activity sandbox (no overlay/service/permissions/network) via the `ViewGroup*Surface` implementations. A **data-driven step machine** (`Step` objects with per-step enter/exit/gesture hooks and gating) covers tap/escape/long-press/swipe plus voice (with a real spoken reply), volume/headset shortcuts (auto-play animation), web-search/tool indicators, and ghost mode — all with scripted mock pipelines that pull the production `svc_bubble_*`/`status_*` string resources directly (no hardcoded copies, so indicator text stays in sync). Snapshots and restores the four radial-menu settings so nothing the user flips persists |
-| `SettingsDialogs` | Reusable dialog builders |
-| `ui/PresetPagerAdapter` | ViewPager2 adapter for preset carousel |
-| `ui/PresetDialogHelper` | Dialogs for preset creation/editing |
-| `ui/SpritePickerHelper` | File picker for custom sprite sheets |
-| `ui/SpritePreviewAnimator` | Sprite preview animation in settings |
-| `ui/TextEditorBottomSheet` | Bottom sheet for prompt/message editing |
-
-### Android Auto
-
-| Class | Role |
-|---|---|
-| `CompanionCarAppService` | `CarAppService` entry point |
-| `CompanionCarSession` | Session for car app interaction |
-| `CompanionMainScreen` / `CompanionModelScreen` / `CompanionResponseScreen` | Car app UI screens |
-| `CarVoiceRecorder` | Voice input for automotive context |
+| `MainActivity` | Character preset carousel (ViewPager2), prompt/sprite editing, gateway status row, overlay toggle. Launches the tutorial on first run |
+| `SettingsActivity` / `SettingsFragment` | `PreferenceFragmentCompat` host — Nexus gateway (URL/token/device name), display, voice, conversation, permissions, debug tools |
+| `TutorialActivity` | Self-contained interactive walkthrough with mocked pipelines — no overlay/service/permissions/network |
+| `SettingsDialogs` / `ui/*` | Reusable dialog builders, preset pager/dialog/picker helpers, sprite preview animation, text editor bottom sheet |
 
 ### Dependency injection (Koin)
 
 | Module | Provides |
 |---|---|
-| `di/AppModule` | `OkHttpClient`, `OverlayCoordinator`, `SettingsRepository`, `ClaudeAuth`, `ClaudeApi`, `McpRepository`, `McpManager` |
-| `di/AudioModule` | `TtsManager`, `GeminiTtsManager`, `AudioCoordinator` |
-| `di/StorageModule` | `SharedPreferences` (settings + auth), `PresetRepository` |
-| `di/OverlayModule` | `ConversationStorage`, `ConversationManager` (factory), `ScreenshotManager`, `CameraManager`, `BeepManager` |
+| `di/AppModule` | `OkHttpClient`, `OverlayCoordinator`, `SettingsRepository`, `TutorialSettings`, `GatewayClient` (singleton, main-thread callback executor), `AvatarRepository` |
+| `di/AudioModule` | `TtsManager`, `AudioCoordinator` |
+| `di/StorageModule` | `SharedPreferences` (settings + encrypted), `PresetRepository` |
+| `di/OverlayModule` | `ScreenshotManager`, `CameraManager`, `BeepManager` |
 | `di/ViewModelModule` | `MainViewModel` |
 
 ### Debug
@@ -175,7 +167,7 @@ The service also self-guards: if "Display over other apps" is missing, `onCreate
 | Class | Role |
 |---|---|
 | `DebugLog` | In-memory ring buffer (50 KB), logcat output, copyable from settings UI |
-| `ImageAudit` | Gated on the `saveSentImages` user setting (off by default) — saves the exact JPEG sent to Claude (screenshot or camera) to external files, logs resolution/size, viewable on-device via `FileProvider` |
+| `ImageAudit` | Gated on the `saveSentImages` user setting (off by default) — saves the exact JPEG sent to Nexus (screenshot or camera) to external files, viewable on-device via `FileProvider` |
 
 ## Project structure
 
@@ -185,127 +177,64 @@ app/src/main/
 ├── assets/
 │   ├── idle_sheet.png                 # Default idle sprite (6 frames)
 │   ├── walk_sheet.png                 # Default walk sprite (4 frames)
-│   ├── custom_idle_sheet.png          # User-editable idle sprite
-│   ├── custom_walk_sheet.png          # User-editable walk sprite
-│   ├── custom_prompt.txt              # Custom system prompt
-│   └── silero_vad.onnx               # Silero VAD v5 model
+│   ├── custom_idle_sheet.png          # First-boot default (pre-avatar-sync)
+│   ├── custom_walk_sheet.png          # First-boot default (pre-avatar-sync)
+│   └── silero_vad.onnx                # Silero VAD v5 model
 ├── java/com/starfarer/companionoverlay/
 │   ├── CompanionApplication.kt
 │   ├── MainActivity.kt
-│   ├── SettingsActivity.kt
-│   ├── SettingsFragment.kt
-│   ├── SettingsDialogs.kt
-│   ├── TutorialActivity.kt
-│   ├── AssistActivity.kt
+│   ├── SettingsActivity.kt / SettingsFragment.kt / SettingsDialogs.kt
+│   ├── TutorialActivity.kt / AssistActivity.kt
 │   ├── CompanionOverlayService.kt
 │   ├── CompanionAccessibilityService.kt
-│   ├── ClaudeApi.kt
-│   ├── ClaudeAuth.kt
-│   ├── ConversationManager.kt
-│   ├── ConversationStorage.kt
-│   ├── VoiceInputController.kt
-│   ├── VoiceInputHost.kt
-│   ├── SpeechRecognitionManager.kt
-│   ├── GeminiSpeechRecognizer.kt
-│   ├── SileroVadDetector.kt
-│   ├── AudioCoordinator.kt
-│   ├── AudioUtils.kt
-│   ├── TtsManager.kt
-│   ├── GeminiTtsManager.kt
-│   ├── BeepManager.kt
-│   ├── BluetoothAudioRouter.kt
-│   ├── SilenceKeepAlive.kt
-│   ├── SpriteAnimator.kt
-│   ├── SpriteSurface.kt
-│   ├── BubbleManager.kt
-│   ├── BubbleStyle.kt
-│   ├── BubbleSurface.kt
-│   ├── ScreenshotManager.kt
-│   ├── CameraManager.kt
-│   ├── ImageAudit.kt
+│   ├── VoiceInputController.kt / VoiceInputHost.kt
+│   ├── SpeechRecognitionManager.kt / SileroVadDetector.kt
+│   ├── AudioCoordinator.kt / AudioUtils.kt / TtsManager.kt / TtsTextCleaner.kt
+│   ├── BeepManager.kt / BluetoothAudioRouter.kt / SilenceKeepAlive.kt
+│   ├── SpriteAnimator.kt / SpriteSurface.kt
+│   ├── BubbleManager.kt / BubbleStyle.kt / BubbleSurface.kt
+│   ├── ScreenshotManager.kt / CameraManager.kt / ImageAudit.kt
 │   ├── OverlayController.kt
-│   ├── RadialMenuManager.kt
-│   ├── RadialMenuView.kt
-│   ├── CharacterPreset.kt
-│   ├── PromptSettings.kt
-│   ├── DebugLog.kt
-│   ├── CompanionCarAppService.kt
-│   ├── CompanionCarSession.kt
-│   ├── CompanionMainScreen.kt
-│   ├── CompanionModelScreen.kt
-│   ├── CompanionResponseScreen.kt
-│   ├── CarVoiceRecorder.kt
-│   ├── api/
-│   │   ├── ClaudeBilling.kt
-│   │   └── ClaudeModels.kt
-│   ├── avatar3d/                       # Experimental 3D Filament avatar (hidden overlayMode pref)
-│   │   ├── FilamentAvatarRenderer.kt
-│   │   ├── FilamentOverlayManager.kt
-│   │   └── OverlayMode.kt
-│   ├── mcp/
-│   │   ├── AsyncResultPoller.kt
-│   │   ├── McpClient.kt
-│   │   ├── McpManager.kt
-│   │   ├── McpModels.kt
-│   │   ├── McpRepository.kt
-│   │   └── NexusContextFetcher.kt
-│   ├── di/
-│   │   ├── AppModule.kt
-│   │   ├── AudioModule.kt
-│   │   ├── StorageModule.kt
-│   │   ├── OverlayModule.kt
-│   │   └── ViewModelModule.kt
-│   ├── event/
-│   │   ├── OverlayCoordinator.kt
-│   │   └── OverlayEvent.kt
-│   ├── repository/
-│   │   ├── SettingsRepository.kt
-│   │   └── PresetRepository.kt
-│   ├── ui/
-│   │   ├── LongClickPreference.kt
-│   │   ├── McpSettingsUi.kt
-│   │   ├── PresetPagerAdapter.kt
-│   │   ├── PresetDialogHelper.kt
-│   │   ├── SpritePickerHelper.kt
-│   │   ├── SpritePreviewAnimator.kt
-│   │   └── TextEditorBottomSheet.kt
-│   └── viewmodel/
-│       └── MainViewModel.kt
-└── res/
-    ├── drawable/                       # Icons, backgrounds, scrollbar
-    ├── layout/                         # activity_main, activity_settings, dialogs, preset card
-    ├── mipmap-*/                       # Launcher icons
-    ├── transition/                     # Fade in/out, shared element
-    ├── values/                         # strings, colors, themes, arrays
-    ├── values-night/                   # Dark theme overrides
-    └── xml/                            # Accessibility config, settings preferences, automotive
+│   ├── RadialMenuManager.kt / RadialMenuView.kt
+│   ├── CharacterPreset.kt / PromptSettings.kt / DebugLog.kt
+│   ├── gateway/
+│   │   ├── GatewayClient.kt           # presence protocol v1 WebSocket client
+│   │   ├── GatewayConfig.kt
+│   │   └── AvatarRepository.kt        # versioned sprite cache + sync
+│   ├── avatar3d/                      # Experimental 3D Filament avatar (hidden overlayMode pref)
+│   ├── di/                            # Koin modules
+│   ├── event/                         # OverlayCoordinator + OverlayEvent
+│   ├── repository/                    # SettingsRepository, TutorialSettings, PresetRepository
+│   ├── ui/                            # Dialog/pager/picker helpers
+│   └── viewmodel/MainViewModel.kt
+└── res/                               # layouts, strings, prefs XML, icons
 ```
 
 ## Design patterns
 
-- **Dependency injection** — Koin modules wire all stateful components; top-level `object`s are reserved for stateless helpers (`DebugLog`, `ImageAudit`, `OverlayController`, `PromptSettings`, `TtsTextCleaner`, `BubbleStyle`, `SettingsDialogs`, `AudioUtils`, `ClaudeBilling`, `MessageContentSerializer`)
-- **Repository pattern** — `SettingsRepository`, `PresetRepository`, `ConversationStorage` abstract storage behind clean interfaces
+- **Thin client / server brain** — the app holds no conversation state; the gateway is a dumb pipe and everything above it renders or captures
+- **Dependency injection** — Koin modules wire all stateful components
+- **Repository pattern** — `SettingsRepository`, `PresetRepository` abstract storage behind clean interfaces
 - **State machine** — `VoiceInputController` transitions through `IDLE` → `LISTENING` → `PROCESSING` with explicit state guards
-- **Coordinator / event bus** — `OverlayCoordinator` uses `StateFlow` for observable state and `SharedFlow` for fire-and-forget events; pure data events only (no lambdas)
-- **Strategy** — dual STT and TTS engines selected at runtime based on user settings, with automatic fallback
+- **Coordinator / event bus** — `OverlayCoordinator` uses `StateFlow` for observable state and `SharedFlow` for fire-and-forget events; pure data events only
+- **Seams for testability** — `GatewayClient`/`AvatarRepository` are Android-free and covered by JVM tests (MockWebServer protocol suite + an opt-in live test against a real Nexus dev server)
 
 ## Threading
 
 | Context | Used for |
 |---|---|
-| Main thread | UI, callbacks, animation (Choreographer + Handler watchdog) |
-| `Dispatchers.IO` | File I/O, API calls, disk storage |
-| Background threads | Audio recording (`GeminiSpeechRecognizer`), TTS synthesis (`GeminiTtsManager`) |
+| Main thread | UI, gateway listener callbacks (posted via executor), animation (Choreographer + Handler watchdog) |
+| `Dispatchers.IO` | Avatar sync downloads, file I/O |
+| OkHttp threads | WebSocket reads/writes; a single daemon scheduler inside `GatewayClient` drives pings and reconnect backoff |
+| Background threads | TTS synthesis callbacks (engine-owned) |
 
-Thread-safety primitives: `AtomicReference` (API/HTTP call cancellation), `AtomicBoolean` (`CameraManager` capture-complete latch), `Collections.synchronizedList` (conversation history), `@Volatile` (shared mutable state), coroutine scopes with lifecycle-aware cancellation. `VoiceInputController` recording state is a plain `enum State` field mutated on the main thread, not an atomic.
+Thread-safety primitives: a single lock guarding `GatewayClient` connection state and queue, `AtomicBoolean`/`AtomicInteger` latches, `@Volatile` shared flags, coroutine scopes with lifecycle-aware cancellation.
 
-## API integration
+## Server integration
 
-**Claude API** — API key authentication (OAuth fallback). Models: Sonnet 4.5, Opus 4.1, Opus 4.6. Max tokens: 512 (4096 with tools/web search). Streaming not used — single response. Read timeout 300s.
+**Presence protocol v1** — see `docs/PRESENCE_PROTOCOL.md` in the Nexus repo. JSON text frames over WebSocket at `<server>/ws`, `Authorization: Bearer <token>`; binary payloads base64-inline in v1. The server registers each declared capability as a Claude tool (`device_screenshot`, `device_camera`, `device_notify`) for the duration of the connection.
 
-**Gemini STT** — `gemini-2.5-flash-lite` via REST. 16kHz mono PCM → WAV → base64. Conversation context injected as `systemInstruction` for better name/term recognition. Free tier: 15 RPM, 1000 RPD.
-
-**Gemini TTS** — `gemini-2.5-flash-preview-tts` via REST. Returns 24kHz 16-bit mono PCM (base64). Default voice: Kore. Free tier: 10 RPM.
+**Avatar assets** — `GET /avatar/manifest` and `GET /avatar/asset/<file>` (same bearer token) with sha256-verified, version-keyed caching.
 
 ## Build configuration
 
