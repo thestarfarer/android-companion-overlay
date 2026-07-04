@@ -21,6 +21,5 @@ class TutorialSettings(
 
     override var captureMode: CaptureMode = super.captureMode
     override var volumeToggleEnabled: Boolean = super.volumeToggleEnabled
-    override var geminiSttEnabled: Boolean = super.geminiSttEnabled
-    override var geminiTtsEnabled: Boolean = super.geminiTtsEnabled
+    override var ttsEnabled: Boolean = super.ttsEnabled
 }

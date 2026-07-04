@@ -8,38 +8,29 @@ import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.os.Handler
 import android.os.Looper
-import com.starfarer.companionoverlay.repository.SettingsRepository
 
 /**
- * Routes speech to the active TTS engine (Gemini → on-device fallback on
- * error), plays beeps, and owns the cross-cutting audio concerns: audio focus
- * around speech/recording and the Bluetooth A2DP keep-alive.
+ * Routes speech to the on-device TTS engine, plays beeps, and owns the
+ * cross-cutting audio concerns: audio focus around speech/recording and the
+ * Bluetooth A2DP keep-alive.
  *
  * Singleton — outlives the overlay service. [warmUp]/[release] bracket a
  * service lifetime; release detaches every service-owned callback so a late
  * engine error can't touch a destroyed service's UI.
  *
- * STT deliberately has no analogous fallback: TTS degrading mid-conversation
- * is invisible (a different voice), but silently swapping the transcription
- * engine changes accuracy and privacy expectations — STT errors surface to
- * the user instead.
+ * Remote synthesis is Nexus's job now: when the server starts shipping
+ * `speak.audio`, playback of that payload belongs here alongside the local
+ * engine — the fallback relationship inverts, but the seam stays.
  */
 class AudioCoordinator(
     private val context: Context,
     val ttsManager: TtsManager,
-    val geminiTtsManager: GeminiTtsManager,
-    private val settings: SettingsRepository,
+    private val settings: com.starfarer.companionoverlay.repository.SettingsRepository,
     private val beepManager: BeepManager
 ) {
     companion object { private const val TAG = "Audio" }
 
     var onSpeechComplete: (() -> Unit)? = null
-
-    /** Gemini synthesis started — show a "generating voice" indicator. */
-    var onSynthesisStarted: (() -> Unit)? = null
-
-    /** Playback began or the attempt ended — clear the indicator. */
-    var onSynthesisEnded: (() -> Unit)? = null
 
     private val handler = Handler(Looper.getMainLooper())
     private val keepAlive = SilenceKeepAlive()
@@ -55,28 +46,8 @@ class AudioCoordinator(
         override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>) = updateKeepAlive()
     }
 
-    init {
-        geminiTtsManager.onSynthesisStarted = {
-            handler.post { if (!released) onSynthesisStarted?.invoke() }
-        }
-        geminiTtsManager.onSynthesisEnded = {
-            handler.post { if (!released) onSynthesisEnded?.invoke() }
-        }
-        geminiTtsManager.onSpeechError = { failedText ->
-            handler.post {
-                if (released) return@post
-                DebugLog.log(TAG, "Gemini TTS failed, falling back to on-device")
-                playBeep(BeepManager.Beep.ERROR)
-                onSynthesisEnded?.invoke()
-                ttsManager.ensureReady()
-                ttsManager.onSpeechDone = { speechFinished() }
-                ttsManager.speak(failedText)
-            }
-        }
-    }
-
     val isSpeaking: Boolean
-        get() = ttsManager.isSpeaking || geminiTtsManager.isSpeaking
+        get() = ttsManager.isSpeaking
 
     fun warmUp() {
         released = false
@@ -101,36 +72,22 @@ class AudioCoordinator(
     }
 
     fun speak(text: String) {
-        val useGemini = settings.geminiTtsEnabled && !settings.geminiApiKey.isNullOrBlank()
-        // Stop whichever engine is NOT about to speak — flipping the Gemini
-        // toggle mid-speech used to let both engines talk over each other.
-        if (useGemini) ttsManager.stop() else geminiTtsManager.stop()
-
+        if (released) return
         requestFocus(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
-        if (useGemini) {
-            geminiTtsManager.onSpeechDone = { speechFinished() }
-            geminiTtsManager.speak(text)
-        } else {
-            ttsManager.ensureReady()
-            ttsManager.onSpeechDone = { speechFinished() }
-            ttsManager.speak(text)
-        }
+        ttsManager.ensureReady()
+        ttsManager.onSpeechDone = { speechFinished() }
+        ttsManager.speak(text)
     }
 
     private fun speechFinished() {
         abandonFocus()
         onSpeechComplete?.invoke()
         ttsManager.onSpeechDone = null
-        geminiTtsManager.onSpeechDone = null
     }
 
     fun stopSpeaking() {
         ttsManager.stop()
-        geminiTtsManager.stop()
         abandonFocus()
-        // Synthesis may have been cancelled before playback — clear the
-        // "generating voice" indicator that would otherwise linger 30s.
-        onSynthesisEnded?.invoke()
         onSpeechComplete = null
     }
 
@@ -178,12 +135,9 @@ class AudioCoordinator(
         keepAlive.stop()
         abandonFocus()
         ttsManager.release()
-        geminiTtsManager.release()
         // Drop service-owned hooks — this singleton outlives the service, and a
         // retained lambda would leak the whole service via its captured managers.
         onSpeechComplete = null
-        onSynthesisStarted = null
-        onSynthesisEnded = null
         // BeepManager is a singleton — outlives the service. Don't release it here.
     }
 }

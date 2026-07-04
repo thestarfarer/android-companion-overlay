@@ -3,6 +3,8 @@ package com.starfarer.companionoverlay.repository
 import android.content.SharedPreferences
 import com.starfarer.companionoverlay.CharacterPreset
 import com.starfarer.companionoverlay.PromptSettings
+import com.starfarer.companionoverlay.gateway.GatewayConfig
+import java.util.UUID
 
 /** What an upper-body long-press on the avatar does. */
 enum class CaptureMode(val key: String) {
@@ -25,12 +27,12 @@ enum class CaptureMode(val key: String) {
  * All runtime settings access flows through this class. Default values
  * are defined in [PromptSettings], which is now a pure constants object.
  *
- * Security note: Sensitive values (API keys) are stored in [securePrefs],
- * which uses EncryptedSharedPreferences. Non-sensitive settings use [settingsPrefs].
+ * Security note: Sensitive values (the Nexus gateway bearer token) are stored
+ * in [securePrefs], which uses EncryptedSharedPreferences. Non-sensitive
+ * settings use [settingsPrefs].
  *
- * Conversation history is handled separately by [ConversationStorage] —
- * it was moved out of SharedPreferences because SP rewrites the entire
- * file on every apply(), and conversations with screenshots can be large.
+ * Implements [GatewayConfig]: this is where the presence gateway reads its
+ * server URL, token, and device identity from.
  *
  * Injected via Koin as a singleton.
  */
@@ -38,7 +40,7 @@ open class SettingsRepository(
     private val settingsPrefs: SharedPreferences,
     private val securePrefs: SharedPreferences,
     private val presetProvider: () -> CharacterPreset
-) {
+) : GatewayConfig {
 
 
     // ══════════════════════════════════════════════════════════════════════
@@ -53,59 +55,77 @@ open class SettingsRepository(
     val walkFrameCount: Int get() = presetProvider().walkFrameCount
 
     // ══════════════════════════════════════════════════════════════════════
-    // Connection & API
+    // Nexus gateway connection (GatewayConfig)
     // ══════════════════════════════════════════════════════════════════════
 
-    var claudeApiKey: String?
-        get() = securePrefs.getString(KEY_CLAUDE_API_KEY, null)
+    /** Nexus base URL (rotating tunnel / port-forward — editable at runtime). */
+    var gatewayUrl: String?
+        get() = settingsPrefs.getString(KEY_GATEWAY_URL, null)
         set(value) {
-            val editor = securePrefs.edit()
-            if (value.isNullOrBlank()) editor.remove(KEY_CLAUDE_API_KEY)
-            else editor.putString(KEY_CLAUDE_API_KEY, value.trim())
+            val editor = settingsPrefs.edit()
+            if (value.isNullOrBlank()) editor.remove(KEY_GATEWAY_URL)
+            else editor.putString(KEY_GATEWAY_URL, value.trim())
             editor.apply()
         }
 
-    var connectionType: String
-        get() = settingsPrefs.getString(KEY_CONNECTION_TYPE, CONNECTION_API_KEY)
-            ?: CONNECTION_API_KEY
-        set(value) = settingsPrefs.edit().putString(KEY_CONNECTION_TYPE, value).apply()
+    /** Bearer token for /ws and the avatar routes — encrypted at rest. */
+    var gatewayToken: String?
+        get() = securePrefs.getString(KEY_GATEWAY_TOKEN, null)
+        set(value) {
+            val editor = securePrefs.edit()
+            if (value.isNullOrBlank()) editor.remove(KEY_GATEWAY_TOKEN)
+            else editor.putString(KEY_GATEWAY_TOKEN, value.trim())
+            editor.apply()
+        }
 
-    val isApiKeyMode: Boolean get() = connectionType == CONNECTION_API_KEY
+    override val serverUrl: String? get() = gatewayUrl
+    override val token: String? get() = gatewayToken
 
-    var advancedUnlocked: Boolean
-        get() = settingsPrefs.getBoolean(KEY_ADVANCED_UNLOCKED, false)
-        set(value) = settingsPrefs.edit().putBoolean(KEY_ADVANCED_UNLOCKED, value).apply()
+    /**
+     * Stable per-install device id — the server keys session resume and
+     * capability routing on it. Generated once, then never changes.
+     */
+    override val deviceId: String
+        get() {
+            settingsPrefs.getString(KEY_DEVICE_ID, null)?.let { return it }
+            val generated = "phone-" + UUID.randomUUID().toString().take(8)
+            settingsPrefs.edit().putString(KEY_DEVICE_ID, generated).apply()
+            return generated
+        }
 
-    var model: String
-        get() = settingsPrefs.getString(KEY_MODEL, PromptSettings.DEFAULT_MODEL)
-            ?: PromptSettings.DEFAULT_MODEL
-        set(value) = settingsPrefs.edit().putString(KEY_MODEL, value).apply()
+    override val deviceName: String get() = deviceNameSetting
 
-    var webSearchEnabled: Boolean
-        get() = settingsPrefs.getBoolean(KEY_WEB_SEARCH, false)
-        set(value) = settingsPrefs.edit().putBoolean(KEY_WEB_SEARCH, value).apply()
+    var deviceNameSetting: String
+        get() = settingsPrefs.getString(KEY_DEVICE_NAME, null)?.takeIf { it.isNotBlank() }
+            ?: defaultDeviceName()
+        set(value) {
+            val editor = settingsPrefs.edit()
+            if (value.isBlank()) editor.remove(KEY_DEVICE_NAME)
+            else editor.putString(KEY_DEVICE_NAME, value.trim())
+            editor.apply()
+        }
+
+    private fun defaultDeviceName(): String =
+        try {
+            android.os.Build.MODEL?.takeIf { it.isNotBlank() } ?: "Android phone"
+        } catch (_: Throwable) {
+            "Android phone"
+        }
 
     // ══════════════════════════════════════════════════════════════════════
-    // Conversation
+    // Conversation UI
     // ══════════════════════════════════════════════════════════════════════
 
     var bubbleTimeoutSeconds: Int
         get() = settingsPrefs.getInt(KEY_BUBBLE_TIMEOUT, PromptSettings.DEFAULT_BUBBLE_TIMEOUT)
         set(value) = settingsPrefs.edit().putInt(KEY_BUBBLE_TIMEOUT, value).apply()
 
-    var maxMessages: Int
-        get() = settingsPrefs.getInt(KEY_MAX_MESSAGES, PromptSettings.DEFAULT_MAX_MESSAGES)
-        set(value) = settingsPrefs.edit().putInt(KEY_MAX_MESSAGES, value).apply()
-
-    var keepDialogue: Boolean
-        get() = settingsPrefs.getBoolean(KEY_KEEP_DIALOGUE, false)
-        set(value) = settingsPrefs.edit().putBoolean(KEY_KEEP_DIALOGUE, value).apply()
-
     // ══════════════════════════════════════════════════════════════════════
     // On-Device TTS
     // ══════════════════════════════════════════════════════════════════════
 
-    var ttsEnabled: Boolean
+    // open: the tutorial sandboxes the radial-menu-mutable settings ([TutorialSettings]).
+    open var ttsEnabled: Boolean
         get() = settingsPrefs.getBoolean(KEY_TTS_ENABLED, true)
         set(value) = settingsPrefs.edit().putBoolean(KEY_TTS_ENABLED, value).apply()
 
@@ -122,30 +142,8 @@ open class SettingsRepository(
         set(value) = settingsPrefs.edit().putFloat(KEY_TTS_PITCH, value).apply()
 
     // ══════════════════════════════════════════════════════════════════════
-    // Gemini (STT & TTS) — API key stored in encrypted prefs
+    // Voice input
     // ══════════════════════════════════════════════════════════════════════
-
-    var geminiApiKey: String?
-        get() = securePrefs.getString(KEY_GEMINI_API_KEY, null)
-        set(value) {
-            val editor = securePrefs.edit()
-            if (value.isNullOrBlank()) editor.remove(KEY_GEMINI_API_KEY)
-            else editor.putString(KEY_GEMINI_API_KEY, value.trim())
-            editor.apply()
-        }
-
-    // open: the tutorial sandboxes the radial-menu-mutable settings ([TutorialSettings]).
-    open var geminiSttEnabled: Boolean
-        get() = settingsPrefs.getBoolean(KEY_GEMINI_STT, false)
-        set(value) = settingsPrefs.edit().putBoolean(KEY_GEMINI_STT, value).apply()
-
-    open var geminiTtsEnabled: Boolean
-        get() = settingsPrefs.getBoolean(KEY_GEMINI_TTS, false)
-        set(value) = settingsPrefs.edit().putBoolean(KEY_GEMINI_TTS, value).apply()
-
-    var geminiTtsVoice: String?
-        get() = settingsPrefs.getString(KEY_GEMINI_TTS_VOICE, null)
-        set(value) = settingsPrefs.edit().putString(KEY_GEMINI_TTS_VOICE, value).apply()
 
     var silenceTimeoutMs: Long
         get() = settingsPrefs.getLong(KEY_SILENCE_TIMEOUT, PromptSettings.DEFAULT_SILENCE_TIMEOUT_MS)
@@ -188,7 +186,7 @@ open class SettingsRepository(
         get() = CaptureMode.fromKey(settingsPrefs.getString(KEY_CAPTURE_MODE, null))
         set(value) = settingsPrefs.edit().putString(KEY_CAPTURE_MODE, value.key).apply()
 
-    /** Debug: persist a copy of every image sent to Claude for inspection. */
+    /** Debug: persist a copy of every image sent to the gateway for inspection. */
     var saveSentImages: Boolean
         get() = settingsPrefs.getBoolean(KEY_SAVE_SENT_IMAGES, false)
         set(value) = settingsPrefs.edit().putBoolean(KEY_SAVE_SENT_IMAGES, value).apply()
@@ -199,64 +197,22 @@ open class SettingsRepository(
         set(value) = settingsPrefs.edit().putBoolean(KEY_TUTORIAL_SEEN, value).apply()
 
     // ══════════════════════════════════════════════════════════════════════
-    // MCP
-    // ══════════════════════════════════════════════════════════════════════
-
-    var mcpEnabled: Boolean
-        get() = settingsPrefs.getBoolean(KEY_MCP_ENABLED, false)
-        set(value) = settingsPrefs.edit().putBoolean(KEY_MCP_ENABLED, value).apply()
-
-    var mcpShowToolBubbles: Boolean
-        get() = settingsPrefs.getBoolean(KEY_MCP_SHOW_TOOL_BUBBLES, true)
-        set(value) = settingsPrefs.edit().putBoolean(KEY_MCP_SHOW_TOOL_BUBBLES, value).apply()
-
-    var nexusEmitCounter: Int
-        get() = settingsPrefs.getInt(KEY_NEXUS_EMIT_COUNTER, 0)
-        set(value) = settingsPrefs.edit().putInt(KEY_NEXUS_EMIT_COUNTER, value).apply()
-
-    var nexusIntegrationEnabled: Boolean
-        get() = settingsPrefs.getBoolean(KEY_NEXUS_INTEGRATION, false)
-        set(value) = settingsPrefs.edit().putBoolean(KEY_NEXUS_INTEGRATION, value).apply()
-
-    var nexusContextCache: String?
-        get() = settingsPrefs.getString(KEY_NEXUS_CONTEXT_CACHE, null)
-        set(value) {
-            val editor = settingsPrefs.edit()
-            if (value == null) editor.remove(KEY_NEXUS_CONTEXT_CACHE)
-            else editor.putString(KEY_NEXUS_CONTEXT_CACHE, value)
-            editor.apply()
-        }
-
-    var nexusContextTimestamp: Long
-        get() = settingsPrefs.getLong(KEY_NEXUS_CONTEXT_TIMESTAMP, 0)
-        set(value) = settingsPrefs.edit().putLong(KEY_NEXUS_CONTEXT_TIMESTAMP, value).apply()
-
-    var nexusContextPrompt: String
-        get() = settingsPrefs.getString(KEY_NEXUS_CONTEXT_PROMPT, DEFAULT_CONTEXT_PROMPT)
-            ?: DEFAULT_CONTEXT_PROMPT
-        set(value) = settingsPrefs.edit().putString(KEY_NEXUS_CONTEXT_PROMPT, value).apply()
-
-    var nexusContextAppendToPrompt: Boolean
-        get() = settingsPrefs.getBoolean(KEY_NEXUS_CONTEXT_APPEND, true)
-        set(value) = settingsPrefs.edit().putBoolean(KEY_NEXUS_CONTEXT_APPEND, value).apply()
-
-    // ══════════════════════════════════════════════════════════════════════
     // Utilities
     // ══════════════════════════════════════════════════════════════════════
 
     fun resetToDefaults() {
-        // This prefs file is SHARED with PresetRepository (presets, active id)
-        // and McpRepository (server configs) — a blanket clear() would wipe the
-        // user's characters and MCP servers too. Preserve those keys.
+        // This prefs file is SHARED with PresetRepository (presets, active id) —
+        // a blanket clear() would wipe the user's characters. Preserve those
+        // keys, plus the stable device identity the server keys sessions on.
         val preserved = listOf(
-            "character_presets", "active_preset_id", "mcp_servers"
+            "character_presets", "active_preset_id", KEY_DEVICE_ID
         ).mapNotNull { key -> settingsPrefs.getString(key, null)?.let { key to it } }
 
         settingsPrefs.edit().apply {
             clear()
             preserved.forEach { (key, value) -> putString(key, value) }
         }.apply()
-        // Don't touch secure prefs — that would wipe auth tokens and MCP secrets.
+        // Don't touch secure prefs — that would wipe the gateway token.
     }
 
     var overlayMode: String
@@ -267,25 +223,15 @@ open class SettingsRepository(
         get() = overlayMode == "godot_3d"
 
     companion object {
-        const val CONNECTION_API_KEY = "api_key"
-        const val CONNECTION_OAUTH = "oauth"
-
-        private const val KEY_CLAUDE_API_KEY = "claude_api_key"
-        private const val KEY_CONNECTION_TYPE = "claude_connection_type"
-        private const val KEY_ADVANCED_UNLOCKED = "advanced_unlocked"
-        private const val KEY_MODEL = "selected_model"
-        private const val KEY_WEB_SEARCH = "web_search_enabled"
+        private const val KEY_GATEWAY_URL = "gateway_url"
+        private const val KEY_GATEWAY_TOKEN = "gateway_token"
+        private const val KEY_DEVICE_ID = "gateway_device_id"
+        private const val KEY_DEVICE_NAME = "gateway_device_name"
         private const val KEY_BUBBLE_TIMEOUT = "bubble_timeout"
-        private const val KEY_MAX_MESSAGES = "max_messages"
-        private const val KEY_KEEP_DIALOGUE = "keep_dialogue"
         private const val KEY_TTS_ENABLED = "tts_enabled"
         private const val KEY_TTS_VOICE = "tts_voice"
         private const val KEY_TTS_SPEECH_RATE = "tts_speech_rate"
         private const val KEY_TTS_PITCH = "tts_pitch"
-        private const val KEY_GEMINI_API_KEY = "gemini_api_key"
-        private const val KEY_GEMINI_STT = "gemini_stt_enabled"
-        private const val KEY_GEMINI_TTS = "gemini_tts_enabled"
-        private const val KEY_GEMINI_TTS_VOICE = "gemini_tts_voice"
         private const val KEY_SILENCE_TIMEOUT = "silence_timeout_ms"
         private const val KEY_AVATAR_X = "avatar_x"
         private const val KEY_AVATAR_POSITION = "avatar_position"
@@ -296,15 +242,6 @@ open class SettingsRepository(
         private const val KEY_CAPTURE_MODE = "capture_mode"
         private const val KEY_SAVE_SENT_IMAGES = "save_sent_images"
         private const val KEY_TUTORIAL_SEEN = "tutorial_seen"
-        private const val KEY_MCP_ENABLED = "mcp_enabled"
-        private const val KEY_MCP_SHOW_TOOL_BUBBLES = "mcp_show_tool_bubbles"
-        private const val KEY_NEXUS_EMIT_COUNTER = "nexus_emit_counter"
-        private const val KEY_NEXUS_INTEGRATION = "nexus_integration_enabled"
-        private const val KEY_NEXUS_CONTEXT_CACHE = "nexus_context_cache"
-        private const val KEY_NEXUS_CONTEXT_TIMESTAMP = "nexus_context_timestamp"
-        private const val KEY_NEXUS_CONTEXT_APPEND = "nexus_context_append_to_prompt"
-        private const val KEY_NEXUS_CONTEXT_PROMPT = "nexus_context_prompt"
-        private const val DEFAULT_CONTEXT_PROMPT = "What happened recently? What are we up to? What should I know?"
         private const val KEY_OVERLAY_MODE = "overlay_mode"
     }
 }

@@ -13,6 +13,9 @@ import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.content.res.Configuration
 import android.graphics.PixelFormat
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import android.os.BatteryManager
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
@@ -23,11 +26,13 @@ import android.view.*
 import android.widget.ImageView
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.starfarer.companionoverlay.avatar3d.FilamentAvatarRenderer
 import com.starfarer.companionoverlay.event.OverlayCoordinator
 import com.starfarer.companionoverlay.event.OverlayEvent
-import com.starfarer.companionoverlay.mcp.McpManager
+import com.starfarer.companionoverlay.gateway.AvatarRepository
+import com.starfarer.companionoverlay.gateway.GatewayClient
 import com.starfarer.companionoverlay.repository.CaptureMode
 import com.starfarer.companionoverlay.repository.SettingsRepository
 import kotlinx.coroutines.CoroutineScope
@@ -35,26 +40,31 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.koin.android.ext.android.inject
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Foreground service that displays the companion overlay on screen.
  *
- * Orchestrates the various managers but doesn't implement business logic itself:
- * - [SpriteAnimator] handles sprite rendering and animation
- * - [BubbleManager] handles speech bubbles and UI
- * - [ConversationManager] handles Claude API and history
- * - [AudioCoordinator] handles TTS and beeps
- * - [VoiceInputController] handles voice input state machine
- * - [ScreenshotManager] handles accessibility-based screenshots
+ * A thin presence endpoint: rendering, voice capture, and device
+ * capabilities live here; the brain lives server-side in Nexus. All
+ * conversation flows through [GatewayClient] (presence protocol v1):
+ * - user text / transcribed voice → `text`
+ * - long-press captures → `image`
+ * - taps and keyboard visibility → `event`
+ * - inbound `message` → [BubbleManager], `speak` → local TTS,
+ *   `animate` → [SpriteAnimator], `status` → thinking indicator,
+ *   `cap_request` → screenshot/camera/notify handlers.
  *
- * Implements [VoiceInputHost] to provide the interface that [VoiceInputController]
- * needs without exposing internal implementation details.
- *
- * Communicates with other components via [OverlayCoordinator] instead of
- * static instance references.
+ * Local reactive animation (tap walks, escape) never depends on the
+ * connection — presence works fully offline; only conversation needs Nexus.
  */
-class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceInputHost {
+class CompanionOverlayService : Service(), VoiceInputHost, GatewayClient.Listener {
 
     companion object {
         const val CHANNEL_ID = CompanionApplication.NOTIFICATION_CHANNEL_ID
@@ -72,14 +82,13 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
     // ══════════════════════════════════════════════════════════════════════
 
     private val coordinator: OverlayCoordinator by inject()
-    private val conversationManager: ConversationManager by inject()
     private val audioCoordinator: AudioCoordinator by inject()
     private val screenshotManager: ScreenshotManager by inject()
     private val cameraManager: CameraManager by inject()
     private val settings: SettingsRepository by inject()
     private val beepManager: BeepManager by inject()
-    private val httpClient: okhttp3.OkHttpClient by inject()
-    private val mcpManager: McpManager by inject()
+    private val gateway: GatewayClient by inject()
+    private val avatarRepository: AvatarRepository by inject()
 
     // Main.immediate so launch bodies run inline up to their first suspension —
     // subscribeToEvents() relies on this: its collect subscription must be live
@@ -116,6 +125,12 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
     private var pendingScreenshotBase64: String? = null
     private var pendingVoiceReply = false
 
+    /** Last finalized assistant message — reopened by a lower-body long-press. */
+    private var lastAssistantMessage: String? = null
+
+    // Edge state for the subtle offline hint: shown once per disconnect episode.
+    private var offlineHintShown = false
+
     private val longPressHandler = Handler(Looper.getMainLooper())
     private var isLongPress = false
     // Raw (screen) coordinates for movement deltas — the window itself moves
@@ -138,6 +153,9 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
     // Tracked so screen-on/unlock fades restore to the ghost alpha (0.5) rather
     // than snapping a ghosted sprite back to fully visible.
     private var ghostActive = false
+
+    // Ids for server-requested `notify` capability notifications.
+    private val notifyIds = AtomicInteger(100)
 
     // ══════════════════════════════════════════════════════════════════════
     // Lifecycle
@@ -199,12 +217,21 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
         // fast observer land on a SharedFlow with no subscriber — silently dropped.
         coordinator.onOverlayServiceStarted()
 
+        // Bring the presence link up last — everything it renders into exists now.
+        gateway.capabilities = deviceCapabilities()
+        gateway.listener = this
+        gateway.start()
+
         DebugLog.log("Overlay", "Service created")
     }
 
     override fun onDestroy() {
         super.onDestroy()
         destroyed = true
+        // The gateway singleton outlives the service; detach before teardown so
+        // late frames can't poke dead UI. Presence endpoint down = socket down.
+        gateway.listener = null
+        gateway.stop()
         saveState()
         stopAnimation()
         // Kill pending delayed work (screenshot/camera capture posts) — a capture
@@ -216,12 +243,10 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
 
         // Only tear down what initializeManagers() actually created — the
         // permission-abort path never gets there, and the injected delegates
-        // (audioCoordinator, conversationManager) must not be lazily *created*
-        // here just to be destroyed.
+        // (audioCoordinator) must not be lazily *created* here just to be destroyed.
         if (managersInitialized) {
             voiceController.destroy()
             audioCoordinator.release()
-            conversationManager.destroy()
             bubbleManager.destroy()
             radialMenuManager.close()
             spriteAnimator.release()
@@ -277,36 +302,15 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
             screenHeight = screenHeight,
             density = density
         )
-        spriteAnimator = SpriteAnimator(this, animConfig, settings).apply {
+        spriteAnimator = SpriteAnimator(this, animConfig, settings, avatarRepository).apply {
             loadSprites()
         }
 
         bubbleManager = BubbleManager(this, OverlayBubbleSurface(windowManager, density), handler, bubbleHost)
         radialMenuManager = RadialMenuManager(this, windowManager, settings)
 
-        conversationManager.listener = this
-        conversationManager.isTtsSpeaking = { audioCoordinator.isSpeaking }
-
-        audioCoordinator.onSynthesisStarted = { bubbleManager.showBrief(getString(R.string.svc_bubble_generating_voice), 30000L) }
-        audioCoordinator.onSynthesisEnded = { bubbleManager.hideSpeechBubble() }
-
         audioCoordinator.warmUp()
-        voiceController = VoiceInputController(this, this, settings, beepManager, httpClient)
-
-        // Initialize MCP servers if enabled
-        if (settings.mcpEnabled) {
-            serviceScope.launch {
-                val results = mcpManager.initializeAll()
-                val totalTools = results.values.sumOf {
-                    it.getOrDefault(emptyList()).size
-                }
-                val failCount = results.values.count { it.isFailure }
-                if (totalTools > 0 || failCount > 0) {
-                    DebugLog.log("Overlay", "MCP: $totalTools tools, $failCount failures")
-                }
-                conversationManager.startAsyncPolling()
-            }
-        }
+        voiceController = VoiceInputController(this, this, settings, beepManager)
 
         managersInitialized = true
     }
@@ -318,16 +322,15 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
                     is OverlayEvent.ToggleVoice -> voiceController.toggle()
                     is OverlayEvent.DismissOverlay -> dismissAnimated()
                     is OverlayEvent.KeyboardVisibility -> setGhostMode(event.visible)
-                    is OverlayEvent.ReloadMcp -> reloadMcp()
                     is OverlayEvent.ReloadSprites -> reloadSprites()
-                    is OverlayEvent.ClearConversation -> conversationManager.clearHistory()
+                    is OverlayEvent.GatewayConfigChanged -> restartGateway()
                     else -> { /* Handled elsewhere */ }
                 }
             }
         }
     }
 
-    /** Live sprite/preset change from MainActivity — reload sheets in place. */
+    /** Live sprite/preset change from MainActivity or avatar sync — reload sheets in place. */
     private fun reloadSprites() {
         // 3D mode doesn't render sprite sheets; nothing to reload.
         if (filamentRenderer != null) return
@@ -343,18 +346,12 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
         spriteAnimator.update()
     }
 
-    private fun reloadMcp() {
-        DebugLog.log("Overlay", "MCP credentials changed, reinitializing...")
-        mcpManager.disconnectAll()
-        serviceScope.launch {
-            val results = mcpManager.initializeAll()
-            val totalTools = results.values.sumOf {
-                it.getOrDefault(emptyList()).size
-            }
-            val failCount = results.values.count { it.isFailure }
-            DebugLog.log("Overlay", "MCP reinit: $totalTools tools, $failCount failures")
-            conversationManager.startAsyncPolling()
-        }
+    /** Server URL/token changed in settings — tear the socket down and redial. */
+    private fun restartGateway() {
+        DebugLog.log("Overlay", "Gateway settings changed — reconnecting")
+        gateway.stop()
+        offlineHintShown = false
+        gateway.start()
     }
 
     /** @return false when the overlay window could not be added (service is stopping). */
@@ -488,6 +485,8 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
                     // Plain tap (no long-press, no swipe) → walk. Fires immediately on UP.
                     if (!isLongPress && !swipeConsumed && event.action == MotionEvent.ACTION_UP) {
                         spriteAnimator.handleTouch()
+                        // Cheap presence signal — rate-limited inside the client.
+                        gateway.sendEvent("tapped")
                     }
                     true
                 }
@@ -615,7 +614,7 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
     }
 
     /**
-     * Route a freshly captured image (screenshot or camera) into the conversation.
+     * Route a freshly captured image (screenshot or camera) toward the gateway.
      * Source-agnostic: both paths produce a base64 JPEG. Safe to call from any
      * thread — the work is posted to the main handler.
      */
@@ -636,7 +635,7 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
                     voiceController.toggle()
                 }
             } else {
-                sendScreenshot(base64, null)
+                sendCapturedImage(base64, null)
             }
         }
     }
@@ -684,7 +683,7 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
     }
 
     private fun handleBubbleReopen() {
-        val lastMessage = conversationManager.lastAssistantMessage
+        val lastMessage = lastAssistantMessage
         if (lastMessage != null) {
             bubbleManager.showResponse(lastMessage, settings.bubbleTimeoutSeconds * 1000L)
         } else {
@@ -693,81 +692,258 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
     }
 
     // ══════════════════════════════════════════════════════════════════════
-    // Conversation flow
+    // Conversation flow (outbound → gateway)
     // ══════════════════════════════════════════════════════════════════════
 
-    private fun sendScreenshot(imageBase64: String, voiceText: String?) {
+    private fun sendCapturedImage(imageBase64: String, voiceText: String?) {
         if (settings.saveSentImages) {
             val source = if (settings.captureMode == CaptureMode.CAMERA) "cam" else "screen"
             ImageAudit.save(this, imageBase64, source)
         }
         audioCoordinator.playBeep(BeepManager.Beep.STEP)
-        bubbleManager.showBrief(getString(R.string.svc_bubble_thinking), 30000L)
-        conversationManager.sendWithScreenshot(imageBase64, voiceText)
-    }
-
-    private fun sendTextReply(text: String) {
-        bubbleManager.cancelPendingDismiss()
-        bubbleManager.hideSpeechBubble()
-        audioCoordinator.playBeep(BeepManager.Beep.STEP)
-        bubbleManager.showBrief(getString(R.string.svc_bubble_thinking), 30000L)
-        conversationManager.sendText(text)
-    }
-
-    // ══════════════════════════════════════════════════════════════════════
-    // ConversationManager.Listener
-    // ══════════════════════════════════════════════════════════════════════
-
-    override fun onResponseReceived(text: String) {
-        voiceController.cancelSafetyTimeout()
-        audioCoordinator.playBeep(BeepManager.Beep.STEP)
-
-        val shouldSpeak = settings.ttsEnabled || pendingVoiceReply
-        val wasVoice = pendingVoiceReply
-        pendingVoiceReply = false
-
-        if (shouldSpeak) {
-            bubbleManager.cancelPendingDismiss()
-            bubbleManager.hideSpeechBubble()
-
-            audioCoordinator.onSpeechComplete = {
-                audioCoordinator.playBeep(BeepManager.Beep.DONE)
-                if (wasVoice) {
-                    handler.post { voiceController.onVoiceResponseComplete() }
-                }
-                conversationManager.onTtsDone()
-                audioCoordinator.onSpeechComplete = null
-            }
-            audioCoordinator.speak(text)
+        val kind = if (settings.captureMode == CaptureMode.CAMERA) "camera" else "screenshot"
+        // Images are never queued offline (protocol §1) — tell the user instead.
+        if (gateway.sendImage("image/jpeg", imageBase64, kind, voiceText)) {
+            bubbleManager.showBrief(getString(R.string.svc_bubble_thinking), 30000L)
         } else {
-            bubbleManager.showResponse(text, settings.bubbleTimeoutSeconds * 1000L)
-            voiceController.onVoiceResponseComplete()
+            pendingVoiceReply = false
+            bubbleManager.showBrief(getString(R.string.svc_bubble_offline_image), 4000L)
         }
     }
 
-    override fun onError(message: String) {
+    private fun sendTextReply(text: String, source: String = "typed") {
+        bubbleManager.cancelPendingDismiss()
+        bubbleManager.hideSpeechBubble()
+        audioCoordinator.playBeep(BeepManager.Beep.STEP)
+        if (gateway.isConnected) {
+            bubbleManager.showBrief(getString(R.string.svc_bubble_thinking), 30000L)
+        } else {
+            // Queued client-side (bounded, drop-oldest) and flushed on reconnect.
+            bubbleManager.showBrief(getString(R.string.svc_bubble_offline_queued), 4000L)
+        }
+        gateway.sendText(text, source)
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // GatewayClient.Listener (inbound ← Nexus, on the main thread)
+    // ══════════════════════════════════════════════════════════════════════
+
+    override fun onConnected(welcome: GatewayClient.Welcome) {
+        DebugLog.log("Overlay", "Gateway connected: session=${welcome.sessionId} resumed=${welcome.resumed}")
+        offlineHintShown = false
+        sendDeviceStatus()
+
+        // Avatar sync: welcome carries the mandated sprite version — on
+        // mismatch, refresh the cache off the main thread and reload in place.
+        val version = welcome.avatarVersion
+        serviceScope.launch(Dispatchers.IO) {
+            val updated = avatarRepository.syncIfNeeded(version)
+            if (updated) withContext(Dispatchers.Main) {
+                if (!destroyed) reloadSprites()
+            }
+        }
+    }
+
+    override fun onDisconnected() {
+        // Subtle, once per episode: the sprite keeps animating regardless —
+        // presence never depends on connectivity, only conversation does.
+        if (!offlineHintShown && !destroyed) {
+            offlineHintShown = true
+            bubbleManager.showBrief(getString(R.string.svc_bubble_offline), 3000L)
+        }
+    }
+
+    override fun onMessage(msgId: String?, text: String) {
+        if (destroyed || text.isBlank()) return
+        voiceController.cancelSafetyTimeout()
+        audioCoordinator.playBeep(BeepManager.Beep.STEP)
+        lastAssistantMessage = text
+
+        if (settings.autoCopy) {
+            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            val clip = android.content.ClipData.newPlainText("Senni", text).apply {
+                description.extras = android.os.PersistableBundle().apply {
+                    putBoolean(android.content.ClipDescription.EXTRA_IS_SENSITIVE, true)
+                }
+            }
+            clipboard.setPrimaryClip(clip)
+        }
+
+        // Always display — the response dialog doubles as the typed-reply
+        // surface. `speak` (if any) arrives separately and overlays voice.
+        bubbleManager.showResponse(text, settings.bubbleTimeoutSeconds * 1000L)
+        voiceController.onVoiceResponseComplete()
+    }
+
+    override fun onSpeak(text: String, audioFormat: String?, audioBase64: String?) {
+        if (destroyed || text.isBlank()) return
+        // Server-side TTS audio isn't built yet; when it lands, decode and play
+        // it here. Until then: local TTS when enabled, or when the user spoke
+        // (voice in → voice out, matching the old companion behavior).
+        val shouldSpeak = settings.ttsEnabled || pendingVoiceReply
+        pendingVoiceReply = false
+        if (!shouldSpeak) return
+
+        audioCoordinator.onSpeechComplete = {
+            audioCoordinator.playBeep(BeepManager.Beep.DONE)
+            audioCoordinator.onSpeechComplete = null
+        }
+        audioCoordinator.speak(text)
+    }
+
+    override fun onCompanionStatus(state: String, detail: String?) {
+        if (destroyed) return
+        when (state) {
+            "thinking" -> bubbleManager.showBrief(getString(R.string.svc_bubble_thinking), 30000L)
+            "tool_running" -> bubbleManager.showBrief(
+                getString(R.string.svc_bubble_tool_use, detail ?: "…"), 30000L
+            )
+            // idle/listening/speaking need no indicator; the brief toast
+            // auto-dismisses and `message` replaces it with the response.
+        }
+    }
+
+    override fun onAnimate(state: String, params: JsonObject?) {
+        if (destroyed) return
+        // Advisory mapping onto what the 2D sprite can do; states without a
+        // local equivalent (talk/think) are ignored. Local reactive animation
+        // (tap walks, escape) stays untouched underneath.
+        when (state) {
+            "walk" -> spriteAnimator.walk()
+            "escape", "alert" -> spriteAnimator.escape()
+        }
+    }
+
+    override fun onSession(event: String, data: JsonObject?) {
+        DebugLog.log("Overlay", "Session event: $event ${data ?: ""}")
+    }
+
+    override fun onServerError(code: String, message: String?, re: String?) {
+        if (destroyed) return
+        DebugLog.log("Overlay", "Gateway error $code: $message")
         audioCoordinator.playBeep(BeepManager.Beep.ERROR)
         pendingVoiceReply = false
-        bubbleManager.showBrief(getString(R.string.svc_bubble_error, message))
+        bubbleManager.showBrief(getString(R.string.svc_bubble_error, message ?: code))
         voiceController.onVoiceResponseComplete()
     }
 
-    override fun onCancelled() {
-        pendingVoiceReply = false
-        // Without this, an externally cancelled request (tap on the bubble,
-        // TTS stop) left the controller in PROCESSING until the 300s watchdog.
-        voiceController.onVoiceResponseComplete()
+    // ══════════════════════════════════════════════════════════════════════
+    // Capability requests (server-side tool loop → this device)
+    // ══════════════════════════════════════════════════════════════════════
+
+    override fun onCapRequest(requestId: String, capability: String, params: JsonObject, timeoutMs: Long) {
+        if (destroyed) return
+        DebugLog.log("Overlay", "cap_request $capability ($requestId)")
+        when (capability) {
+            "screenshot" -> handleCapScreenshot(requestId)
+            "camera" -> handleCapCamera(requestId, params)
+            "notify" -> handleCapNotify(requestId, params)
+            else -> capFail(requestId, "unsupported")
+        }
     }
 
-    override fun onToolUseProgress(toolNames: List<String>) {
-        if (!settings.mcpShowToolBubbles) return
-        val toolList = toolNames.joinToString(", ")
-        bubbleManager.showBrief(getString(R.string.svc_bubble_tool_use, toolList), 30000L)
+    private fun handleCapScreenshot(requestId: String) {
+        if (!coordinator.accessibilityRunning.value) {
+            capFail(requestId, "accessibility_unavailable")
+            return
+        }
+        screenshotManager.takeScreenshot { base64 ->
+            if (base64 != null) capImage(requestId, base64)
+            else capFail(requestId, "capture_failed")
+        }
     }
 
-    override fun onAsyncResultsInjecting() {
-        audioCoordinator.playBeep(BeepManager.Beep.QUEUE)
-        bubbleManager.showBrief(getString(R.string.svc_bubble_queue_results), 30000L)
+    private fun handleCapCamera(requestId: String, params: JsonObject) {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
+            != PackageManager.PERMISSION_GRANTED) {
+            capFail(requestId, "permission_denied")
+            return
+        }
+        val facing = (params["facing"] as? JsonPrimitive)?.content ?: "back"
+        handler.post {
+            if (destroyed) return@post
+            setCameraForeground(true)
+            cameraManager.capture(facing) { base64 ->
+                setCameraForeground(false)
+                if (base64 != null) capImage(requestId, base64)
+                else capFail(requestId, "capture_failed")
+            }
+        }
+    }
+
+    private fun handleCapNotify(requestId: String, params: JsonObject) {
+        if (!NotificationManagerCompat.from(this).areNotificationsEnabled()) {
+            capFail(requestId, "permission_denied")
+            return
+        }
+        val title = (params["title"] as? JsonPrimitive)?.content ?: "Senni"
+        val body = (params["body"] as? JsonPrimitive)?.content ?: ""
+        try {
+            val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+                .setContentTitle(title)
+                .setContentText(body)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+                .setSmallIcon(R.drawable.ic_notification)
+                .setAutoCancel(true)
+                .build()
+            NotificationManagerCompat.from(this).notify(notifyIds.incrementAndGet(), notification)
+            gateway.sendCapResult(requestId, buildJsonObject { put("ok", true) })
+        } catch (e: Exception) {
+            capFail(requestId, "notify_failed")
+        }
+    }
+
+    private fun capImage(requestId: String, base64: String) {
+        gateway.sendCapResult(requestId, buildJsonObject {
+            put("ok", true)
+            put("format", "image/jpeg")
+            put("data", base64)
+        })
+    }
+
+    private fun capFail(requestId: String, error: String) {
+        DebugLog.log("Overlay", "cap_result failure: $error")
+        gateway.sendCapResult(requestId, buildJsonObject {
+            put("ok", false)
+            put("error", error)
+        })
+    }
+
+    /** The capability manifest this device declares in `hello`. */
+    private fun deviceCapabilities(): List<JsonObject> = listOf(
+        buildJsonObject { put("name", "screenshot") },
+        buildJsonObject {
+            put("name", "camera")
+            put("facing", kotlinx.serialization.json.buildJsonArray {
+                add(JsonPrimitive("front")); add(JsonPrimitive("back"))
+            })
+        },
+        buildJsonObject { put("name", "notify") },
+        buildJsonObject { put("name", "mic") },
+        buildJsonObject { put("name", "stt") },
+        buildJsonObject { put("name", "tts") },
+    )
+
+    /** Battery/network snapshot, sent after each welcome. */
+    private fun sendDeviceStatus() {
+        val battery = try {
+            (getSystemService(Context.BATTERY_SERVICE) as? BatteryManager)
+                ?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+                ?.takeIf { it in 0..100 }
+        } catch (_: Exception) { null }
+
+        val network = try {
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            val caps = cm?.activeNetwork?.let { cm.getNetworkCapabilities(it) }
+            when {
+                caps == null -> "none"
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "wifi"
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "cell"
+                else -> "other"
+            }
+        } catch (_: Exception) { null }
+
+        gateway.sendStatus(battery = battery, network = network, muted = !settings.ttsEnabled)
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -781,7 +957,6 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
 
     override fun stopTtsAndCancel() {
         audioCoordinator.stopSpeaking()
-        conversationManager.cancelPending()
     }
 
     override fun sendVoiceInput(text: String) {
@@ -791,9 +966,9 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
         val screenshot = pendingScreenshotBase64
         if (screenshot != null) {
             pendingScreenshotBase64 = null
-            sendScreenshot(screenshot, text)
+            sendCapturedImage(screenshot, text)
         } else {
-            sendTextReply(text)
+            sendTextReply(text, source = "voice")
         }
     }
 
@@ -801,13 +976,14 @@ class CompanionOverlayService : Service(), ConversationManager.Listener, VoiceIn
         pendingScreenshotBase64 = null
     }
 
-    override fun getConversationContextForStt(): String = conversationManager.getContextForStt()
-
     // ══════════════════════════════════════════════════════════════════════
     // Internal helpers
     // ══════════════════════════════════════════════════════════════════════
 
     private fun setGhostMode(ghost: Boolean) {
+        if (ghostActive != ghost) {
+            gateway.sendEvent("keyboard_visible", buildJsonObject { put("visible", ghost) })
+        }
         ghostActive = ghost
         spriteAnimator.setGhostMode(ghost)
     }

@@ -53,17 +53,9 @@ sealed class OverlayEvent {
     data object ReloadSprites : OverlayEvent()
 
     // ══════════════════════════════════════════════════════════════════════
-    // Conversation
+    // Gateway
     // ══════════════════════════════════════════════════════════════════════
 
-    /** User asked to wipe the conversation (Settings) — clear the running
-     *  service's in-memory history, not just the file. */
-    data object ClearConversation : OverlayEvent()
-
-    // ══════════════════════════════════════════════════════════════════════
-    // MCP
-    // ══════════════════════════════════════════════════════════════════════
-
-    /** MCP credentials changed — service should reinitialize connections and poller. */
-    data object ReloadMcp : OverlayEvent()
+    /** Nexus server URL/token changed — the service should redial the gateway. */
+    data object GatewayConfigChanged : OverlayEvent()
 }

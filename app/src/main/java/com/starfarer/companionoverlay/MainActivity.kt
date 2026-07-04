@@ -9,12 +9,8 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.View
-import android.widget.ArrayAdapter
 import android.widget.LinearLayout
 import android.widget.Toast
-import android.widget.AutoCompleteTextView
-import android.widget.Button
-import android.widget.TextView
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -34,14 +30,13 @@ import com.starfarer.companionoverlay.viewmodel.MainViewModel
 import kotlinx.coroutines.launch
 import org.koin.android.ext.android.inject
 import org.koin.androidx.viewmodel.ext.android.viewModel
-import java.util.Date
 
 /**
  * Main launcher activity.
  *
  * Provides:
  * - Character preset carousel with swipe navigation
- * - Claude authentication
+ * - Nexus gateway status (server configured or not)
  * - Overlay service control
  * - Navigation to settings
  *
@@ -56,8 +51,6 @@ class MainActivity : AppCompatActivity() {
     // ══════════════════════════════════════════════════════════════════════
 
     private val viewModel: MainViewModel by viewModel()
-    private val claudeAuth: ClaudeAuth by inject()
-    private val claudeApi: ClaudeApi by inject()
     private val coordinator: OverlayCoordinator by inject()
     private val settings: SettingsRepository by inject()
 
@@ -83,7 +76,6 @@ class MainActivity : AppCompatActivity() {
     private val userMessagePreview get() = binding.userMessagePreview
     private val statusText get() = binding.statusText
     private val toggleButton get() = binding.toggleButton
-    private val modelSelector get() = binding.modelSelector
 
     private lateinit var pagerAdapter: PresetPagerAdapter
 
@@ -157,7 +149,6 @@ class MainActivity : AppCompatActivity() {
 
         registerTextEditorListeners()
         setupPagerAdapter()
-        setupModelDropdown()
         setupClickListeners()
         observeState()
 
@@ -193,7 +184,7 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         viewModel.loadPresets()
-        viewModel.refreshAuthState()
+        viewModel.refreshGatewayState()
         spriteAnimator.start()
     }
 
@@ -217,7 +208,7 @@ class MainActivity : AppCompatActivity() {
                 viewModel.state.collect { state ->
                     updatePresetDisplay(state)
                     updateOverlayUI(state)
-                    updateAuthUI(state)
+                    updateGatewayUI(state)
                 }
             }
         }
@@ -249,26 +240,6 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
-    private fun setupModelDropdown() {
-        val adapter = ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, PromptSettings.MODEL_NAMES)
-        modelSelector.setAdapter(adapter)
-
-        val savedModel = settings.model
-        val idx = PromptSettings.MODEL_IDS.indexOf(savedModel)
-        if (idx >= 0) {
-            modelSelector.setText(PromptSettings.MODEL_NAMES[idx], false)
-        }
-
-        // Resolve by the selected NAME, not the adapter position: an
-        // AutoCompleteTextView filters its list, so a filtered position no
-        // longer maps 1:1 onto MODEL_IDS and could select the wrong model.
-        modelSelector.setOnItemClickListener { _, _, position, _ ->
-            val name = adapter.getItem(position) ?: return@setOnItemClickListener
-            val modelIdx = PromptSettings.MODEL_NAMES.indexOf(name)
-            if (modelIdx >= 0) settings.model = PromptSettings.MODEL_IDS[modelIdx]
-        }
-    }
-
     private fun setupClickListeners() {
         binding.settingsButton.setOnClickListener {
             startActivity(Intent(this, SettingsActivity::class.java))
@@ -296,7 +267,7 @@ class MainActivity : AppCompatActivity() {
             )
         }
 
-        authButton.setOnClickListener { handleAuthClick() }
+        authButton.setOnClickListener { openGatewaySettings() }
 
         toggleButton.setOnClickListener {
             if (viewModel.state.value.overlayRunning) stopOverlayService()
@@ -382,46 +353,25 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun updateAuthUI(state: MainViewModel.UiState) {
-        when (val authState = state.authState) {
-            is MainViewModel.AuthState.ApiKeyMode -> {
-                if (authState.hasKey) {
-                    authDot.backgroundTintList = ColorStateList.valueOf(getColor(R.color.status_connected))
-                    authStatusText.text = getString(R.string.main_api_key_configured)
-                    authButton.visibility = View.GONE
-                } else {
-                    authDot.backgroundTintList = ColorStateList.valueOf(getColor(R.color.status_error))
-                    authStatusText.text = getString(R.string.main_api_key_not_set)
-                    authButton.visibility = View.VISIBLE
-                    authButton.text = getString(R.string.main_set_api_key)
-                }
-            }
-            is MainViewModel.AuthState.Waiting -> {
-                authDot.backgroundTintList = ColorStateList.valueOf(getColor(R.color.status_warning))
-                authStatusText.text = getString(R.string.main_waiting_for_browser)
-                authButton.visibility = View.VISIBLE
-                authButton.text = getString(R.string.common_cancel)
-            }
-            is MainViewModel.AuthState.Connected -> {
+    private fun updateGatewayUI(state: MainViewModel.UiState) {
+        when (val gateway = state.gateway) {
+            is MainViewModel.GatewayState.Configured -> {
                 authDot.backgroundTintList = ColorStateList.valueOf(getColor(R.color.status_connected))
-                // Locale- and 12/24h-aware via the user's system formats.
-                val date = Date(authState.expiresAt)
-                val df = android.text.format.DateFormat.getMediumDateFormat(this)
-                val tf = android.text.format.DateFormat.getTimeFormat(this)
-                authStatusText.text = getString(R.string.main_connected_until, df.format(date), tf.format(date))
+                val host = android.net.Uri.parse(gateway.serverUrl).host ?: gateway.serverUrl
+                authStatusText.text = getString(R.string.main_gateway_configured, host)
                 authButton.visibility = View.GONE
             }
-            is MainViewModel.AuthState.Expired -> {
-                authDot.backgroundTintList = ColorStateList.valueOf(getColor(R.color.status_error))
-                authStatusText.text = getString(R.string.main_token_expired)
+            is MainViewModel.GatewayState.TokenMissing -> {
+                authDot.backgroundTintList = ColorStateList.valueOf(getColor(R.color.status_warning))
+                authStatusText.text = getString(R.string.main_gateway_token_missing)
                 authButton.visibility = View.VISIBLE
-                authButton.text = getString(R.string.main_reconnect)
+                authButton.text = getString(R.string.main_setup_gateway)
             }
-            is MainViewModel.AuthState.NotConnected -> {
+            is MainViewModel.GatewayState.NotConfigured -> {
                 authDot.backgroundTintList = ColorStateList.valueOf(getColor(R.color.status_error))
-                authStatusText.text = getString(R.string.main_not_connected)
+                authStatusText.text = getString(R.string.main_gateway_not_configured)
                 authButton.visibility = View.VISIBLE
-                authButton.text = getString(R.string.main_connect_to_claude)
+                authButton.text = getString(R.string.main_setup_gateway)
             }
         }
     }
@@ -558,59 +508,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ══════════════════════════════════════════════════════════════════════
-    // Authentication
+    // Gateway setup
     // ══════════════════════════════════════════════════════════════════════
 
-    private fun handleAuthClick() {
-        when (viewModel.state.value.authState) {
-            is MainViewModel.AuthState.ApiKeyMode -> {
-                startActivity(Intent(this, SettingsActivity::class.java).apply {
-                    putExtra(SettingsActivity.EXTRA_HIGHLIGHT_KEY, "claude_api_key")
-                })
-            }
-            is MainViewModel.AuthState.Waiting -> {
-                viewModel.cancelAuth()
-                Toast.makeText(this, getString(R.string.main_cancelled), Toast.LENGTH_SHORT).show()
-            }
-            is MainViewModel.AuthState.Expired -> {
-                lifecycleScope.launch {
-                    val result = viewModel.refreshToken()
-                    if (result.isSuccess) {
-                        Toast.makeText(this@MainActivity, getString(R.string.main_token_refreshed), Toast.LENGTH_SHORT).show()
-                    } else {
-                        viewModel.logout()
-                        startAuthentication()
-                    }
-                }
-            }
-            is MainViewModel.AuthState.Connected -> {
-                viewModel.logout()
-                Toast.makeText(this, getString(R.string.main_logged_out), Toast.LENGTH_SHORT).show()
-            }
-            is MainViewModel.AuthState.NotConnected -> startAuthentication()
-        }
-    }
-
-    private fun startAuthentication() {
-        DebugLog.log("Main", "Starting authentication...")
-        lifecycleScope.launch {
-            claudeAuth.startAuthWithCallback(this@MainActivity, object : ClaudeAuth.AuthCallback {
-                override fun onAuthProgress(message: String) {
-                    DebugLog.log("Main", "Auth progress: $message")
-                    viewModel.refreshAuthState()
-                }
-                override fun onAuthSuccess() {
-                    DebugLog.log("Main", "Auth SUCCESS")
-                    Toast.makeText(this@MainActivity, getString(R.string.main_connected), Toast.LENGTH_SHORT).show()
-                    viewModel.refreshAuthState()
-                }
-                override fun onAuthFailure(error: String) {
-                    DebugLog.log("Main", "Auth FAILURE: $error")
-                    Toast.makeText(this@MainActivity, getString(R.string.main_auth_failed, error), Toast.LENGTH_LONG).show()
-                    viewModel.refreshAuthState()
-                }
-            })
-        }
+    private fun openGatewaySettings() {
+        startActivity(Intent(this, SettingsActivity::class.java).apply {
+            putExtra(SettingsActivity.EXTRA_HIGHLIGHT_KEY, "gateway_url")
+        })
     }
 
     // ══════════════════════════════════════════════════════════════════════

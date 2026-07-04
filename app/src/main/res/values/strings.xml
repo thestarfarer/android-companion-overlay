@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Companion Overlay</string>
-    <string name="accessibility_service_description">Senni uses this to capture your screen when you long-press her, and to detect volume-button shortcuts and keyboard visibility. Captures happen only when you trigger them and are sent to Anthropic (Claude) to generate her response; if conversation memory is enabled, they are also stored in the conversation history on this device. Nothing is captured or recorded in the background.</string>
+    <string name="accessibility_service_description">Senni uses this to capture your screen when you long-press her (or when your Nexus companion server asks with your consent-configured token), and to detect volume-button shortcuts and keyboard visibility. Captures happen only when triggered and are sent to your own Nexus companion server to generate her response. Nothing is captured or recorded in the background.</string>
 
     <!-- Shared action labels -->
     <string name="common_cancel">Cancel</string>
@@ -18,28 +18,17 @@
     <string name="main_toggle_rest">Let Her Rest</string>
     <string name="main_status_sleeping">Senni is sleeping...</string>
     <string name="main_toggle_wake">Wake Her Up</string>
-    <string name="main_api_key_configured">API Key configured</string>
-    <string name="main_api_key_not_set">API Key not set</string>
-    <string name="main_set_api_key">Set Claude API key</string>
-    <string name="main_waiting_for_browser">Waiting for browser...</string>
-    <string name="main_connected_until">Connected until %1$s %2$s</string>
-    <string name="main_token_expired">Token expired</string>
-    <string name="main_reconnect">Reconnect</string>
-    <string name="main_not_connected">Not connected</string>
-    <string name="main_connect_to_claude">Connect to Claude</string>
+    <string name="main_gateway_configured">Nexus: %1$s</string>
+    <string name="main_gateway_token_missing">Nexus token missing</string>
+    <string name="main_gateway_not_configured">Nexus server not set</string>
+    <string name="main_setup_gateway">Set up Nexus link</string>
     <string name="main_cant_delete_only_preset">Can\'t delete your only preset~</string>
     <string name="main_saved">Saved~</string>
     <string name="main_reset_to_default">Reset to default~</string>
     <string name="main_sprite_updated">Sprite updated~</string>
-    <string name="main_cancelled">Cancelled</string>
-    <string name="main_token_refreshed">Token refreshed~</string>
-    <string name="main_logged_out">Logged out~</string>
-    <string name="main_connected">Connected~</string>
-    <string name="main_auth_failed">Failed: %1$s</string>
     <string name="main_grant_overlay_permission">Please grant overlay permission!</string>
     <string name="main_settings_button">Settings</string>
     <string name="main_preset_name_default">Senni</string>
-    <string name="main_model_hint">Model</string>
 
     <!-- Settings screen (code-set strings) -->
     <string name="settings_title">Settings</string>
@@ -51,25 +40,18 @@
     <string name="settings_camera_needs_permission">Camera capture needs camera permission</string>
     <string name="settings_notifications_ready">Notifications ready~</string>
     <string name="settings_notifications_denied">Without notifications you won\'t see the overlay status or its Stop button</string>
-    <string name="settings_api_key_enter">Enter your sk-ant-... API key</string>
-    <string name="settings_api_key_set">Key set (%1$s...)</string>
-    <string name="settings_api_key_hint">sk-ant-...</string>
-    <string name="settings_claude_api_key_title">Claude API Key</string>
-    <string name="settings_connection_api_key">API Key</string>
-    <string name="settings_connection_oauth">Claude Code OAuth</string>
-    <string name="settings_connection_type_title">Connection type</string>
-    <string name="settings_gemini_key_required">Required for Gemini speech-to-text and text-to-speech</string>
-    <string name="settings_gemini_key_set">Key set (%1$s…)</string>
-    <string name="settings_gemini_key_hint">AIza...</string>
-    <string name="settings_gemini_api_key_title">Gemini API Key</string>
+    <string name="settings_gateway_url_title">Nexus server URL</string>
+    <string name="settings_gateway_url_hint">https://tunnel.example.com or 192.168.1.7:9597</string>
+    <string name="settings_gateway_url_not_set">Not set — Senni renders offline until you point her at Nexus</string>
+    <string name="settings_gateway_token_title">Nexus access token</string>
+    <string name="settings_gateway_token_hint">Bearer token</string>
+    <string name="settings_gateway_token_not_set">Not set</string>
+    <string name="settings_gateway_token_set">Token set (%1$s…)</string>
+    <string name="settings_gateway_device_name_title">Device name</string>
+    <string name="settings_gateway_device_name_hint">Pixel 8</string>
     <string name="settings_silence_timeout_summary">%1$.1fs — wait this long after silence before sending</string>
     <string name="settings_volume_toggle_warning">This option will interfere with long press for volume down</string>
-    <string name="settings_max_messages_summary">Keep %1$s messages in context</string>
     <string name="settings_bubble_timeout_summary">Dismiss after %1$s seconds</string>
-    <string name="settings_clear_history_title">Clear conversation history?</string>
-    <string name="settings_clear_history_message">Senni forgets everything said so far. This cannot be undone.</string>
-    <string name="settings_clear">Clear</string>
-    <string name="settings_conversation_cleared">Conversation cleared~</string>
     <string name="settings_already_enabled">Already enabled~</string>
     <string name="settings_enable_accessibility">Enable \'Senni Overlay\' in Accessibility settings</string>
     <string name="settings_already_granted">Already granted~</string>
@@ -79,32 +61,11 @@
     <string name="settings_perm_voice_desc">Microphone and Bluetooth permissions for voice recording</string>
     <string name="settings_perm_camera_desc">Required for camera capture instead of screenshots</string>
     <string name="settings_perm_notifications_desc">Shows the overlay status and its Stop button</string>
-    <string name="settings_advanced_unlocked">Advanced mode unlocked</string>
-    <string name="settings_auth_waiting">Waiting for browser… (tap to cancel)</string>
-    <string name="settings_auth_connected_until">Connected until %1$s — tap to log out</string>
-    <string name="settings_auth_token_expired">Token expired — tap to reconnect</string>
-    <string name="settings_auth_not_connected">Not connected — tap to log in</string>
-    <string name="settings_claude_connection_title">Claude connection</string>
-    <string name="settings_using_api_key">Using API Key</string>
-    <string name="settings_cancelled">Cancelled</string>
-    <string name="settings_token_refreshed">Token refreshed~</string>
-    <string name="settings_logged_out">Logged out~</string>
-    <string name="settings_connected">Connected~</string>
-    <string name="settings_auth_failed">Failed: %1$s</string>
     <string name="settings_open_source_licenses_title">Open source licenses</string>
-    <string name="settings_test_thinking">Thinking…</string>
-    <string name="settings_test_error">Error: %1$s</string>
     <string name="settings_no_saved_images">No saved images yet — enable \'Save sent images\' and send one</string>
     <string name="settings_no_image_viewer">No image viewer found</string>
     <string name="settings_log_copied">Log copied! (%1$d chars)</string>
     <string name="settings_log_cleared">Log cleared</string>
-    <string name="settings_test_ready">Send a test message to verify the connection</string>
-    <string name="settings_test_need_key">Set Claude API key first</string>
-    <string name="settings_test_need_auth">Connect to Claude first</string>
-    <plurals name="settings_taps_to_go">
-        <item quantity="one">%1$d tap to go...</item>
-        <item quantity="other">%1$d taps to go...</item>
-    </plurals>
 
     <!-- Voice / TTS dialogs -->
     <string name="dialog_tts_unavailable">Text-to-speech engine unavailable</string>
@@ -123,42 +84,6 @@
     <string name="editor_prompt_empty">Prompt can\'t be empty~</string>
     <string name="editor_saved">Saved~</string>
 
-    <!-- MCP settings UI -->
-    <string name="mcp_context_prompt_title">Context Prompt</string>
-    <string name="mcp_nexus_default_prompt">What happened recently? What are we up to? What should I know?</string>
-    <string name="mcp_no_cached_context">No cached context</string>
-    <string name="mcp_nexus_context_title">Nexus Context</string>
-    <string name="mcp_clear">Clear</string>
-    <string name="mcp_context_cleared">Context cleared</string>
-    <string name="mcp_never_fetched">Never fetched</string>
-    <string name="mcp_last_fetched">Last fetched: %1$s (%2$d chars)</string>
-    <string name="mcp_fetching">Fetching...</string>
-    <string name="mcp_context_fetched">Context fetched (%1$d chars)</string>
-    <string name="mcp_error_with_message">Error: %1$s</string>
-    <string name="mcp_fetch_failed">Fetch failed: %1$s</string>
-    <string name="mcp_no_servers_configured">No servers configured</string>
-    <string name="mcp_servers_configured">%1$d server(s) configured</string>
-    <string name="mcp_check">Check</string>
-    <string name="mcp_servers_title">MCP Servers</string>
-    <string name="mcp_add_server">Add server</string>
-    <string name="mcp_connecting_to">Connecting to %1$s...</string>
-    <string name="mcp_no_tools_found">No tools found.</string>
-    <string name="mcp_tool_list_item">• %1$s</string>
-    <string name="mcp_tool_list_item_with_desc">• %1$s — %2$s</string>
-    <string name="mcp_server_tools_title">%1$s — %2$d tools</string>
-    <string name="mcp_unknown_error">Unknown error</string>
-    <string name="mcp_server_failed_title">%1$s — Failed</string>
-    <string name="mcp_hint_server_name">Server name</string>
-    <string name="mcp_hint_server_url">Server URL (https://...)</string>
-    <string name="mcp_auth_none">No auth</string>
-    <string name="mcp_auth_client_credentials">Client Credentials</string>
-    <string name="mcp_hint_client_id">Client ID</string>
-    <string name="mcp_hint_client_secret">Client Secret</string>
-    <string name="mcp_hint_client_secret_saved">Client Secret (saved — leave blank to keep)</string>
-    <string name="mcp_edit_server_title">Edit Server</string>
-    <string name="mcp_add_server_title">Add MCP Server</string>
-    <string name="mcp_server_removed">Server removed</string>
-
     <!-- Overlay service: notification, channel, bubble briefs -->
     <string name="svc_channel_name">Companion Overlay</string>
     <string name="svc_channel_description">Keeps Senni alive on your screen</string>
@@ -166,7 +91,6 @@
     <string name="svc_notification_text">Tap to open the app</string>
     <string name="svc_notification_action_stop">Stop</string>
     <string name="svc_toast_overlay_permission_needed">Grant \'Display over other apps\' to show the companion~</string>
-    <string name="svc_bubble_generating_voice">🔊 Generating voice...</string>
     <string name="svc_bubble_grant_screenshot_permission">Grant screenshot permission in the app first~</string>
     <string name="svc_bubble_let_me_see">Let me see~</string>
     <string name="svc_bubble_screenshot_failed">Couldn\'t peek at your screen...</string>
@@ -177,7 +101,9 @@
     <string name="svc_bubble_thinking">🧠 Thinking...</string>
     <string name="svc_bubble_error">Hmph! %1$s</string>
     <string name="svc_bubble_tool_use">🔧 %1$s</string>
-    <string name="svc_bubble_queue_results">📨 Queue results...</string>
+    <string name="svc_bubble_offline">📡 Lost Nexus... I\'m still here~</string>
+    <string name="svc_bubble_offline_queued">📡 Offline — I\'ll send that when we reconnect~</string>
+    <string name="svc_bubble_offline_image">📡 Offline — can\'t send pictures right now...</string>
 
     <!-- Assist + accessibility services -->
     <string name="assist_toast_overlay_permission_needed">Grant \'Display over other apps\' to use the companion~</string>
@@ -209,13 +135,13 @@
     <string name="tutorial_step_recall_title">Missed what I said?</string>
     <string name="tutorial_step_recall_body">Long-press my lower body and I\'ll bring my last reply back. Dismiss it, or type a follow-up right there~</string>
     <string name="tutorial_step_radial_title">Swipe up: my quick menu</string>
-    <string name="tutorial_step_radial_body">Swipe up on me for my settings dial — capture mode, the volume-button shortcut, Gemini vs on-device voice. Swipe down (or tap away) to close it.</string>
+    <string name="tutorial_step_radial_body">Swipe up on me for my settings dial — capture mode, the volume-button shortcut, and my voice. Swipe down (or tap away) to close it.</string>
     <string name="tutorial_step_visibility_title">Need me out of sight?</string>
     <string name="tutorial_step_visibility_body">Double-press Volume Down and I\'ll hide; double-press again and I\'m back~ Try it on the volume key at the edge.</string>
     <string name="tutorial_step_voice_title">Talk to me hands-free</string>
     <string name="tutorial_step_voice_body">Triple-press Volume Down or press an assistant button and I\'m listening — no screen tap needed. I transcribe ✒️, think 🧠, and answer aloud. Give the edge key three quick presses~</string>
     <string name="tutorial_step_tools_title">I can search &amp; use tools</string>
-    <string name="tutorial_step_tools_body">Ask about current events and I\'ll search the web. If you\'ve connected tool servers (MCP), I\'ll use those too — watch for my 🔧 badge. Tap me to replay~</string>
+    <string name="tutorial_step_tools_body">Ask about current events and my Nexus brain searches the web and uses its tools — watch for my 🔧 badge. Tap me to replay~</string>
     <string name="tutorial_step_ghost_title">I won\'t block your typing</string>
     <string name="tutorial_step_ghost_body">When a keyboard pops up I turn ghostly and let your taps pass right through me. Bring up the keyboard and press a few keys — right through me~</string>
     <string name="tutorial_step_outro_title">That\'s everything~</string>
@@ -236,13 +162,13 @@
     <string name="preset_walk_label">walk</string>
 
     <!-- Preferences screen (settings_preferences.xml) -->
-    <string name="pref_cat_gemini_api">Gemini API</string>
-    <string name="pref_gemini_api_key_title">API Key</string>
-    <string name="pref_gemini_api_key_summary">Required for Gemini speech-to-text and text-to-speech</string>
-    <string name="pref_gemini_stt_title">Speech-to-text</string>
-    <string name="pref_gemini_stt_summary">Use Gemini to transcribe voice input instead of on-device recognition</string>
-    <string name="pref_gemini_tts_title">Text-to-speech</string>
-    <string name="pref_gemini_tts_summary">Use Gemini to generate voice instead of on-device synthesis</string>
+    <string name="pref_cat_gateway">Nexus Gateway</string>
+    <string name="pref_gateway_url_title">Server URL</string>
+    <string name="pref_gateway_url_summary">Where your Nexus companion server lives (tunnel or LAN)</string>
+    <string name="pref_gateway_token_title">Access token</string>
+    <string name="pref_gateway_token_summary">Bearer token for the presence connection (stored encrypted)</string>
+    <string name="pref_gateway_device_name_title">Device name</string>
+    <string name="pref_gateway_device_name_summary">How this phone introduces itself to Nexus</string>
     <string name="pref_cat_display">Display</string>
     <string name="pref_overlay_mode_title">Overlay mode</string>
     <string name="pref_overlay_mode_summary">Choose between 2D sprite or 3D avatar</string>
@@ -262,33 +188,10 @@
     <string name="pref_tts_voice_picker_title">On-device voice</string>
     <string name="pref_tts_voice_picker_summary">Choose the voice and adjust speed and pitch for on-device TTS</string>
     <string name="pref_cat_conversation">Conversation</string>
-    <string name="pref_web_search_title">Web search</string>
-    <string name="pref_web_search_summary">Allow Claude to search the web for current information</string>
-    <string name="pref_keep_dialogue_title">Keep dialogue</string>
-    <string name="pref_keep_dialogue_summary">Remember conversation history across overlay restarts</string>
     <string name="pref_auto_copy_title">Auto-copy replies</string>
     <string name="pref_auto_copy_summary">Copy every response to the clipboard automatically</string>
-    <string name="pref_max_messages_title">History length</string>
-    <string name="pref_max_messages_summary">How many messages to keep in the conversation context</string>
     <string name="pref_bubble_timeout_title">Bubble timeout</string>
     <string name="pref_bubble_timeout_summary">How long the speech bubble stays visible</string>
-    <string name="pref_clear_history_title">Clear conversation history</string>
-    <string name="pref_clear_history_summary">Forget everything said so far (asks first)</string>
-    <string name="pref_cat_mcp_servers">MCP Servers</string>
-    <string name="pref_mcp_enabled_title">Enable MCP tools</string>
-    <string name="pref_mcp_enabled_summary">Connect to external tool servers using Model Context Protocol</string>
-    <string name="pref_mcp_show_tool_bubbles_title">Show tool use bubbles</string>
-    <string name="pref_mcp_show_tool_bubbles_summary">Display a notification when MCP tools are being used</string>
-    <string name="pref_nexus_integration_title">Nexus integration</string>
-    <string name="pref_nexus_integration_summary">Use nexus_emit_event and nexus_poll_results if available on servers</string>
-    <string name="pref_nexus_context_prompt_title">Context prompt</string>
-    <string name="pref_nexus_context_prompt_summary">Tap to edit the prompt sent to Sable</string>
-    <string name="pref_nexus_fetch_context_title">Fetch Nexus context</string>
-    <string name="pref_nexus_fetch_context_summary">Never fetched</string>
-    <string name="pref_nexus_context_append_title">Include context in system prompt</string>
-    <string name="pref_nexus_context_append_summary">Append cached Nexus context to the system prompt for every message</string>
-    <string name="pref_mcp_manage_servers_title">Manage servers</string>
-    <string name="pref_mcp_manage_servers_summary">No servers configured</string>
     <string name="pref_cat_permissions">Permissions</string>
     <string name="pref_perm_accessibility_title">Accessibility service</string>
     <string name="pref_perm_accessibility_summary">Required for screenshots and volume button shortcut</string>
@@ -298,25 +201,16 @@
     <string name="pref_perm_camera_summary">Required for camera capture instead of screenshots</string>
     <string name="pref_perm_notifications_title">Notifications</string>
     <string name="pref_perm_notifications_summary">Shows the overlay status and its Stop button</string>
-    <string name="pref_cat_claude_api">Claude API</string>
-    <string name="pref_claude_api_key_title">Claude API Key</string>
-    <string name="pref_claude_api_key_summary">Enter your sk-ant-... key</string>
-    <string name="pref_claude_connection_type_title">Connection type</string>
-    <string name="pref_claude_connection_type_summary">API Key</string>
-    <string name="pref_account_auth_title">Claude connection</string>
-    <string name="pref_account_auth_summary">Not connected</string>
     <string name="pref_cat_about">About</string>
     <string name="pref_tutorial_title">Tutorial</string>
     <string name="pref_tutorial_summary">Replay the interactive walkthrough</string>
     <string name="pref_open_source_licenses_title">Open source licenses</string>
     <string name="pref_open_source_licenses_summary">Third-party software used in this app</string>
     <string name="pref_cat_debug">Debug</string>
-    <string name="pref_debug_test_title">Send test message</string>
-    <string name="pref_debug_test_summary">Send a test prompt to verify the connection</string>
     <string name="pref_save_sent_images_title">Save sent images</string>
-    <string name="pref_save_sent_images_summary">Keep a copy of every screenshot/photo sent to Claude for inspection</string>
+    <string name="pref_save_sent_images_summary">Keep a copy of every screenshot/photo sent to Nexus for inspection</string>
     <string name="pref_debug_view_image_title">View last sent image</string>
-    <string name="pref_debug_view_image_summary">Open the most recent image sent to Claude</string>
+    <string name="pref_debug_view_image_summary">Open the most recent image sent to Nexus</string>
     <string name="pref_debug_copy_log_title">Copy log</string>
     <string name="pref_debug_copy_log_summary">Copy the debug log to clipboard</string>
     <string name="pref_debug_clear_log_title">Clear log</string>

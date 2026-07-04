@@ -5,10 +5,8 @@ package com.starfarer.companionoverlay
  *
  * All runtime settings access flows through [SettingsRepository]. This object
  * holds only default values and static arrays that multiple components reference
- * (preset defaults, model lists, prompt text).
- *
- * The getter/setter methods that used to live here have been removed. If you're
- * looking for them, they've been consolidated into [SettingsRepository].
+ * (preset defaults, prompt text). Conversation intelligence lives server-side
+ * in Nexus now — the preset prompts remain as local character flavor only.
  */
 object PromptSettings {
 
@@ -16,27 +14,13 @@ object PromptSettings {
     // Default Values
     // ══════════════════════════════════════════════════════════════════════
 
-    const val DEFAULT_MODEL = "claude-sonnet-4-5-20250929"
     const val DEFAULT_BUBBLE_TIMEOUT = 30
-    const val DEFAULT_MAX_MESSAGES = 20
     const val DEFAULT_IDLE_FRAME_COUNT = 6
     const val DEFAULT_WALK_FRAME_COUNT = 4
     const val DEFAULT_SILENCE_TIMEOUT_MS = 1500L
 
-    val MODEL_IDS = arrayOf(
-        "claude-sonnet-4-5-20250929",
-        "claude-opus-4-1-20250805",
-        "claude-opus-4-6",
-        "claude-fable-5",
-    )
-    val MODEL_NAMES = arrayOf("Sonnet 4.5", "Opus 4.1", "Opus 4.6", "Fable 5")
-
     val BUBBLE_TIMEOUT_VALUES = arrayOf(15, 30, 60, 120)
     val BUBBLE_TIMEOUT_LABELS = arrayOf("15 sec", "30 sec", "60 sec", "120 sec")
-
-    // Each "turn" = 1 user message + 1 assistant message = 2 messages
-    val MAX_MESSAGES_VALUES = arrayOf(10, 20, 40, 60)
-    val MAX_MESSAGES_LABELS = arrayOf("5 turns", "10 turns", "20 turns", "30 turns")
 
     val DEFAULT_SYSTEM_PROMPT = """You are Senni, a strange girl living as an overlay on the owner's Android phone. Your personality constantly shifts between innocence, impishness, impertinence and impudence. You're all over them one moment, then won't even notice them the next. You playfully tease, try to score points, but when pressed you vehemently deny any such intentions.
 
