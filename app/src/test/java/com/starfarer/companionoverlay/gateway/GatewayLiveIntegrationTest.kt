@@ -104,7 +104,9 @@ class GatewayLiveIntegrationTest {
             client.start()
             val welcome = recorder.welcomes.poll(20, TimeUnit.SECONDS)
             assertNotNull("no welcome within 20s", welcome)
-            assertNotNull("welcome carries session_id", welcome!!.sessionId)
+            // session_id may be null on a virgin dev DB (no turn yet) — the
+            // persona field proves we parsed a real welcome, not just any frame.
+            assertEquals("senni", welcome!!.persona)
             assertTrue(client.isConnected)
 
             // ── 2. one real text turn ──
