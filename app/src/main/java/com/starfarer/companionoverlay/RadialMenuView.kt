@@ -51,7 +51,7 @@ class RadialMenuView(
 
     // Buttons in arc order (bottom → top), each owning one segment.
     private enum class Button(val segIndex: Int) {
-        GEMINI(0), VOLUME(1), CAPTURE(2),
+        VOICE(0), VOLUME(1), CAPTURE(2),
     }
 
     private val colors = BubbleStyle.colors(context)
@@ -144,7 +144,7 @@ class RadialMenuView(
                 CaptureMode.CAMERA -> emoji(canvas, "📷", x, y, bright = true)      // 📷
             }
             Button.VOLUME -> emoji(canvas, "🔊", x, y, bright = settings.volumeToggleEnabled)
-            Button.GEMINI -> emoji(canvas, "✨", x, y, bright = geminiOn())
+            Button.VOICE -> emoji(canvas, "🗣", x, y, bright = settings.ttsEnabled)
         }
     }
 
@@ -161,8 +161,6 @@ class RadialMenuView(
         val r = w * 0.22f
         canvas.drawRoundRect(x - w / 2f, y - h / 2f, x + w / 2f, y + h / 2f, r, r, phonePaint)
     }
-
-    private fun geminiOn(): Boolean = settings.geminiSttEnabled && settings.geminiTtsEnabled
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         when (event.actionMasked) {
@@ -227,11 +225,7 @@ class RadialMenuView(
         when (button) {
             Button.CAPTURE -> settings.captureMode = settings.captureMode.next()
             Button.VOLUME -> settings.volumeToggleEnabled = !settings.volumeToggleEnabled
-            Button.GEMINI -> {
-                val target = !geminiOn()
-                settings.geminiSttEnabled = target
-                settings.geminiTtsEnabled = target
-            }
+            Button.VOICE -> settings.ttsEnabled = !settings.ttsEnabled
         }
         invalidate()
     }

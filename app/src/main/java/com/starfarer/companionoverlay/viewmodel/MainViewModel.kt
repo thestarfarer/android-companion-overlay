@@ -7,7 +7,6 @@ import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.starfarer.companionoverlay.CharacterPreset
-import com.starfarer.companionoverlay.ClaudeAuth
 import com.starfarer.companionoverlay.DebugLog
 import com.starfarer.companionoverlay.event.OverlayCoordinator
 import com.starfarer.companionoverlay.repository.PresetRepository
@@ -22,12 +21,12 @@ import kotlinx.coroutines.withContext
 
 /**
  * ViewModel for MainActivity.
- * 
+ *
  * Owns:
  * - Character preset list and selection
- * - Auth state observation
+ * - Gateway configuration state (is a Nexus server set up?)
  * - Overlay running state observation
- * 
+ *
  * Preset loading runs on [Dispatchers.IO] to avoid blocking the main thread
  * with SharedPreferences reads and JSON deserialization. The in-memory cache
  * in [PresetRepository] makes subsequent reads fast, but the first load
@@ -35,65 +34,51 @@ import kotlinx.coroutines.withContext
  */
 class MainViewModel(
     application: Application,
-    private val claudeAuth: ClaudeAuth,
     private val settings: SettingsRepository,
     private val coordinator: OverlayCoordinator,
     private val presetRepository: PresetRepository
 ) : AndroidViewModel(application) {
-    
+
     companion object {
         private const val TAG = "MainVM"
     }
-    
+
     // ══════════════════════════════════════════════════════════════════════
     // State
     // ══════════════════════════════════════════════════════════════════════
-    
+
     data class UiState(
         val presets: List<CharacterPreset> = emptyList(),
         val activeIndex: Int = 0,
-        val authState: AuthState = AuthState.NotConnected,
+        val gateway: GatewayState = GatewayState.NotConfigured,
         val overlayRunning: Boolean = false
     ) {
         val activePreset: CharacterPreset?
             get() = presets.getOrNull(activeIndex)
     }
-    
-    sealed class AuthState {
-        data class ApiKeyMode(val hasKey: Boolean) : AuthState()
-        data object NotConnected : AuthState()
-        data object Waiting : AuthState()
-        data class Connected(val expiresAt: Long) : AuthState()
-        data object Expired : AuthState()
+
+    /** Static configuration state — live connectivity is the service's business. */
+    sealed class GatewayState {
+        data object NotConfigured : GatewayState()
+        data object TokenMissing : GatewayState()
+        data class Configured(val serverUrl: String) : GatewayState()
     }
-    
+
     private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state.asStateFlow()
-    
+
     private val context get() = getApplication<Application>()
-    
+
     init {
         loadPresets()
         observeOverlayState()
-        observeTokenExpiry()
+        refreshGatewayState()
     }
 
-    /**
-     * Re-derive auth state whenever ClaudeAuth persists new tokens — including
-     * the silent auto-refresh on the first message after launch. Without this,
-     * a token that expired before launch and refreshed mid-session left the UI
-     * stuck showing "Expired".
-     */
-    private fun observeTokenExpiry() {
-        viewModelScope.launch {
-            claudeAuth.tokenExpiry.collect { refreshAuthState() }
-        }
-    }
-    
     // ══════════════════════════════════════════════════════════════════════
     // Preset Management
     // ══════════════════════════════════════════════════════════════════════
-    
+
     fun loadPresets() {
         viewModelScope.launch {
             val (presets, activeId) = withContext(Dispatchers.IO) {
@@ -102,20 +87,20 @@ class MainViewModel(
                 Pair(p.toList(), id)
             }
             val activeIndex = presets.indexOfFirst { it.id == activeId }.coerceAtLeast(0)
-            
+
             _state.update { it.copy(presets = presets, activeIndex = activeIndex) }
             DebugLog.log(TAG, "Loaded ${presets.size} presets, active: $activeIndex")
         }
     }
-    
+
     fun selectPreset(index: Int) {
         val presets = _state.value.presets
         if (index < 0 || index >= presets.size) return
-        
+
         presetRepository.setActiveId(presets[index].id)
         _state.update { it.copy(activeIndex = index) }
     }
-    
+
     fun updateActivePreset(transform: (CharacterPreset) -> CharacterPreset) {
         val current = _state.value.activePreset ?: return
         val updated = transform(current)
@@ -133,7 +118,7 @@ class MainViewModel(
         val index = presets.indexOfFirst { it.id == activeId }.coerceAtLeast(0)
         _state.update { it.copy(presets = presets, activeIndex = index) }
     }
-    
+
     fun createPreset(): CharacterPreset {
         val source = _state.value.activePreset ?: CharacterPreset()
         val newPreset = CharacterPreset(
@@ -154,59 +139,33 @@ class MainViewModel(
         syncStateFromRepo(activeId = newPreset.id)
         return newPreset
     }
-    
+
     fun deleteActivePreset() {
         val preset = _state.value.activePreset ?: return
         if (_state.value.presets.size <= 1) return // Don't delete last preset
-        
+
         presetRepository.delete(preset.id)
         loadPresets()
     }
-    
+
     // ══════════════════════════════════════════════════════════════════════
-    // Auth
+    // Gateway configuration
     // ══════════════════════════════════════════════════════════════════════
-    
-    fun refreshAuthState() {
-        val authState = if (settings.isApiKeyMode) {
-            AuthState.ApiKeyMode(hasKey = !settings.claudeApiKey.isNullOrBlank())
-        } else {
-            when {
-                claudeAuth.isWaitingForCallback() -> AuthState.Waiting
-                claudeAuth.isAuthenticated() -> {
-                    val expiresAt = claudeAuth.getExpiresAt()
-                    if (System.currentTimeMillis() > expiresAt) {
-                        AuthState.Expired
-                    } else {
-                        AuthState.Connected(expiresAt)
-                    }
-                }
-                else -> AuthState.NotConnected
-            }
+
+    fun refreshGatewayState() {
+        val url = settings.gatewayUrl
+        val gateway = when {
+            url.isNullOrBlank() -> GatewayState.NotConfigured
+            settings.gatewayToken.isNullOrBlank() -> GatewayState.TokenMissing
+            else -> GatewayState.Configured(url)
         }
-        _state.update { it.copy(authState = authState) }
+        _state.update { it.copy(gateway = gateway) }
     }
-    
-    fun logout() {
-        claudeAuth.logout()
-        refreshAuthState()
-    }
-    
-    fun cancelAuth() {
-        claudeAuth.cancelAuth()
-        refreshAuthState()
-    }
-    
-    suspend fun refreshToken(): Result<Unit> {
-        val result = claudeAuth.refreshToken()
-        refreshAuthState()
-        return result
-    }
-    
+
     // ══════════════════════════════════════════════════════════════════════
     // Overlay State
     // ══════════════════════════════════════════════════════════════════════
-    
+
     private fun observeOverlayState() {
         viewModelScope.launch {
             coordinator.overlayRunning.collect { running ->
@@ -214,11 +173,11 @@ class MainViewModel(
             }
         }
     }
-    
+
     // ══════════════════════════════════════════════════════════════════════
     // Sprite Loading (utility for Activity)
     // ══════════════════════════════════════════════════════════════════════
-    
+
     fun loadSpriteSheet(customUri: String?, customAsset: String, defaultAsset: String): Bitmap? {
         if (customUri != null) {
             try {

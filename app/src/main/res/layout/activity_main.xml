@@ -38,7 +38,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="@string/main_not_connected"
+                android:text="@string/main_gateway_not_configured"
                 android:textSize="12sp"
                 android:textColor="@color/text_secondary"
                 android:singleLine="true"/>
@@ -131,30 +131,6 @@
                     android:gravity="center"
                     android:paddingTop="12dp"
                     android:paddingBottom="16dp"/>
-
-                <!-- ════════════════════════════════════════════════════════
-                     Model Selector
-                     ════════════════════════════════════════════════════════ -->
-
-                <com.google.android.material.textfield.TextInputLayout
-                    android:id="@+id/modelDropdown"
-                    style="@style/CompanionDropdown"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginHorizontal="24dp"
-                    android:layout_marginBottom="16dp"
-                    android:hint="@string/main_model_hint">
-
-                    <AutoCompleteTextView
-                        android:id="@+id/modelSelector"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:inputType="none"
-                        android:textColor="@color/text_primary"
-                        android:textSize="14sp"
-                        android:popupBackground="@drawable/dropdown_popup_background"/>
-
-                </com.google.android.material.textfield.TextInputLayout>
 
                 <!-- ════════════════════════════════════════════════════════
                      System Prompt Card
@@ -260,7 +236,7 @@
                     android:text="@string/main_toggle_wake"/>
 
                 <!-- ════════════════════════════════════════════════════════
-                     Auth Button (when needed)
+                     Gateway Setup Button (when needed)
                      Anchored last so its show/hide never reflows the controls
                      above it — only grows the scroll content at the bottom.
                      marginTop (not Bottom) gives the gap from the toggle, so a
@@ -274,7 +250,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginHorizontal="24dp"
                     android:layout_marginTop="12dp"
-                    android:text="@string/main_connect_to_claude"
+                    android:text="@string/main_setup_gateway"
                     android:visibility="gone"/>
 
             </LinearLayout>

@@ -59,10 +59,12 @@ class CameraManager(private val context: Context) {
     }
 
     /**
-     * Capture one still from the back camera and return it as a base64 JPEG,
-     * or null on any failure. The callback runs on the main thread exactly once.
+     * Capture one still and return it as a base64 JPEG, or null on any
+     * failure. [facing] selects the lens ("front" or "back", default back —
+     * the presence protocol's `camera` capability passes it through).
+     * The callback runs on the main thread exactly once.
      */
-    fun capture(callback: (String?) -> Unit) {
+    fun capture(facing: String = "back", callback: (String?) -> Unit) {
         val done = AtomicBoolean(false)
         val lifecycleOwner = CaptureLifecycle()
         var provider: ProcessCameraProvider? = null
@@ -95,7 +97,8 @@ class CameraManager(private val context: Context) {
                 provider!!.unbindAll()
                 provider!!.bindToLifecycle(
                     lifecycleOwner,
-                    CameraSelector.DEFAULT_BACK_CAMERA,
+                    if (facing == "front") CameraSelector.DEFAULT_FRONT_CAMERA
+                    else CameraSelector.DEFAULT_BACK_CAMERA,
                     imageCapture
                 )
 

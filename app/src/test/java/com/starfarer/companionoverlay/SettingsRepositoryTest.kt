@@ -11,7 +11,8 @@ import org.junit.Test
  * Unit tests for [SettingsRepository].
  *
  * Verifies that settings are correctly read from and written to
- * SharedPreferences with proper defaults.
+ * SharedPreferences with proper defaults, and that the GatewayConfig
+ * surface (URL, token, device identity) behaves.
  */
 class SettingsRepositoryTest {
 
@@ -53,62 +54,78 @@ class SettingsRepositoryTest {
         )
     }
 
+    // ── Gateway configuration ──
+
     @Test
-    fun `model returns default when not set`() {
-        every { settingsPrefs.getString("selected_model", any()) } returns null
-        assertEquals(PromptSettings.DEFAULT_MODEL, repository.model)
+    fun `gatewayUrl returns null when not set`() {
+        every { settingsPrefs.getString("gateway_url", null) } returns null
+        assertNull(repository.gatewayUrl)
+        assertNull(repository.serverUrl)
     }
 
     @Test
-    fun `model returns saved value`() {
-        val customModel = "claude-opus-4-1-20250805"
-        every { settingsPrefs.getString("selected_model", any()) } returns customModel
-        assertEquals(customModel, repository.model)
-    }
-
-    @Test
-    fun `setting model writes to preferences`() {
-        val newModel = "claude-opus-4-6"
-        repository.model = newModel
-        verify { settingsEditor.putString("selected_model", newModel) }
+    fun `gatewayUrl trims and persists`() {
+        repository.gatewayUrl = "  https://tunnel.example.com  "
+        verify { settingsEditor.putString("gateway_url", "https://tunnel.example.com") }
         verify { settingsEditor.apply() }
     }
 
     @Test
-    fun `webSearchEnabled defaults to false`() {
-        every { settingsPrefs.getBoolean("web_search_enabled", false) } returns false
-        assertFalse(repository.webSearchEnabled)
+    fun `gatewayUrl removes on blank`() {
+        repository.gatewayUrl = "   "
+        verify { settingsEditor.remove("gateway_url") }
     }
+
+    @Test
+    fun `gatewayToken lives in secure prefs`() {
+        every { securePrefs.getString("gateway_token", null) } returns "tok-123"
+        assertEquals("tok-123", repository.gatewayToken)
+        assertEquals("tok-123", repository.token)
+
+        repository.gatewayToken = " new-token "
+        verify { secureEditor.putString("gateway_token", "new-token") }
+
+        repository.gatewayToken = ""
+        verify { secureEditor.remove("gateway_token") }
+    }
+
+    @Test
+    fun `deviceId returns stored value without regenerating`() {
+        every { settingsPrefs.getString("gateway_device_id", null) } returns "phone-abcd1234"
+        assertEquals("phone-abcd1234", repository.deviceId)
+        verify(exactly = 0) { settingsEditor.putString("gateway_device_id", any()) }
+    }
+
+    @Test
+    fun `deviceId is generated once and persisted when missing`() {
+        val stored = slot<String>()
+        every { settingsPrefs.getString("gateway_device_id", null) } returns null
+        every { settingsEditor.putString("gateway_device_id", capture(stored)) } returns settingsEditor
+
+        val id = repository.deviceId
+        assertTrue("generated id has the phone- prefix: $id", id.startsWith("phone-"))
+        assertEquals(id, stored.captured)
+    }
+
+    @Test
+    fun `deviceName falls back when unset`() {
+        every { settingsPrefs.getString("gateway_device_name", null) } returns null
+        // Build.MODEL is null on the JVM — the fallback must still be non-blank.
+        assertTrue(repository.deviceName.isNotBlank())
+    }
+
+    @Test
+    fun `deviceName uses the stored setting`() {
+        every { settingsPrefs.getString("gateway_device_name", null) } returns "Pixel 8"
+        assertEquals("Pixel 8", repository.deviceName)
+    }
+
+    // ── Local settings ──
 
     @Test
     fun `ttsEnabled defaults to true`() {
         every { settingsPrefs.getBoolean("tts_enabled", true) } returns true
         assertTrue(repository.ttsEnabled)
-    }
-
-    @Test
-    fun `geminiApiKey reads from secure prefs`() {
-        every { securePrefs.getString("gemini_api_key", null) } returns "test-key"
-        assertEquals("test-key", repository.geminiApiKey)
-    }
-
-    @Test
-    fun `geminiApiKey writes to secure prefs`() {
-        repository.geminiApiKey = "new-api-key"
-        verify { secureEditor.putString("gemini_api_key", "new-api-key") }
-        verify { secureEditor.apply() }
-    }
-
-    @Test
-    fun `geminiApiKey trims whitespace`() {
-        repository.geminiApiKey = "  spaced-key  "
-        verify { secureEditor.putString("gemini_api_key", "spaced-key") }
-    }
-
-    @Test
-    fun `geminiApiKey removes on blank`() {
-        repository.geminiApiKey = "   "
-        verify { secureEditor.remove("gemini_api_key") }
     }
 
     @Test
@@ -128,9 +145,8 @@ class SettingsRepositoryTest {
     }
 
     @Test
-    fun `maxMessages returns default when not set`() {
-        every { settingsPrefs.getInt("max_messages", PromptSettings.DEFAULT_MAX_MESSAGES) } returns PromptSettings.DEFAULT_MAX_MESSAGES
-        assertEquals(PromptSettings.DEFAULT_MAX_MESSAGES, repository.maxMessages)
+    fun `silenceTimeoutMs returns default when not set`() {
+        every { settingsPrefs.getLong("silence_timeout_ms", PromptSettings.DEFAULT_SILENCE_TIMEOUT_MS) } returns PromptSettings.DEFAULT_SILENCE_TIMEOUT_MS
+        assertEquals(PromptSettings.DEFAULT_SILENCE_TIMEOUT_MS, repository.silenceTimeoutMs)
     }
-
 }

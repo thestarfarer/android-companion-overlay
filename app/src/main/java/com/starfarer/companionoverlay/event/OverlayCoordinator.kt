@@ -97,23 +97,15 @@ class OverlayCoordinator {
         }
     }
 
-    fun reloadMcp() {
-        _events.tryEmit(OverlayEvent.ReloadMcp)
+    /** Nexus server URL/token changed — the running service redials the gateway. */
+    fun gatewayConfigChanged() {
+        _events.tryEmit(OverlayEvent.GatewayConfigChanged)
     }
 
     fun reloadSprites() {
         if (_overlayRunning.value) {
             _events.tryEmit(OverlayEvent.ReloadSprites)
         }
-    }
-
-    /**
-     * Clear the running service's conversation. Returns false when the overlay
-     * isn't running — the caller should clear the storage file directly instead.
-     */
-    fun clearConversation(): Boolean {
-        if (!_overlayRunning.value) return false
-        return _events.tryEmit(OverlayEvent.ClearConversation)
     }
 
     // ══════════════════════════════════════════════════════════════════════

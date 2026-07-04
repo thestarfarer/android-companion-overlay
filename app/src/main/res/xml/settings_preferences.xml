@@ -1,28 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
 <PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
 
-    <!-- ════════ GEMINI API ════════ -->
-    <PreferenceCategory app:iconSpaceReserved="false" app:title="@string/pref_cat_gemini_api">
+    <!-- ════════ NEXUS GATEWAY ════════ -->
+    <PreferenceCategory app:iconSpaceReserved="false" app:title="@string/pref_cat_gateway">
 
         <Preference
             app:iconSpaceReserved="false"
-            app:key="gemini_api_key"
-            app:title="@string/pref_gemini_api_key_title"
-            app:summary="@string/pref_gemini_api_key_summary"/>
+            app:key="gateway_url"
+            app:title="@string/pref_gateway_url_title"
+            app:summary="@string/pref_gateway_url_summary"/>
 
-        <SwitchPreferenceCompat
+        <Preference
             app:iconSpaceReserved="false"
-            app:key="gemini_stt_enabled"
-            app:title="@string/pref_gemini_stt_title"
-            app:summary="@string/pref_gemini_stt_summary"
-            app:defaultValue="false"/>
+            app:key="gateway_token"
+            app:title="@string/pref_gateway_token_title"
+            app:summary="@string/pref_gateway_token_summary"/>
 
-        <SwitchPreferenceCompat
+        <Preference
             app:iconSpaceReserved="false"
-            app:key="gemini_tts_enabled"
-            app:title="@string/pref_gemini_tts_title"
-            app:summary="@string/pref_gemini_tts_summary"
-            app:defaultValue="false"/>
+            app:key="gateway_device_name"
+            app:title="@string/pref_gateway_device_name_title"
+            app:summary="@string/pref_gateway_device_name_summary"/>
 
     </PreferenceCategory>
 
@@ -111,34 +109,10 @@
 
         <SwitchPreferenceCompat
             app:iconSpaceReserved="false"
-            app:key="web_search_enabled"
-            app:title="@string/pref_web_search_title"
-            app:summary="@string/pref_web_search_summary"
-            app:defaultValue="false"/>
-
-        <SwitchPreferenceCompat
-            app:iconSpaceReserved="false"
-            app:key="keep_dialogue"
-            app:title="@string/pref_keep_dialogue_title"
-            app:summary="@string/pref_keep_dialogue_summary"
-            app:defaultValue="false"/>
-
-        <SwitchPreferenceCompat
-            app:iconSpaceReserved="false"
             app:key="auto_copy"
             app:title="@string/pref_auto_copy_title"
             app:summary="@string/pref_auto_copy_summary"
             app:defaultValue="false"/>
-
-        <ListPreference
-            app:iconSpaceReserved="false"
-            app:key="max_messages"
-            app:title="@string/pref_max_messages_title"
-            app:summary="@string/pref_max_messages_summary"
-            app:entries="@array/history_labels"
-            app:entryValues="@array/history_values"
-            app:defaultValue="20"
-            app:persistent="false"/>
 
         <ListPreference
             app:iconSpaceReserved="false"
@@ -149,69 +123,6 @@
             app:entryValues="@array/timeout_values"
             app:defaultValue="30"
             app:persistent="false"/>
-
-        <Preference
-            app:iconSpaceReserved="false"
-            app:key="clear_history"
-            app:title="@string/pref_clear_history_title"
-            app:summary="@string/pref_clear_history_summary"/>
-
-    </PreferenceCategory>
-
-    <!-- ════════ MCP SERVERS ════════ -->
-    <PreferenceCategory app:iconSpaceReserved="false" app:title="@string/pref_cat_mcp_servers">
-
-        <SwitchPreferenceCompat
-            app:iconSpaceReserved="false"
-            app:key="mcp_enabled"
-            app:title="@string/pref_mcp_enabled_title"
-            app:summary="@string/pref_mcp_enabled_summary"
-            app:defaultValue="false"/>
-
-        <SwitchPreferenceCompat
-            app:iconSpaceReserved="false"
-            app:key="mcp_show_tool_bubbles"
-            app:title="@string/pref_mcp_show_tool_bubbles_title"
-            app:summary="@string/pref_mcp_show_tool_bubbles_summary"
-            app:defaultValue="true"
-            app:dependency="mcp_enabled"/>
-
-        <SwitchPreferenceCompat
-            app:iconSpaceReserved="false"
-            app:key="nexus_integration_enabled"
-            app:title="@string/pref_nexus_integration_title"
-            app:summary="@string/pref_nexus_integration_summary"
-            app:defaultValue="false"
-            app:dependency="mcp_enabled"/>
-
-        <Preference
-            app:iconSpaceReserved="false"
-            app:key="nexus_context_prompt"
-            app:title="@string/pref_nexus_context_prompt_title"
-            app:summary="@string/pref_nexus_context_prompt_summary"
-            app:dependency="nexus_integration_enabled"/>
-
-        <com.starfarer.companionoverlay.ui.LongClickPreference
-            app:iconSpaceReserved="false"
-            app:key="nexus_fetch_context"
-            app:title="@string/pref_nexus_fetch_context_title"
-            app:summary="@string/pref_nexus_fetch_context_summary"
-            app:dependency="nexus_integration_enabled"/>
-
-        <SwitchPreferenceCompat
-            app:iconSpaceReserved="false"
-            app:key="nexus_context_append_to_prompt"
-            app:title="@string/pref_nexus_context_append_title"
-            app:summary="@string/pref_nexus_context_append_summary"
-            app:defaultValue="true"
-            app:dependency="nexus_integration_enabled"/>
-
-        <Preference
-            app:iconSpaceReserved="false"
-            app:key="mcp_manage_servers"
-            app:title="@string/pref_mcp_manage_servers_title"
-            app:summary="@string/pref_mcp_manage_servers_summary"
-            app:dependency="mcp_enabled"/>
 
     </PreferenceCategory>
 
@@ -244,29 +155,6 @@
 
     </PreferenceCategory>
 
-    <!-- ════════ CLAUDE API ════════ -->
-    <PreferenceCategory app:iconSpaceReserved="false" app:key="account_category" app:title="@string/pref_cat_claude_api">
-
-        <Preference
-            app:iconSpaceReserved="false"
-            app:key="claude_api_key"
-            app:title="@string/pref_claude_api_key_title"
-            app:summary="@string/pref_claude_api_key_summary"/>
-
-        <Preference
-            app:iconSpaceReserved="false"
-            app:key="claude_connection_type"
-            app:title="@string/pref_claude_connection_type_title"
-            app:summary="@string/pref_claude_connection_type_summary"/>
-
-        <Preference
-            app:iconSpaceReserved="false"
-            app:key="account_auth"
-            app:title="@string/pref_account_auth_title"
-            app:summary="@string/pref_account_auth_summary"/>
-
-    </PreferenceCategory>
-
     <!-- ════════ ABOUT ════════ -->
     <PreferenceCategory app:iconSpaceReserved="false" app:title="@string/pref_cat_about">
 
@@ -286,12 +174,6 @@
 
     <!-- ════════ DEBUG ════════ -->
     <PreferenceCategory app:iconSpaceReserved="false" app:title="@string/pref_cat_debug">
-
-        <Preference
-            app:iconSpaceReserved="false"
-            app:key="debug_test"
-            app:title="@string/pref_debug_test_title"
-            app:summary="@string/pref_debug_test_summary"/>
 
         <SwitchPreferenceCompat
             app:iconSpaceReserved="false"

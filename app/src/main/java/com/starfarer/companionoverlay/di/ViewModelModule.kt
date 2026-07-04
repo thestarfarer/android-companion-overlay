@@ -9,11 +9,10 @@ import org.koin.dsl.module
  * ViewModel definitions for Koin.
  */
 val viewModelModule = module {
-    
+
     viewModel {
         MainViewModel(
             application = androidApplication(),
-            claudeAuth = get(),
             settings = get(),
             coordinator = get(),
             presetRepository = get()

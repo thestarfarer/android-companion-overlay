@@ -396,28 +396,23 @@ class TutorialActivity : AppCompatActivity() {
         if (settings.beepsEnabled) beepManager.play(b)
     }
 
-    /** Production picks the label by engine: Gemini transcription "records", on-device "listens". */
-    private fun listeningLabel() = getString(
-        if (settings.geminiSttEnabled) R.string.status_recording else R.string.status_listening
-    )
+    /** On-device transcription label (the only STT engine on this build). */
+    private fun listeningLabel() = getString(R.string.status_listening)
 
     /**
-     * Deliver a spoken reply with production beats (onResponseReceived): STEP beep, bubble
-     * down, a "Generating voice..." brief when the ✨ toggle selected the Gemini voice,
-     * speech, then the DONE beep on completion — not at enqueue. Falls back to a bubble
-     * when the on-device engine failed so the demo isn't silent.
+     * Deliver a spoken reply with production beats (gateway `message`/`speak`):
+     * STEP beep, bubble down, speech, then the DONE beep on completion — not
+     * at enqueue. Falls back to a bubble when the on-device engine failed so
+     * the demo isn't silent.
      */
     private fun speakReply(text: String) {
         lastResponse = text
         beep(BeepManager.Beep.STEP)
         bubbleManager.hideSpeechBubble(animate = false)
-        if (ttsFailed) {
+        if (ttsFailed || !settings.ttsEnabled) {
             bubbleManager.showResponse(text, RESPONSE_TIMEOUT)
             beep(BeepManager.Beep.DONE)
             return
-        }
-        if (settings.geminiTtsEnabled) {
-            bubbleManager.showBrief(getString(R.string.svc_bubble_generating_voice), 2000L)
         }
         ttsManager.onSpeechDone = {
             ttsManager.onSpeechDone = null

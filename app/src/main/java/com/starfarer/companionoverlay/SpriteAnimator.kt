@@ -5,6 +5,7 @@ import android.graphics.*
 import android.net.Uri
 import android.os.SystemClock
 import android.widget.ImageView
+import com.starfarer.companionoverlay.gateway.AvatarRepository
 import com.starfarer.companionoverlay.repository.SettingsRepository
 import kotlin.math.sin
 import kotlin.random.Random
@@ -25,7 +26,8 @@ import kotlin.random.Random
 class SpriteAnimator(
     private val context: Context,
     private val config: Config,
-    private val settings: SettingsRepository
+    private val settings: SettingsRepository,
+    private val avatar: AvatarRepository? = null
 ) {
 
     /**
@@ -192,12 +194,22 @@ class SpriteAnimator(
         idleFrameCount = settings.idleFrameCount
         walkFrameCount = settings.walkFrameCount
 
-        idleSpriteSheet = loadSprite(
+        // Load order: user-picked custom sprite URI > Nexus avatar cache >
+        // bundled custom asset > bundled default. When a sheet comes from the
+        // avatar cache, its frame count comes from the server manifest — never
+        // from local constants (PRESENCE_PROTOCOL.md §7).
+        val cachedIdle = if (settings.idleSpriteUri == null) loadCachedSheet("idle") else null
+        val cachedWalk = if (settings.walkSpriteUri == null) loadCachedSheet("walk") else null
+
+        idleSpriteSheet = cachedIdle?.first ?: loadSprite(
             settings.idleSpriteUri, "custom_idle_sheet.png", "idle_sheet.png"
         )
-        walkSpriteSheet = loadSprite(
+        cachedIdle?.let { idleFrameCount = it.second }
+
+        walkSpriteSheet = cachedWalk?.first ?: loadSprite(
             settings.walkSpriteUri, "custom_walk_sheet.png", "walk_sheet.png"
         )
+        cachedWalk?.let { walkFrameCount = it.second }
 
         idleSpriteSheet?.let {
             idleFrameWidth = it.width / idleFrameCount
@@ -246,6 +258,19 @@ class SpriteAnimator(
 
         walkFramesRight = right
         walkFramesLeft = left
+    }
+
+    /** Sheet + manifest frame count from the synced avatar cache, or null. */
+    private fun loadCachedSheet(name: String): Pair<Bitmap, Int>? {
+        val sprite = avatar?.sprite(name) ?: return null
+        val bitmap = try {
+            decodeCapped { java.io.FileInputStream(sprite.file) }
+        } catch (e: Exception) {
+            DebugLog.log("Overlay", "Avatar cache decode failed for $name: ${e.message}")
+            null
+        } ?: return null
+        DebugLog.log("Overlay", "Loaded $name sheet from avatar cache (${sprite.frames} frames)")
+        return bitmap to sprite.frames
     }
 
     private fun loadSprite(customUri: String?, customAsset: String, defaultAsset: String): Bitmap {
@@ -336,6 +361,11 @@ class SpriteAnimator(
 
     /** Scripted escape — deterministic trigger for the tutorial finale (handleTouch's is randomized). */
     fun escape() = triggerEscape()
+
+    /** Server-directed walk (`animate {state: "walk"}`). No-op mid-walk/escape. */
+    fun walk() {
+        if (state == OverlayState.Idle) triggerWalk()
+    }
 
     fun dismissAnimated(onComplete: () -> Unit) {
         val view = surface?.view ?: run { onComplete(); return }

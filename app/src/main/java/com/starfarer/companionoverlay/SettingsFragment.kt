@@ -9,46 +9,36 @@ import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.provider.Settings
+import android.text.InputType
 import android.view.View
 import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.lifecycleScope
 import androidx.preference.*
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
 import com.starfarer.companionoverlay.event.OverlayCoordinator
 import com.starfarer.companionoverlay.repository.SettingsRepository
-import kotlinx.coroutines.launch
 import org.koin.android.ext.android.inject
-import java.text.SimpleDateFormat
-import java.util.*
 
 /**
  * Settings screen fragment.
  *
  * Routes all settings reads/writes through [SettingsRepository] rather than
- * calling [PromptSettings] static methods directly. The preference XML still
- * binds to the same SharedPreferences file — the repository is used for
- * programmatic access where the preference framework doesn't handle persistence
- * automatically (int-backed lists, seekbar mappings, encrypted keys).
+ * touching SharedPreferences directly. The preference XML still binds to the
+ * same SharedPreferences file — the repository is used for programmatic
+ * access where the preference framework doesn't handle persistence
+ * automatically (int-backed lists, seekbar mappings, encrypted values).
  *
- * [ClaudeApi] is injected for the debug test button — a settings screen
- * reaching into the API layer is unusual, but a "test connection" feature
- * is squarely a settings concern and doesn't warrant an intermediary.
+ * The brain lives server-side in Nexus now: the connection section is just a
+ * server URL, a bearer token (encrypted at rest), and a device name.
  */
 class SettingsFragment : PreferenceFragmentCompat() {
 
     private val coordinator: OverlayCoordinator by inject()
-    private val claudeAuth: ClaudeAuth by inject()
-    private val claudeApi: ClaudeApi by inject()
     private val settings: SettingsRepository by inject()
-
-    // The MCP/Nexus section (server CRUD dialogs + context fetch) lives in its
-    // own controller — it was ~400 lines of inline programmatic UI.
-    private val mcpUi by lazy { com.starfarer.companionoverlay.ui.McpSettingsUi(this, settings, coordinator) }
 
     companion object {
         private val LICENSES_TEXT = """
@@ -85,9 +75,6 @@ class SettingsFragment : PreferenceFragmentCompat() {
             Apache License 2.0
         """.trimIndent()
     }
-
-    private var accountTapCount = 0
-    private var lastTapTime = 0L
 
     private val voicePermLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -133,19 +120,17 @@ class SettingsFragment : PreferenceFragmentCompat() {
     }
 
     override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
-        // Point at the same SharedPreferences file PromptSettings uses
+        // Point at the same SharedPreferences file the repository uses
         preferenceManager.sharedPreferencesName = "companion_prompts"
 
         setPreferencesFromResource(R.xml.settings_preferences, rootKey)
 
-        setupGeminiApi()
+        setupGateway()
         setupSilenceTimeout()
         setupVolumeShortcut()
         setupVoiceOutput()
         setupConversationLists()
-        mcpUi.setup()
         setupPermissions()
-        setupAccount()
         setupAbout()
         setupDebug()
     }
@@ -170,10 +155,8 @@ class SettingsFragment : PreferenceFragmentCompat() {
                     findPreference<ListPreference>("capture_mode")?.value = settings.captureMode.key
                 "volume_toggle_enabled" ->
                     findPreference<SwitchPreferenceCompat>("volume_toggle_enabled")?.isChecked = settings.volumeToggleEnabled
-                "gemini_stt_enabled" ->
-                    findPreference<SwitchPreferenceCompat>("gemini_stt_enabled")?.isChecked = settings.geminiSttEnabled
-                "gemini_tts_enabled" ->
-                    findPreference<SwitchPreferenceCompat>("gemini_tts_enabled")?.isChecked = settings.geminiTtsEnabled
+                "tts_enabled" ->
+                    findPreference<SwitchPreferenceCompat>("tts_enabled")?.isChecked = settings.ttsEnabled
             }
         }
     }
@@ -182,8 +165,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
     private fun syncLiveWidgets() {
         findPreference<ListPreference>("capture_mode")?.value = settings.captureMode.key
         findPreference<SwitchPreferenceCompat>("volume_toggle_enabled")?.isChecked = settings.volumeToggleEnabled
-        findPreference<SwitchPreferenceCompat>("gemini_stt_enabled")?.isChecked = settings.geminiSttEnabled
-        findPreference<SwitchPreferenceCompat>("gemini_tts_enabled")?.isChecked = settings.geminiTtsEnabled
+        findPreference<SwitchPreferenceCompat>("tts_enabled")?.isChecked = settings.ttsEnabled
     }
 
     override fun onResume() {
@@ -194,9 +176,6 @@ class SettingsFragment : PreferenceFragmentCompat() {
         // are reflected on return.
         syncLiveWidgets()
         refreshPermissions()
-        refreshAccount()
-        refreshDebugTest()
-
 
         val key = pendingHighlightKey ?: return
         pendingHighlightKey = null
@@ -211,41 +190,100 @@ class SettingsFragment : PreferenceFragmentCompat() {
         preferenceManager.sharedPreferences?.unregisterOnSharedPreferenceChangeListener(prefsListener)
     }
 
-    // ── Claude API Key ──
+    // ── Nexus gateway ──
 
-    private fun setupClaudeApiKey() {
-        findPreference<Preference>("claude_api_key")?.apply {
-            refreshApiKeySummary(this)
+    private fun setupGateway() {
+        findPreference<Preference>("gateway_url")?.apply {
+            refreshGatewayUrlSummary(this)
             setOnPreferenceClickListener {
-                showApiKeyDialog()
+                showTextDialog(
+                    title = getString(R.string.settings_gateway_url_title),
+                    hint = getString(R.string.settings_gateway_url_hint),
+                    current = settings.gatewayUrl,
+                    password = false
+                ) { value ->
+                    settings.gatewayUrl = value
+                    refreshGatewayUrlSummary()
+                    coordinator.gatewayConfigChanged()
+                }
+                true
+            }
+        }
+
+        findPreference<Preference>("gateway_token")?.apply {
+            refreshGatewayTokenSummary(this)
+            setOnPreferenceClickListener {
+                showTextDialog(
+                    title = getString(R.string.settings_gateway_token_title),
+                    hint = getString(R.string.settings_gateway_token_hint),
+                    current = settings.gatewayToken,
+                    password = true
+                ) { value ->
+                    settings.gatewayToken = value
+                    refreshGatewayTokenSummary()
+                    coordinator.gatewayConfigChanged()
+                }
+                true
+            }
+        }
+
+        findPreference<Preference>("gateway_device_name")?.apply {
+            summary = settings.deviceNameSetting
+            setOnPreferenceClickListener {
+                showTextDialog(
+                    title = getString(R.string.settings_gateway_device_name_title),
+                    hint = getString(R.string.settings_gateway_device_name_hint),
+                    current = settings.deviceNameSetting,
+                    password = false
+                ) { value ->
+                    settings.deviceNameSetting = value ?: ""
+                    summary = settings.deviceNameSetting
+                    coordinator.gatewayConfigChanged()
+                }
                 true
             }
         }
     }
 
-    private fun refreshApiKeySummary(pref: Preference? = findPreference("claude_api_key")) {
+    private fun refreshGatewayUrlSummary(pref: Preference? = findPreference("gateway_url")) {
         pref ?: return
-        val key = settings.claudeApiKey
-        pref.summary = if (key.isNullOrBlank()) getString(R.string.settings_api_key_enter)
-        else getString(R.string.settings_api_key_set, key.take(10))
+        val url = settings.gatewayUrl
+        pref.summary = if (url.isNullOrBlank()) getString(R.string.settings_gateway_url_not_set) else url
     }
 
-    private fun showApiKeyDialog() {
+    private fun refreshGatewayTokenSummary(pref: Preference? = findPreference("gateway_token")) {
+        pref ?: return
+        val token = settings.gatewayToken
+        pref.summary = if (token.isNullOrBlank()) getString(R.string.settings_gateway_token_not_set)
+        else getString(R.string.settings_gateway_token_set, token.take(6))
+    }
+
+    /** Shared single-field text dialog (URL, token, device name). */
+    private fun showTextDialog(
+        title: String,
+        hint: String,
+        current: String?,
+        password: Boolean,
+        onSave: (String?) -> Unit
+    ) {
         val ctx = context ?: return
         val d = ctx.resources.displayMetrics.density
         val pad = (20 * d).toInt()
 
         val r = 12 * d
         val inputLayout = TextInputLayout(ctx, null, com.google.android.material.R.attr.textInputOutlinedStyle).apply {
-            hint = ctx.getString(R.string.settings_api_key_hint)
-            endIconMode = TextInputLayout.END_ICON_PASSWORD_TOGGLE
+            this.hint = hint
+            if (password) endIconMode = TextInputLayout.END_ICON_PASSWORD_TOGGLE
             setBoxCornerRadii(r, r, r, r)
         }
         val editText = TextInputEditText(inputLayout.context).apply {
-            inputType = android.text.InputType.TYPE_CLASS_TEXT or
-                    android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            inputType = if (password) {
+                InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            } else {
+                InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+            }
             isSingleLine = true
-            setText(settings.claudeApiKey ?: "")
+            setText(current ?: "")
         }
         inputLayout.addView(editText)
 
@@ -255,108 +293,10 @@ class SettingsFragment : PreferenceFragmentCompat() {
         }
 
         MaterialAlertDialogBuilder(ctx, R.style.CompanionDialog)
-            .setTitle(getString(R.string.settings_claude_api_key_title))
+            .setTitle(title)
             .setView(container)
             .setPositiveButton(getString(R.string.common_save)) { _, _ ->
-                settings.claudeApiKey = editText.text?.toString()?.trim()
-                refreshApiKeySummary()
-                refreshDebugTest()
-            }
-            .setNegativeButton(getString(R.string.common_cancel), null)
-            .show()
-
-        editText.requestFocus()
-    }
-
-    // ── Connection Type ──
-
-    private val connectionLabels by lazy {
-        arrayOf(getString(R.string.settings_connection_api_key), getString(R.string.settings_connection_oauth))
-    }
-    private val connectionValues = arrayOf(SettingsRepository.CONNECTION_API_KEY, SettingsRepository.CONNECTION_OAUTH)
-
-    private fun setupConnectionType() {
-        findPreference<Preference>("claude_connection_type")?.apply {
-            summary = if (settings.isApiKeyMode) getString(R.string.settings_connection_api_key)
-            else getString(R.string.settings_connection_oauth)
-            setOnPreferenceClickListener {
-                showConnectionTypeDialog()
-                true
-            }
-        }
-    }
-
-    private fun showConnectionTypeDialog() {
-        val ctx = context ?: return
-        val currentIndex = connectionValues.indexOf(settings.connectionType).coerceAtLeast(0)
-        var selectedIndex = currentIndex
-
-        MaterialAlertDialogBuilder(ctx, R.style.CompanionDialog)
-            .setTitle(getString(R.string.settings_connection_type_title))
-            .setSingleChoiceItems(connectionLabels, currentIndex) { _, which ->
-                selectedIndex = which
-            }
-            .setPositiveButton(getString(R.string.common_save)) { _, _ ->
-                val type = connectionValues[selectedIndex]
-                settings.connectionType = type
-                findPreference<Preference>("claude_connection_type")?.summary =
-                    connectionLabels[selectedIndex]
-                refreshAccountVisibility()
-                refreshDebugTest()
-            }
-            .setNegativeButton(getString(R.string.common_cancel), null)
-            .show()
-    }
-
-    // ── Gemini API ──
-
-    private fun setupGeminiApi() {
-        findPreference<Preference>("gemini_api_key")?.apply {
-            refreshGeminiKeySummary(this)
-            setOnPreferenceClickListener {
-                showGeminiKeyDialog()
-                true
-            }
-        }
-    }
-
-    private fun refreshGeminiKeySummary(pref: Preference? = findPreference("gemini_api_key")) {
-        pref ?: return
-        val key = settings.geminiApiKey
-        pref.summary = if (key.isNullOrBlank()) getString(R.string.settings_gemini_key_required)
-        else getString(R.string.settings_gemini_key_set, key.take(8))
-    }
-
-    private fun showGeminiKeyDialog() {
-        val ctx = context ?: return
-        val d = ctx.resources.displayMetrics.density
-        val pad = (20 * d).toInt()
-
-        val r = 12 * d
-        val inputLayout = TextInputLayout(ctx, null, com.google.android.material.R.attr.textInputOutlinedStyle).apply {
-            hint = ctx.getString(R.string.settings_gemini_key_hint)
-            endIconMode = TextInputLayout.END_ICON_PASSWORD_TOGGLE
-            setBoxCornerRadii(r, r, r, r)
-        }
-        val editText = TextInputEditText(inputLayout.context).apply {
-            inputType = android.text.InputType.TYPE_CLASS_TEXT or
-                    android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
-            isSingleLine = true
-            setText(settings.geminiApiKey ?: "")
-        }
-        inputLayout.addView(editText)
-
-        val container = FrameLayout(ctx).apply {
-            setPadding(pad, (12 * d).toInt(), pad, 0)
-            addView(inputLayout)
-        }
-
-        MaterialAlertDialogBuilder(ctx, R.style.CompanionDialog)
-            .setTitle(getString(R.string.settings_gemini_api_key_title))
-            .setView(container)
-            .setPositiveButton(getString(R.string.common_save)) { _, _ ->
-                settings.geminiApiKey = editText.text?.toString()?.trim()
-                refreshGeminiKeySummary()
+                onSave(editText.text?.toString()?.trim())
             }
             .setNegativeButton(getString(R.string.common_cancel), null)
             .show()
@@ -415,16 +355,6 @@ class SettingsFragment : PreferenceFragmentCompat() {
     // ── Conversation lists (non-persistent, int-backed) ──
 
     private fun setupConversationLists() {
-        findPreference<ListPreference>("max_messages")?.apply {
-            value = settings.maxMessages.toString()
-            summary = getString(R.string.settings_max_messages_summary)
-            setOnPreferenceChangeListener { _, newValue ->
-                val count = (newValue as String).toIntOrNull() ?: PromptSettings.DEFAULT_MAX_MESSAGES
-                settings.maxMessages = count
-                true
-            }
-        }
-
         findPreference<ListPreference>("bubble_timeout")?.apply {
             value = settings.bubbleTimeoutSeconds.toString()
             summary = getString(R.string.settings_bubble_timeout_summary)
@@ -433,24 +363,6 @@ class SettingsFragment : PreferenceFragmentCompat() {
                 settings.bubbleTimeoutSeconds = secs
                 true
             }
-        }
-
-        findPreference<Preference>("clear_history")?.setOnPreferenceClickListener {
-            MaterialAlertDialogBuilder(requireContext())
-                .setTitle(getString(R.string.settings_clear_history_title))
-                .setMessage(getString(R.string.settings_clear_history_message))
-                .setPositiveButton(getString(R.string.settings_clear)) { _, _ ->
-                    // Running service clears memory + file via the event; with
-                    // the overlay down, delete the stored file directly.
-                    if (!coordinator.clearConversation()) {
-                        val storage: ConversationStorage by inject()
-                        lifecycleScope.launch { storage.clear() }
-                    }
-                    Toast.makeText(requireContext(), getString(R.string.settings_conversation_cleared), Toast.LENGTH_SHORT).show()
-                }
-                .setNegativeButton(getString(R.string.common_cancel), null)
-                .show()
-            true
         }
     }
 
@@ -512,7 +424,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
                 PackageManager.PERMISSION_GRANTED
 
     private fun refreshPermissions() {
-        val ctx = context ?: return
+        context ?: return
         findPreference<Preference>("perm_accessibility")?.summary =
             if (coordinator.accessibilityRunning.value) getString(R.string.settings_perm_enabled)
             else getString(R.string.settings_perm_accessibility_desc)
@@ -528,131 +440,6 @@ class SettingsFragment : PreferenceFragmentCompat() {
         findPreference<Preference>("perm_notifications")?.summary =
             if (hasNotifPerm()) getString(R.string.settings_perm_granted)
             else getString(R.string.settings_perm_notifications_desc)
-    }
-
-    // ── Account ──
-
-    private fun setupAccount() {
-        setupClaudeApiKey()
-        setupConnectionType()
-
-        findPreference<Preference>("account_auth")?.setOnPreferenceClickListener {
-            if (settings.isApiKeyMode && !settings.advancedUnlocked) {
-                val now = System.currentTimeMillis()
-                if (now - lastTapTime > 2000) accountTapCount = 0
-                lastTapTime = now
-                accountTapCount++
-                val remaining = 10 - accountTapCount
-                if (remaining in 1..3) {
-                    Toast.makeText(
-                        requireContext(),
-                        resources.getQuantityString(R.plurals.settings_taps_to_go, remaining, remaining),
-                        Toast.LENGTH_SHORT
-                    ).show()
-                }
-                if (accountTapCount >= 10) {
-                    settings.advancedUnlocked = true
-                    accountTapCount = 0
-                    Toast.makeText(requireContext(), getString(R.string.settings_advanced_unlocked), Toast.LENGTH_SHORT).show()
-                    refreshAccountVisibility()
-                }
-            } else if (!settings.isApiKeyMode) {
-                handleAuthClick()
-            }
-            true
-        }
-
-        refreshAccountVisibility()
-    }
-
-    private fun refreshAccount() {
-        context ?: return
-        refreshAccountVisibility()
-
-        if (settings.isApiKeyMode) return
-
-        val pref = findPreference<Preference>("account_auth") ?: return
-        val isAuth = claudeAuth.isAuthenticated()
-        val isWaiting = claudeAuth.isWaitingForCallback()
-        val isExpired = isAuth && System.currentTimeMillis() > claudeAuth.getExpiresAt()
-
-        pref.summary = when {
-            isWaiting -> getString(R.string.settings_auth_waiting)
-            isAuth && !isExpired -> {
-                val fmt = SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault())
-                getString(R.string.settings_auth_connected_until, fmt.format(Date(claudeAuth.getExpiresAt())))
-            }
-            isAuth && isExpired -> getString(R.string.settings_auth_token_expired)
-            else -> getString(R.string.settings_auth_not_connected)
-        }
-    }
-
-    private fun refreshAccountVisibility() {
-        val isApiKey = settings.isApiKeyMode
-        val isAdvanced = settings.advancedUnlocked
-
-        findPreference<Preference>("claude_api_key")?.isVisible = isApiKey
-        findPreference<Preference>("claude_connection_type")?.isVisible = isAdvanced
-
-        findPreference<Preference>("account_auth")?.apply {
-            if (!isAdvanced) {
-                isVisible = true
-                if (isApiKey) {
-                    title = getString(R.string.settings_claude_connection_title)
-                    summary = getString(R.string.settings_using_api_key)
-                }
-            } else {
-                isVisible = !isApiKey
-            }
-        }
-    }
-
-    private fun handleAuthClick() {
-        when {
-            claudeAuth.isWaitingForCallback() -> {
-                claudeAuth.cancelAuth()
-                refreshAccount()
-                Toast.makeText(requireContext(), getString(R.string.settings_cancelled), Toast.LENGTH_SHORT).show()
-            }
-            claudeAuth.isAuthenticated() && System.currentTimeMillis() > claudeAuth.getExpiresAt() -> {
-                lifecycleScope.launch {
-                    val result = claudeAuth.refreshToken()
-                    if (result.isSuccess) {
-                        Toast.makeText(requireContext(), getString(R.string.settings_token_refreshed), Toast.LENGTH_SHORT).show()
-                    } else {
-                        claudeAuth.logout()
-                        startAuth()
-                    }
-                    refreshAccount()
-                    refreshDebugTest()
-                }
-            }
-            claudeAuth.isAuthenticated() -> {
-                claudeAuth.logout()
-                refreshAccount()
-                refreshDebugTest()
-                Toast.makeText(requireContext(), getString(R.string.settings_logged_out), Toast.LENGTH_SHORT).show()
-            }
-            else -> startAuth()
-        }
-    }
-
-    private fun startAuth() {
-        val ctx = requireContext()
-        lifecycleScope.launch {
-            claudeAuth.startAuthWithCallback(ctx, object : ClaudeAuth.AuthCallback {
-                override fun onAuthProgress(message: String) { refreshAccount() }
-                override fun onAuthSuccess() {
-                    Toast.makeText(ctx, ctx.getString(R.string.settings_connected), Toast.LENGTH_SHORT).show()
-                    refreshAccount()
-                    refreshDebugTest()
-                }
-                override fun onAuthFailure(error: String) {
-                    Toast.makeText(ctx, ctx.getString(R.string.settings_auth_failed, error), Toast.LENGTH_LONG).show()
-                    refreshAccount()
-                }
-            })
-        }
     }
 
     // ── About ──
@@ -676,22 +463,6 @@ class SettingsFragment : PreferenceFragmentCompat() {
     // ── Debug ──
 
     private fun setupDebug() {
-        findPreference<Preference>("debug_test")?.setOnPreferenceClickListener {
-            val pref = it
-            pref.isEnabled = false
-            pref.summary = getString(R.string.settings_test_thinking)
-            lifecycleScope.launch {
-                val response = claudeApi.chat(
-                    userMessage = "Hey Senni! Say something cute in under 50 words~",
-                    systemPrompt = "You are Senni, a playful and mischievous companion. Be cute, a little teasing, maybe flirty. Keep it short and sweet. Use ~, ♡, and similar flourishes sparingly."
-                )
-                pref.summary = if (response.success) response.text
-                    else getString(R.string.settings_test_error, response.error)
-                pref.isEnabled = true
-            }
-            true
-        }
-
         findPreference<SwitchPreferenceCompat>("save_sent_images")?.apply {
             isChecked = settings.saveSentImages
             setOnPreferenceChangeListener { _, newValue ->
@@ -735,23 +506,6 @@ class SettingsFragment : PreferenceFragmentCompat() {
             DebugLog.clear()
             Toast.makeText(requireContext(), getString(R.string.settings_log_cleared), Toast.LENGTH_SHORT).show()
             true
-        }
-    }
-
-    private fun refreshDebugTest() {
-        val canTest = if (settings.isApiKeyMode) {
-            !settings.claudeApiKey.isNullOrBlank()
-        } else {
-            claudeAuth.isAuthenticated() && System.currentTimeMillis() <= claudeAuth.getExpiresAt()
-        }
-        findPreference<Preference>("debug_test")?.apply {
-            isEnabled = canTest
-            // Reset the summary when the connection becomes valid — the stale
-            // "Set Claude API key first" / "Connect to Claude first" lingered
-            // after the user fixed it.
-            summary = if (canTest) getString(R.string.settings_test_ready)
-                else if (settings.isApiKeyMode) getString(R.string.settings_test_need_key)
-                else getString(R.string.settings_test_need_auth)
         }
     }
 
