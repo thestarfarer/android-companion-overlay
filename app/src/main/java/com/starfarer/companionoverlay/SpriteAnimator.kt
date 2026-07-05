@@ -367,6 +367,26 @@ class SpriteAnimator(
         if (state == OverlayState.Idle) triggerWalk()
     }
 
+    /**
+     * Server-directed attention flourish (`animate {state: "alert"}`): one
+     * walk-frame cycle in place — start and target X are the same, so the
+     * existing walking machinery animates the legs without moving the window
+     * and drops back to Idle after a cycle. Deliberately NOT an escape:
+     * `alert` is broadcast with every async job result, and bolting
+     * off-screen each time read as a bug, not presence. No-op mid-walk/escape,
+     * like [walk]. Doesn't toggle [position] — the next tap continues in the
+     * direction it would have anyway.
+     */
+    fun alert() {
+        if (state != OverlayState.Idle) return
+        val s = surface ?: return
+        walkStartTime = SystemClock.elapsedRealtime()
+        walkStartX = s.x
+        walkTargetX = s.x
+        state = if (position == OverlayPosition.Right) OverlayState.WalkingRight
+            else OverlayState.WalkingLeft
+    }
+
     fun dismissAnimated(onComplete: () -> Unit) {
         val view = surface?.view ?: run { onComplete(); return }
         view.animate()

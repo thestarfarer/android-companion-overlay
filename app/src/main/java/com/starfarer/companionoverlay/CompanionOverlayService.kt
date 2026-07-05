@@ -704,12 +704,20 @@ class CompanionOverlayService : Service(), VoiceInputHost, GatewayClient.Listene
         }
         audioCoordinator.playBeep(BeepManager.Beep.STEP)
         val kind = if (settings.captureMode == CaptureMode.CAMERA) "camera" else "screenshot"
-        // Images are never queued offline (protocol §1) — tell the user instead.
-        if (gateway.sendImage("image/jpeg", imageBase64, kind, voiceText)) {
-            bubbleManager.showBrief(getString(R.string.svc_bubble_thinking), 30000L)
-        } else {
-            pendingVoiceReply = false
-            bubbleManager.showBrief(getString(R.string.svc_bubble_offline_image), 4000L)
+        // Images are never queued offline, and oversize payloads are dropped
+        // pre-send (the server rejects >8MB base64 with bad_message anyway) —
+        // tell the user instead (protocol §1).
+        when (gateway.sendImage("image/jpeg", imageBase64, kind, voiceText)) {
+            GatewayClient.ImageSendResult.SENT ->
+                bubbleManager.showBrief(getString(R.string.svc_bubble_thinking), 30000L)
+            GatewayClient.ImageSendResult.TOO_LARGE -> {
+                pendingVoiceReply = false
+                bubbleManager.showBrief(getString(R.string.svc_bubble_image_too_large), 4000L)
+            }
+            GatewayClient.ImageSendResult.OFFLINE -> {
+                pendingVoiceReply = false
+                bubbleManager.showBrief(getString(R.string.svc_bubble_offline_image), 4000L)
+            }
         }
     }
 
@@ -827,10 +835,13 @@ class CompanionOverlayService : Service(), VoiceInputHost, GatewayClient.Listene
         if (destroyed) return
         // Advisory mapping onto what the 2D sprite can do; states without a
         // local equivalent (talk/think) are ignored. Local reactive animation
-        // (tap walks, escape) stays untouched underneath.
+        // (tap walks, escape) stays untouched underneath. `alert` is a brief
+        // in-place reaction, NOT escape — it's broadcast with every async
+        // job result, and bolting off-screen each time looked like a bug.
         when (state) {
             "walk" -> spriteAnimator.walk()
-            "escape", "alert" -> spriteAnimator.escape()
+            "escape" -> spriteAnimator.escape()
+            "alert" -> spriteAnimator.alert()
         }
     }
 
@@ -840,6 +851,18 @@ class CompanionOverlayService : Service(), VoiceInputHost, GatewayClient.Listene
 
     override fun onServerError(code: String, message: String?, re: String?) {
         if (destroyed) return
+        // Protocol version rejected — terminal: the gateway stays offline
+        // until settings change or app restart (no reconnect loop). One clear
+        // hint; also suppress the generic "lost Nexus" hint the close would
+        // otherwise trigger right after.
+        if (code == "version") {
+            offlineHintShown = true
+            audioCoordinator.playBeep(BeepManager.Beep.ERROR)
+            pendingVoiceReply = false
+            bubbleManager.showBrief(getString(R.string.svc_bubble_version_mismatch), 8000L)
+            voiceController.onVoiceResponseComplete()
+            return
+        }
         // unsupported/internal on an in-flight audio message → the voice
         // pipeline engages local-STT fallback and shows its own subtle hint;
         // skip the generic error bubble for those.
@@ -886,7 +909,8 @@ class CompanionOverlayService : Service(), VoiceInputHost, GatewayClient.Listene
             capFail(requestId, "permission_denied")
             return
         }
-        val facing = (params["facing"] as? JsonPrimitive)?.content ?: "back"
+        // Default matches the server tool doc: no `facing` param means front.
+        val facing = (params["facing"] as? JsonPrimitive)?.content ?: "front"
         handler.post {
             if (destroyed) return@post
             setCameraForeground(true)

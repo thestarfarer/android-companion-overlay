@@ -120,8 +120,9 @@ class GatewayLiveIntegrationTest {
 
             // ── 3. one image turn ──
             println(">> image turn")
-            assertTrue(client.sendImage("image/png", redPng, "other",
-                "Test image. What color is this square? Answer with one word."))
+            assertEquals(GatewayClient.ImageSendResult.SENT,
+                client.sendImage("image/png", redPng, "other",
+                    "Test image. What color is this square? Answer with one word."))
             val imageReply = recorder.messages.poll(120, TimeUnit.SECONDS)
             assertNotNull("no reply to image within 120s", imageReply)
             println(">> image reply: $imageReply")

@@ -44,8 +44,8 @@ class ServerVoicePipeline(
         /** No transcript within this window ⇒ the server voice path is broken. */
         const val TRANSCRIPT_TIMEOUT_MS = 30_000L
 
-        /** Protocol cap on base64 audio payloads. */
-        const val MAX_BASE64_BYTES = 10 * 1024 * 1024
+        /** Protocol cap on base64 audio payloads — the server's exact limit (10_000_000, not 10 MiB). */
+        const val MAX_BASE64_BYTES = 10_000_000
 
         /** 16kHz × 16-bit mono ⇒ 32 PCM bytes per millisecond. */
         private const val PCM_BYTES_PER_MS = AudioUtils.SAMPLE_RATE * 2 / 1000

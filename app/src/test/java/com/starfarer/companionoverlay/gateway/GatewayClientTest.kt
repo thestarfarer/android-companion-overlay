@@ -184,7 +184,10 @@ class GatewayClientTest {
     @Test
     fun `sendImage sends format, kind, data, caption — and fails offline`() {
         handshake()
-        assertTrue(client.sendImage("image/webp", "QUJD", "screenshot", "look at this"))
+        assertEquals(
+            GatewayClient.ImageSendResult.SENT,
+            client.sendImage("image/webp", "QUJD", "screenshot", "look at this")
+        )
         val frame = serverSide.awaitFrame("image")
         assertEquals("image/webp", frame["format"]!!.jsonPrimitive.content)
         assertEquals("screenshot", frame["kind"]!!.jsonPrimitive.content)
@@ -192,7 +195,30 @@ class GatewayClientTest {
         assertEquals("look at this", frame["caption"]!!.jsonPrimitive.content)
 
         client.stop()
-        assertFalse(client.sendImage("image/webp", "QUJD", "screenshot", null))
+        assertEquals(
+            GatewayClient.ImageSendResult.OFFLINE,
+            client.sendImage("image/webp", "QUJD", "screenshot", null)
+        )
+    }
+
+    @Test
+    fun `sendImage drops payloads over the 8MB base64 cap without touching the wire`() {
+        handshake()
+        // One byte over the server's bad_message threshold.
+        val oversize = "A".repeat(GatewayClient.MAX_IMAGE_BASE64_BYTES + 1)
+        assertEquals(
+            GatewayClient.ImageSendResult.TOO_LARGE,
+            client.sendImage("image/jpeg", oversize, "screenshot", null)
+        )
+        // At the cap is still fine — the guard is strictly greater-than.
+        assertEquals(8_000_000, GatewayClient.MAX_IMAGE_BASE64_BYTES)
+        assertEquals(
+            GatewayClient.ImageSendResult.SENT,
+            client.sendImage("image/jpeg", "QUJD", "screenshot", null)
+        )
+        // The only image frame the server ever sees is the small one.
+        val frame = serverSide.awaitFrame("image")
+        assertEquals("QUJD", frame["data"]!!.jsonPrimitive.content)
     }
 
     @Test
@@ -320,6 +346,55 @@ class GatewayClientTest {
         secondServerSide.sendWelcome(re = hello2["id"]!!.jsonPrimitive.content)
         assertNotNull(listener.welcomes.poll(5, TimeUnit.SECONDS))
         assertTrue(client.isConnected)
+    }
+
+    @Test
+    fun `version error is terminal — no reconnect after the server closes`() {
+        handshake()
+        assertFalse(client.isVersionRejected)
+
+        // Server rejects our protocol version, then closes (protocol §10).
+        serverSide.send(buildJsonObject {
+            put("type", "error"); put("id", "s-30")
+            put("code", "version"); put("message", "protocol v1 unsupported")
+        })
+        awaitTrue("client should mark the version rejection") { client.isVersionRejected }
+        serverSide.socket!!.close(1002, "version mismatch")
+
+        assertNotNull("expected onDisconnected", listener.disconnects.poll(5, TimeUnit.SECONDS))
+        // No reconnection attempt: with backoff at 1s+jitter, 3s is plenty.
+        Thread.sleep(3000)
+        assertEquals(1, server.requestCount)
+        assertFalse(client.isConnected)
+    }
+
+    @Test
+    fun `restarting after a version rejection dials again (settings may have changed)`() {
+        handshake()
+        serverSide.send(buildJsonObject {
+            put("type", "error"); put("id", "s-31"); put("code", "version")
+        })
+        awaitTrue("client should mark the version rejection") { client.isVersionRejected }
+        serverSide.socket!!.close(1002, "version mismatch")
+        assertNotNull(listener.disconnects.poll(5, TimeUnit.SECONDS))
+
+        // stop() + start() is exactly what a settings change triggers.
+        val secondServerSide = ServerSide()
+        server.enqueue(MockResponse().withWebSocketUpgrade(secondServerSide))
+        client.stop()
+        client.start()
+        assertFalse(client.isVersionRejected)
+        val hello = secondServerSide.awaitFrame("hello", timeoutSec = 10)
+        assertEquals("test-device", hello["device_id"]!!.jsonPrimitive.content)
+    }
+
+    private fun awaitTrue(message: String, timeoutSec: Long = 5, condition: () -> Boolean) {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSec)
+        while (System.nanoTime() < deadline) {
+            if (condition()) return
+            Thread.sleep(20)
+        }
+        throw AssertionError("$message (within ${timeoutSec}s)")
     }
 
     @Test
