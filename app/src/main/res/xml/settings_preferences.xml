@@ -78,7 +78,7 @@
             app:key="voice_screenshot_enabled"
             app:title="@string/pref_voice_screenshot_title"
             app:summary="@string/pref_voice_screenshot_summary"
-            app:defaultValue="false"/>
+            app:defaultValue="true"/>
 
         <SwitchPreferenceCompat
             app:iconSpaceReserved="false"

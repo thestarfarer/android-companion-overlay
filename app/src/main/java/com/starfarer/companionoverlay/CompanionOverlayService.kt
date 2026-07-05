@@ -42,8 +42,10 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.koin.android.ext.android.inject
@@ -91,6 +93,7 @@ class CompanionOverlayService : Service(), VoiceInputHost, GatewayClient.Listene
     private val beepManager: BeepManager by inject()
     private val gateway: GatewayClient by inject()
     private val avatarRepository: AvatarRepository by inject()
+    private val httpClient: okhttp3.OkHttpClient by inject()
 
     // Main.immediate so launch bodies run inline up to their first suspension —
     // subscribeToEvents() relies on this: its collect subscription must be live
@@ -689,8 +692,50 @@ class CompanionOverlayService : Service(), VoiceInputHost, GatewayClient.Listene
         if (lastMessage != null) {
             bubbleManager.showResponse(lastMessage, settings.bubbleTimeoutSeconds * 1000L)
         } else {
-            bubbleManager.showResponse(getString(R.string.svc_bubble_ask_me_anything), settings.bubbleTimeoutSeconds * 1000L)
+            // Cold cache (fresh install/app restart) — the transcript lives on
+            // Nexus; refetch her last line instead of shrugging.
+            refetchLastMessage()
         }
+    }
+
+    /**
+     * GET /session/last: restore "what did she last say" into the bubble and
+     * the reopen cache. Falls back to the ask-me-anything placeholder when
+     * offline/unconfigured/empty.
+     */
+    private fun refetchLastMessage() {
+        val base = settings.serverUrl?.trimEnd('/')?.takeIf { it.isNotBlank() }
+        if (base == null) {
+            bubbleManager.showResponse(getString(R.string.svc_bubble_ask_me_anything), settings.bubbleTimeoutSeconds * 1000L)
+            return
+        }
+        Thread({
+            val text = try {
+                val request = okhttp3.Request.Builder()
+                    .url("$base/session/last")
+                    .header("Authorization", "Bearer ${settings.token ?: ""}")
+                    .build()
+                httpClient.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        val body = response.body?.string() ?: ""
+                        (Json.parseToJsonElement(body).jsonObject["text"] as? JsonPrimitive)?.content
+                    } else null
+                }
+            } catch (e: Exception) {
+                DebugLog.log("Overlay", "last-message refetch failed: ${e.message}")
+                null
+            }
+            handler.post {
+                if (destroyed) return@post
+                if (text != null && text.isNotBlank()) {
+                    // Seed the cache only if a live turn hasn't beaten us to it.
+                    if (lastAssistantMessage == null) lastAssistantMessage = text
+                    bubbleManager.showResponse(lastAssistantMessage ?: text, settings.bubbleTimeoutSeconds * 1000L)
+                } else {
+                    bubbleManager.showResponse(getString(R.string.svc_bubble_ask_me_anything), settings.bubbleTimeoutSeconds * 1000L)
+                }
+            }
+        }, "last-message-refetch").start()
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -781,9 +826,18 @@ class CompanionOverlayService : Service(), VoiceInputHost, GatewayClient.Listene
             clipboard.setPrimaryClip(clip)
         }
 
-        // Always display — the response dialog doubles as the typed-reply
-        // surface. `speak` (if any) arrives separately and overlays voice.
-        bubbleManager.showResponse(text, settings.bubbleTimeoutSeconds * 1000L)
+        // Voice-first: when this reply is about to be voiced (she's unmuted,
+        // or the user spoke and voice-in means voice-out), the bubble stays
+        // closed — the reply is the audio, and the text is silently cached
+        // above for a lower-body reopen. The bubble renders only when she
+        // won't speak. NOTE: read pendingVoiceReply without consuming it —
+        // onSpeak (which follows) owns the reset.
+        val willSpeak = settings.ttsEnabled || pendingVoiceReply
+        if (willSpeak) {
+            bubbleManager.hideSpeechBubble()   // clear the lingering "Thinking…"
+        } else {
+            bubbleManager.showResponse(text, settings.bubbleTimeoutSeconds * 1000L)
+        }
         voiceController.onVoiceResponseComplete()
     }
 
