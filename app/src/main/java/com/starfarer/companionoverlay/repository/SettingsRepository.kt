@@ -185,8 +185,10 @@ open class SettingsRepository(
         get() = settingsPrefs.getBoolean(KEY_BEEPS_ENABLED, true)
         set(value) = settingsPrefs.edit().putBoolean(KEY_BEEPS_ENABLED, value).apply()
 
+    // Default ON: the upper-body gesture is capture-and-TALK — a silent
+    // captionless send reads as "the button broke" (it did, on reinstall).
     var voiceScreenshotEnabled: Boolean
-        get() = settingsPrefs.getBoolean(KEY_VOICE_SCREENSHOT, false)
+        get() = settingsPrefs.getBoolean(KEY_VOICE_SCREENSHOT, true)
         set(value) = settingsPrefs.edit().putBoolean(KEY_VOICE_SCREENSHOT, value).apply()
 
     /** What an upper-body long-press does: Off (reopen last bubble), Screenshot, or Camera. */
