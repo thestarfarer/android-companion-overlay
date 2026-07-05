@@ -39,23 +39,41 @@ class CompanionApplication : Application() {
     }
 
     /**
-     * Notification channel for the overlay foreground service.
-     * Created once in Application so neither the activity nor the service
-     * need to duplicate this setup.
+     * Notification channels, created once in Application so neither the
+     * activity nor the service need to duplicate this setup.
+     *
+     * Two channels because they need opposite importance: the foreground
+     * service notification must stay quiet (IMPORTANCE_LOW), while a
+     * server-requested `notify` capability is Senni deliberately reaching
+     * for the user's attention — posting those on the LOW channel made them
+     * silent and invisible, i.e. "notify does nothing".
      */
     private fun createNotificationChannel() {
-        val channel = NotificationChannel(
-            NOTIFICATION_CHANNEL_ID,
-            getString(R.string.svc_channel_name),
-            NotificationManager.IMPORTANCE_LOW
-        ).apply {
-            description = getString(R.string.svc_channel_description)
-        }
-        getSystemService(NotificationManager::class.java)
-            .createNotificationChannel(channel)
+        val manager = getSystemService(NotificationManager::class.java)
+        manager.createNotificationChannel(
+            NotificationChannel(
+                NOTIFICATION_CHANNEL_ID,
+                getString(R.string.svc_channel_name),
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = getString(R.string.svc_channel_description)
+            }
+        )
+        manager.createNotificationChannel(
+            NotificationChannel(
+                ALERT_CHANNEL_ID,
+                getString(R.string.alert_channel_name),
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = getString(R.string.alert_channel_description)
+            }
+        )
     }
 
     companion object {
         const val NOTIFICATION_CHANNEL_ID = "companion_overlay_channel"
+
+        /** Server-requested `notify` capability — heads-up, with sound. */
+        const val ALERT_CHANNEL_ID = "companion_alerts_channel"
     }
 }
