@@ -6,21 +6,24 @@ import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioFocusRequest
 import android.media.AudioManager
+import android.media.MediaDataSource
+import android.media.MediaPlayer
 import android.os.Handler
 import android.os.Looper
 
 /**
- * Routes speech to the on-device TTS engine, plays beeps, and owns the
- * cross-cutting audio concerns: audio focus around speech/recording and the
- * Bluetooth A2DP keep-alive.
+ * Routes speech to the on-device TTS engine, plays server-synthesized
+ * `speak.audio` payloads, plays beeps, and owns the cross-cutting audio
+ * concerns: audio focus around speech/recording and the Bluetooth A2DP
+ * keep-alive.
  *
  * Singleton — outlives the overlay service. [warmUp]/[release] bracket a
  * service lifetime; release detaches every service-owned callback so a late
  * engine error can't touch a destroyed service's UI.
  *
- * Remote synthesis is Nexus's job now: when the server starts shipping
- * `speak.audio`, playback of that payload belongs here alongside the local
- * engine — the fallback relationship inverts, but the seam stays.
+ * Server TTS ([playSpeakAudio]) and local TTS ([speak]) share the same audio
+ * attributes and focus handling, so Bluetooth routing applies identically to
+ * both. The `speak` handler picks the branch via SpeakRouter.
  */
 class AudioCoordinator(
     private val context: Context,
@@ -46,8 +49,11 @@ class AudioCoordinator(
         override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>) = updateKeepAlive()
     }
 
+    private var speakPlayer: MediaPlayer? = null
+
     val isSpeaking: Boolean
-        get() = ttsManager.isSpeaking
+        get() = ttsManager.isSpeaking ||
+            runCatching { speakPlayer?.isPlaying == true }.getOrDefault(false)
 
     fun warmUp() {
         released = false
@@ -73,10 +79,65 @@ class AudioCoordinator(
 
     fun speak(text: String) {
         if (released) return
+        stopSpeakPlayer()
         requestFocus(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
         ttsManager.ensureReady()
         ttsManager.onSpeechDone = { speechFinished() }
         ttsManager.speak(text)
+    }
+
+    /**
+     * Play a server-synthesized `speak.audio` payload (mp3/ogg/... — the
+     * framework sniffs the container). Shares the local-TTS audio attributes
+     * and focus lifecycle, so Bluetooth/output routing behaves identically.
+     * On any decode/playback failure it completes gracefully (same signal as
+     * finished speech) instead of wedging the voice flow.
+     */
+    fun playSpeakAudio(audio: ByteArray, mimeType: String) {
+        if (released) return
+        ttsManager.stop()
+        stopSpeakPlayer()
+        requestFocus(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+        try {
+            val player = MediaPlayer()
+            speakPlayer = player
+            player.setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build()
+            )
+            player.setDataSource(ByteArrayMediaDataSource(audio))
+            player.setOnPreparedListener {
+                if (released || speakPlayer !== player) player.release() else player.start()
+            }
+            player.setOnCompletionListener { finishSpeakPlayback(player) }
+            player.setOnErrorListener { _, what, extra ->
+                DebugLog.log(TAG, "speak.audio playback error $what/$extra ($mimeType, ${audio.size}B)")
+                finishSpeakPlayback(player)
+                true
+            }
+            player.prepareAsync()
+        } catch (e: Exception) {
+            DebugLog.log(TAG, "speak.audio setup failed: ${e.message}")
+            speakPlayer?.let { runCatching { it.release() } }
+            speakPlayer = null
+            handler.post { speechFinished() }
+        }
+    }
+
+    private fun finishSpeakPlayback(player: MediaPlayer) {
+        runCatching { player.release() }
+        if (speakPlayer === player) speakPlayer = null
+        handler.post { speechFinished() }
+    }
+
+    private fun stopSpeakPlayer() {
+        speakPlayer?.let {
+            runCatching { it.stop() }
+            runCatching { it.release() }
+        }
+        speakPlayer = null
     }
 
     private fun speechFinished() {
@@ -87,6 +148,7 @@ class AudioCoordinator(
 
     fun stopSpeaking() {
         ttsManager.stop()
+        stopSpeakPlayer()
         abandonFocus()
         onSpeechComplete = null
     }
@@ -133,11 +195,25 @@ class AudioCoordinator(
         released = true
         runCatching { audioManager.unregisterAudioDeviceCallback(deviceCallback) }
         keepAlive.stop()
+        stopSpeakPlayer()
         abandonFocus()
         ttsManager.release()
         // Drop service-owned hooks — this singleton outlives the service, and a
         // retained lambda would leak the whole service via its captured managers.
         onSpeechComplete = null
         // BeepManager is a singleton — outlives the service. Don't release it here.
+    }
+
+    /** In-memory source for MediaPlayer — no temp file for `speak.audio` blobs. */
+    private class ByteArrayMediaDataSource(private val data: ByteArray) : MediaDataSource() {
+        override fun readAt(position: Long, buffer: ByteArray, offset: Int, size: Int): Int {
+            if (position < 0 || position >= data.size) return -1
+            val count = minOf(size, data.size - position.toInt())
+            System.arraycopy(data, position.toInt(), buffer, offset, count)
+            return count
+        }
+
+        override fun getSize(): Long = data.size.toLong()
+        override fun close() {}
     }
 }
