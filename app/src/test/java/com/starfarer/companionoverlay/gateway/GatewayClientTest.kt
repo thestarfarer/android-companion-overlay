@@ -94,11 +94,13 @@ class GatewayClientTest {
         val statuses = LinkedBlockingQueue<String>()
         val capRequests = LinkedBlockingQueue<Triple<String, String, JsonObject>>()
         val disconnects = LinkedBlockingQueue<Unit>()
+        val transcripts = LinkedBlockingQueue<Pair<String?, String>>()
 
         override fun onConnected(welcome: GatewayClient.Welcome) { welcomes.add(welcome) }
         override fun onDisconnected() { disconnects.add(Unit) }
         override fun onMessage(msgId: String?, text: String) { messages.add(text) }
         override fun onSpeak(text: String, audioFormat: String?, audioBase64: String?) { speaks.add(text) }
+        override fun onTranscript(re: String?, text: String) { transcripts.add(re to text) }
         override fun onAnimate(state: String, params: JsonObject?) { animates.add(state) }
         override fun onCompanionStatus(state: String, detail: String?) { statuses.add(state) }
         override fun onCapRequest(requestId: String, capability: String, params: JsonObject, timeoutMs: Long) {
@@ -194,6 +196,24 @@ class GatewayClientTest {
     }
 
     @Test
+    fun `sendAudio sends format, base64 data, duration — returns id, and fails offline`() {
+        handshake()
+        val base64 = java.util.Base64.getEncoder().encodeToString(ByteArray(64) { it.toByte() })
+        val id = client.sendAudio("wav", base64, 2300L)
+        assertNotNull(id)
+
+        val frame = serverSide.awaitFrame("audio")
+        assertEquals("wav", frame["format"]!!.jsonPrimitive.content)
+        assertEquals(base64, frame["data"]!!.jsonPrimitive.content)
+        assertEquals(2300, frame["duration_ms"]!!.jsonPrimitive.content.toInt())
+        assertEquals(id, frame["id"]!!.jsonPrimitive.content)
+
+        // Audio is never queued offline (protocol §1) — the send just fails.
+        client.stop()
+        assertNull(client.sendAudio("wav", base64, 2300L))
+    }
+
+    @Test
     fun `text queued while offline is flushed after welcome`() {
         client = GatewayClient(config(server.url("/").toString()), httpClient)
         client.listener = listener
@@ -232,6 +252,21 @@ class GatewayClientTest {
         assertEquals("talk", listener.animates.poll(5, TimeUnit.SECONDS))
         assertEquals("hi!", listener.messages.poll(5, TimeUnit.SECONDS))
         assertEquals("hi spoken", listener.speaks.poll(5, TimeUnit.SECONDS))
+    }
+
+    @Test
+    fun `transcript frames reach the listener, including the empty-text case`() {
+        handshake()
+        serverSide.send(buildJsonObject {
+            put("type", "transcript"); put("id", "s-20"); put("re", "m-7"); put("text", "what's moon doing")
+        })
+        assertEquals("m-7" to "what's moon doing", listener.transcripts.poll(5, TimeUnit.SECONDS))
+
+        // Empty text = the server heard nothing; still delivered so the UI can hint.
+        serverSide.send(buildJsonObject {
+            put("type", "transcript"); put("id", "s-21"); put("re", "m-8"); put("text", "")
+        })
+        assertEquals("m-8" to "", listener.transcripts.poll(5, TimeUnit.SECONDS))
     }
 
     @Test
