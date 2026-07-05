@@ -34,8 +34,7 @@ class PresetRepositoryTest {
     ): CharacterPreset = CharacterPreset(
         id = id,
         name = name,
-        systemPrompt = "sys-$id",
-        userMessage = "user-$id"
+        idleSpriteUri = "content://sprites/$id"
     )
 
     @Before

@@ -12,8 +12,7 @@
     <string name="common_reset">Reset</string>
 
     <!-- Main screen -->
-    <string name="main_system_prompt_title">System Prompt</string>
-    <string name="main_user_message_title">User Message</string>
+    <string name="main_appearance_section">Character appearance</string>
     <string name="main_status_walking">Senni is walking around~</string>
     <string name="main_toggle_rest">Let Her Rest</string>
     <string name="main_status_sleeping">Senni is sleeping...</string>
@@ -79,10 +78,6 @@
     <string name="dialog_voice_tuning_title">Voice Tuning</string>
     <string name="dialog_preview">Preview</string>
     <string name="dialog_tuning_preview">This is how I\'ll sound with these settings~</string>
-
-    <!-- Text editor bottom sheet -->
-    <string name="editor_prompt_empty">Prompt can\'t be empty~</string>
-    <string name="editor_saved">Saved~</string>
 
     <!-- Overlay service: notification, channel, bubble briefs -->
     <string name="svc_channel_name">Companion Overlay</string>

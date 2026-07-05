@@ -7,31 +7,14 @@ import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.starfarer.companionoverlay.repository.SettingsRepository
-import com.starfarer.companionoverlay.ui.TextEditorBottomSheet
 
 /**
- * Dialog builders for settings: text editing, voice picker, and TTS tuning.
+ * Dialog builders for settings: voice picker and TTS tuning.
  *
  * All settings mutations flow through [SettingsRepository] rather than
  * reaching into PromptSettings statics.
  */
 object SettingsDialogs {
-
-    /**
-     * Show the text editor for a field. The result is delivered to [requestKey]
-     * via the Fragment Result API; the caller registers the listener once at
-     * Activity-create time (so a rotation can't drop the save or misroute it).
-     */
-    fun showTextEditor(
-        activity: FragmentActivity,
-        title: String,
-        currentText: String,
-        defaultText: String,
-        requestKey: String
-    ) {
-        TextEditorBottomSheet.newInstance(title, currentText, defaultText, requestKey)
-            .show(activity.supportFragmentManager, "text_editor")
-    }
 
     /**
      * Release [tts] when the activity stops — covers rotation and the

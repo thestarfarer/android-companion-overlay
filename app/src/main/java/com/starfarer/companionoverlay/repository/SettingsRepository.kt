@@ -44,11 +44,10 @@ open class SettingsRepository(
 
 
     // ══════════════════════════════════════════════════════════════════════
-    // Character Preset (read-only here, mutations go through CharacterPreset)
+    // Character Preset (appearance only — read-only here, mutations go
+    // through PresetRepository)
     // ══════════════════════════════════════════════════════════════════════
 
-    val systemPrompt: String get() = presetProvider().systemPrompt
-    val userMessage: String get() = presetProvider().userMessage
     val idleSpriteUri: String? get() = presetProvider().idleSpriteUri
     val walkSpriteUri: String? get() = presetProvider().walkSpriteUri
     val idleFrameCount: Int get() = presetProvider().idleFrameCount

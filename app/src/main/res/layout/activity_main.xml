@@ -110,8 +110,19 @@
                 </LinearLayout>
 
                 <!-- ════════════════════════════════════════════════════════
-                     Preset Carousel (ViewPager2)
+                     Appearance Carousel (ViewPager2)
+                     Presets are appearance-only: sprites + frame counts.
+                     Persona lives server-side in Nexus.
                      ════════════════════════════════════════════════════════ -->
+
+                <TextView
+                    android:id="@+id/appearanceSectionLabel"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:paddingHorizontal="24dp"
+                    android:paddingBottom="4dp"
+                    android:text="@string/main_appearance_section"
+                    android:textAppearance="@style/TextAppearance.Companion.TitleMedium"/>
 
                 <androidx.viewpager2.widget.ViewPager2
                     android:id="@+id/presetPager"
@@ -130,87 +141,7 @@
                     android:orientation="horizontal"
                     android:gravity="center"
                     android:paddingTop="12dp"
-                    android:paddingBottom="16dp"/>
-
-                <!-- ════════════════════════════════════════════════════════
-                     System Prompt Card
-                     ════════════════════════════════════════════════════════ -->
-
-                <com.google.android.material.card.MaterialCardView
-                    android:id="@+id/systemPromptCard"
-                    style="@style/CompanionCard"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginHorizontal="24dp"
-                    android:layout_marginBottom="12dp"
-                    android:clickable="true"
-                    android:focusable="true">
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="vertical"
-                        android:padding="16dp">
-
-                        <TextView
-                            android:id="@+id/systemPromptTitle"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="@string/main_system_prompt_title"
-                            android:textAppearance="@style/TextAppearance.Companion.TitleMedium"
-                            android:layout_marginBottom="6dp"/>
-
-                        <TextView
-                            android:id="@+id/systemPromptPreview"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:textAppearance="@style/TextAppearance.Companion.BodyMedium"
-                            android:maxLines="3"
-                            android:ellipsize="end"/>
-
-                    </LinearLayout>
-
-                </com.google.android.material.card.MaterialCardView>
-
-                <!-- ════════════════════════════════════════════════════════
-                     User Message Card
-                     ════════════════════════════════════════════════════════ -->
-
-                <com.google.android.material.card.MaterialCardView
-                    android:id="@+id/userMessageCard"
-                    style="@style/CompanionCard"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginHorizontal="24dp"
-                    android:layout_marginBottom="24dp"
-                    android:clickable="true"
-                    android:focusable="true">
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="vertical"
-                        android:padding="16dp">
-
-                        <TextView
-                            android:id="@+id/userMessageTitle"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="@string/main_user_message_title"
-                            android:textAppearance="@style/TextAppearance.Companion.TitleMedium"
-                            android:layout_marginBottom="6dp"/>
-
-                        <TextView
-                            android:id="@+id/userMessagePreview"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:textAppearance="@style/TextAppearance.Companion.BodyMedium"
-                            android:maxLines="2"
-                            android:ellipsize="end"/>
-
-                    </LinearLayout>
-
-                </com.google.android.material.card.MaterialCardView>
+                    android:paddingBottom="24dp"/>
 
                 <!-- ════════════════════════════════════════════════════════
                      Status + Toggle

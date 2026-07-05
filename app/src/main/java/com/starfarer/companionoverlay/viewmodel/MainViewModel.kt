@@ -123,8 +123,6 @@ class MainViewModel(
         val source = _state.value.activePreset ?: CharacterPreset()
         val newPreset = CharacterPreset(
             name = "${source.name} copy",
-            systemPrompt = source.systemPrompt,
-            userMessage = source.userMessage,
             idleSpriteUri = source.idleSpriteUri,
             walkSpriteUri = source.walkSpriteUri,
             idleFrameCount = source.idleFrameCount,
