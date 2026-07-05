@@ -82,6 +82,8 @@
     <!-- Overlay service: notification, channel, bubble briefs -->
     <string name="svc_channel_name">Companion Overlay</string>
     <string name="svc_channel_description">Keeps Senni alive on your screen</string>
+    <string name="alert_channel_name">Senni alerts</string>
+    <string name="alert_channel_description">Notifications Senni sends to get your attention</string>
     <string name="svc_notification_title">Senni is here~</string>
     <string name="svc_notification_text">Tap to open the app</string>
     <string name="svc_notification_action_stop">Stop</string>

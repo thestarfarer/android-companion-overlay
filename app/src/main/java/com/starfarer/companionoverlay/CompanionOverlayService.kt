@@ -930,11 +930,20 @@ class CompanionOverlayService : Service(), VoiceInputHost, GatewayClient.Listene
         val title = (params["title"] as? JsonPrimitive)?.content ?: "Senni"
         val body = (params["body"] as? JsonPrimitive)?.content ?: ""
         try {
-            val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+            // The dedicated HIGH-importance channel, not the silent foreground
+            // -service one — this capability exists to get the user's attention.
+            val tapIntent = PendingIntent.getActivity(
+                this, 0, Intent(this, MainActivity::class.java),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            val notification = NotificationCompat.Builder(this, CompanionApplication.ALERT_CHANNEL_ID)
                 .setContentTitle(title)
                 .setContentText(body)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(body))
                 .setSmallIcon(R.drawable.ic_notification)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+                .setContentIntent(tapIntent)
                 .setAutoCancel(true)
                 .build()
             NotificationManagerCompat.from(this).notify(notifyIds.incrementAndGet(), notification)
