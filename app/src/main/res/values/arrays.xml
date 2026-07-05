@@ -44,4 +44,14 @@
         <item>screenshot</item>
         <item>camera</item>
     </string-array>
+    <string-array name="voice_mode_entries">
+        <item>Auto (Nexus, on-device fallback)</item>
+        <item>Nexus transcribes</item>
+        <item>On-device</item>
+    </string-array>
+    <string-array name="voice_mode_values">
+        <item>auto</item>
+        <item>server</item>
+        <item>local</item>
+    </string-array>
 </resources>
