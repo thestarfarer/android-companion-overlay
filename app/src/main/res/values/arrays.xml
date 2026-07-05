@@ -1,18 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string-array name="history_labels">
-        <item>5 turns</item>
-        <item>10 turns</item>
-        <item>20 turns</item>
-        <item>30 turns</item>
-    </string-array>
-    <string-array name="history_values">
-        <item>10</item>
-        <item>20</item>
-        <item>40</item>
-        <item>60</item>
-    </string-array>
-
     <string-array name="timeout_labels">
         <item>15 seconds</item>
         <item>30 seconds</item>
@@ -26,14 +13,6 @@
         <item>120</item>
     </string-array>
 
-    <string-array name="connection_type_labels">
-        <item>API Key</item>
-        <item>Claude Code OAuth</item>
-    </string-array>
-    <string-array name="connection_type_values">
-        <item>api_key</item>
-        <item>oauth</item>
-    </string-array>
     <string-array name="capture_mode_entries">
         <item>Off</item>
         <item>Screenshot</item>

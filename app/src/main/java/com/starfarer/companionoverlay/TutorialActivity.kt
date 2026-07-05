@@ -439,7 +439,7 @@ class TutorialActivity : AppCompatActivity() {
             beep(BeepManager.Beep.READY)
         }
         // Listening → thinking has no beep in production (the STEP beep belongs
-        // to the Transcribing status — see the voice demo and speakReply).
+        // to the moment the utterance ships — see the voice demo and speakReply).
         schedule(1900L) {
             bubbleManager.hideVoice()
             bubbleManager.showBrief(getString(R.string.svc_bubble_thinking), 30000L)
@@ -457,17 +457,23 @@ class TutorialActivity : AppCompatActivity() {
         complete()
     }
 
-    /** Voice round-trip: listening → transcribing → thinking → reply, then she speaks it aloud. */
+    /** Voice round-trip mirroring the live server path: listening → utterance
+     *  ships (STEP beep + thinking) → 🎙 transcript bubble → reply aloud. */
     private fun runVoiceDemo() {
         bubbleManager.showVoice(listeningLabel())
         beep(BeepManager.Beep.READY)
         schedule(800L) {
-            bubbleManager.updateVoice(getString(R.string.status_transcribing))
+            // Utterance sent (onVoiceAudioSent): voice bubble down, STEP beep,
+            // thinking brief.
+            bubbleManager.hideVoice()
             beep(BeepManager.Beep.STEP)
+            bubbleManager.showBrief(getString(R.string.svc_bubble_thinking), 30000L)
         }
         schedule(2000L) {
-            bubbleManager.hideVoice()
-            bubbleManager.showBrief(getString(R.string.svc_bubble_thinking), 30000L)
+            // Nexus echoes what it heard as a `transcript` — the 🎙 bubble.
+            bubbleManager.showBrief(
+                getString(R.string.svc_bubble_heard, getString(R.string.tutorial_canned_heard)), 5000L
+            )
         }
         // Reply is spoken aloud with NO bubble (onResponseReceived → hideSpeechBubble + speak).
         // Completion belongs to the triple-press, not the demo's end.

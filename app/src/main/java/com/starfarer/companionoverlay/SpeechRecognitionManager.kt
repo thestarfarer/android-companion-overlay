@@ -215,7 +215,7 @@ class SpeechRecognitionManager(private val context: Context) {
     fun startListening() {
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
             DebugLog.log(TAG, "No speech recognition service available on this device")
-            onError?.invoke("No speech recognition service on this device — try Gemini voice in settings")
+            onError?.invoke(context.getString(R.string.speech_no_recognizer))
             onStopped?.invoke()
             return
         }

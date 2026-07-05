@@ -115,9 +115,9 @@
     <string name="bubble_reply_hint">Reply...</string>
     <string name="status_recording">🎙 Recording...</string>
     <string name="status_listening">🎙 Listening...</string>
-    <string name="status_transcribing">✒️ Transcribing...</string>
     <string name="status_retrying">Retrying transcription...</string>
     <string name="status_couldnt_hear">Couldn\'t hear that~ (%1$s)</string>
+    <string name="speech_no_recognizer">No on-device speech recognizer here — set Voice transcription to Nexus in settings</string>
 
     <!-- Tutorial -->
     <string name="tutorial_skip">Skip</string>
@@ -140,7 +140,7 @@
     <string name="tutorial_step_visibility_title">Need me out of sight?</string>
     <string name="tutorial_step_visibility_body">Double-press Volume Down and I\'ll hide; double-press again and I\'m back~ Try it on the volume key at the edge.</string>
     <string name="tutorial_step_voice_title">Talk to me hands-free</string>
-    <string name="tutorial_step_voice_body">Triple-press Volume Down or press an assistant button and I\'m listening — no screen tap needed. I transcribe ✒️, think 🧠, and answer aloud. Give the edge key three quick presses~</string>
+    <string name="tutorial_step_voice_body">Triple-press Volume Down or press an assistant button and I\'m listening — no screen tap needed. I\'ll echo what I heard 🎙, think 🧠, and answer aloud. Give the edge key three quick presses~</string>
     <string name="tutorial_step_tools_title">I can search &amp; use tools</string>
     <string name="tutorial_step_tools_body">Ask about current events and my Nexus brain searches the web and uses its tools — watch for my 🔧 badge. Tap me to replay~</string>
     <string name="tutorial_step_ghost_title">I won\'t block your typing</string>
@@ -150,6 +150,7 @@
     <string name="tutorial_recall_placeholder">This is where my last reply would appear!</string>
     <string name="tutorial_canned_response">Ooh, a code editor~ Looks like you\'re deep in a Kotlin file. Want me to explain what\'s on screen, or just keep you company?</string>
     <string name="tutorial_canned_followup">Got it! That\'s exactly how a real reply works — I\'d read it and answer. Try the next gesture when you\'re ready. ✨</string>
+    <string name="tutorial_canned_heard">Senni, can you hear me?</string>
     <string name="tutorial_canned_voice_reply">You said that out loud and I heard you~ This very reply is my on-device voice — no internet required. Handy when you\'d rather talk than type.</string>
     <string name="tutorial_canned_search_reply">It\'s sunny and 72 degrees~ That came from a weather tool. In the real app I can call tools and search the web for you.</string>
     <string name="tutorial_senni_label" translatable="false">SENNI</string>
