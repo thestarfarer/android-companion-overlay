@@ -3,10 +3,12 @@ package com.starfarer.companionoverlay.gateway
 import com.starfarer.companionoverlay.DebugLog
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import com.starfarer.companionoverlay.voice.ServerVoicePipeline
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.putJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
@@ -277,11 +279,25 @@ class GatewayClient(
      * @return the message id (for `transcript`/`error` correlation via `re`),
      *   or null when offline / the socket rejected the frame.
      */
-    fun sendAudio(format: String, base64Data: String, durationMs: Long): String? {
+    fun sendAudio(
+        format: String,
+        base64Data: String,
+        durationMs: Long,
+        image: ServerVoicePipeline.ImagePayload? = null,
+    ): String? {
         val msg = envelope("audio") {
             put("format", format)
             put("data", base64Data)
             put("duration_ms", durationMs)
+            // Optional capture riding along (§3 audio.image) — the
+            // capture-with-voice flow; the transcript becomes its caption.
+            if (image != null) {
+                putJsonObject("image") {
+                    put("format", image.format)
+                    put("data", image.base64Data)
+                    put("kind", image.kind)
+                }
+            }
         }
         return if (sendIfReady(msg)) msg.str("id") else null
     }

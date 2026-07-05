@@ -1,5 +1,6 @@
 package com.starfarer.companionoverlay.gateway
 
+import com.starfarer.companionoverlay.voice.ServerVoicePipeline
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -237,6 +238,20 @@ class GatewayClientTest {
         // Audio is never queued offline (protocol §1) — the send just fails.
         client.stop()
         assertNull(client.sendAudio("wav", base64, 2300L))
+    }
+
+    @Test
+    fun `sendAudio with a riding capture nests it as the image object`() {
+        handshake()
+        val base64 = java.util.Base64.getEncoder().encodeToString(ByteArray(64) { it.toByte() })
+        val image = ServerVoicePipeline.ImagePayload("image/jpeg", "QUJD", "screenshot")
+        assertNotNull(client.sendAudio("wav", base64, 2300L, image))
+
+        val frame = serverSide.awaitFrame("audio")
+        val nested = frame["image"]!!.jsonObject
+        assertEquals("image/jpeg", nested["format"]!!.jsonPrimitive.content)
+        assertEquals("QUJD", nested["data"]!!.jsonPrimitive.content)
+        assertEquals("screenshot", nested["kind"]!!.jsonPrimitive.content)
     }
 
     @Test

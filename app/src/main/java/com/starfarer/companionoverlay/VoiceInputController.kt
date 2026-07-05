@@ -88,8 +88,12 @@ class VoiceInputController(
 
     private val serverPipeline = ServerVoicePipeline(
         transport = object : ServerVoicePipeline.Transport {
-            override fun sendAudio(format: String, base64Data: String, durationMs: Long): String? =
-                gateway.sendAudio(format, base64Data, durationMs)
+            override fun sendAudio(
+                format: String,
+                base64Data: String,
+                durationMs: Long,
+                image: ServerVoicePipeline.ImagePayload?,
+            ): String? = gateway.sendAudio(format, base64Data, durationMs, image)
         },
         listener = object : ServerVoicePipeline.Listener {
             override fun onTranscribed(text: String) {
@@ -234,12 +238,11 @@ class VoiceInputController(
     }
 
     /**
-     * Which engine handles this session. A capture waiting to be captioned
-     * always uses local STT: the caption must be text client-side, and the
-     * protocol has no combined image+audio turn.
+     * Which engine handles this session. A capture waiting to be voiced
+     * rides the audio message itself (protocol §3 `audio.image`) — the
+     * transcript becomes its caption server-side.
      */
     private fun useServerPath(): Boolean {
-        if (host.hasPendingScreenshot()) return false
         return when (settings.voiceMode) {
             SettingsRepository.VOICE_MODE_SERVER -> true
             SettingsRepository.VOICE_MODE_LOCAL -> false
@@ -287,10 +290,18 @@ class VoiceInputController(
         override fun onUtterance(pcm16k: ByteArray) {
             handler.post {
                 if (state != State.LISTENING) return@post
-                when (serverPipeline.submitUtterance(pcm16k)) {
+                // A waiting capture (upper-body gesture) rides along; the
+                // server captions it with the transcript. Consumed only once
+                // the utterance actually ships.
+                val capture = host.pendingCapture()
+                val image = capture?.let {
+                    ServerVoicePipeline.ImagePayload("image/jpeg", it.base64Jpeg, it.kind)
+                }
+                when (serverPipeline.submitUtterance(pcm16k, image)) {
                     ServerVoicePipeline.SubmitResult.SENT -> {
                         // Push-to-talk parity with the local path: one utterance
                         // per press, then wait for the reply.
+                        host.clearPendingScreenshot()
                         utteranceSource?.stop()
                         state = State.PROCESSING
                         host.hideVoiceBubble()

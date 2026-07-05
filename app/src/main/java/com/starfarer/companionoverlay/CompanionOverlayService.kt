@@ -1036,6 +1036,12 @@ class CompanionOverlayService : Service(), VoiceInputHost, GatewayClient.Listene
 
     override fun hasPendingScreenshot(): Boolean = pendingScreenshotBase64 != null
 
+    override fun pendingCapture(): PendingCapture? =
+        pendingScreenshotBase64?.let {
+            val kind = if (settings.captureMode == CaptureMode.CAMERA) "camera" else "screenshot"
+            PendingCapture(it, kind)
+        }
+
     // ══════════════════════════════════════════════════════════════════════
     // Internal helpers
     // ══════════════════════════════════════════════════════════════════════

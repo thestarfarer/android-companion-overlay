@@ -58,4 +58,15 @@ interface VoiceInputHost {
 
     /** True while a capture is waiting to be captioned by voice input. */
     fun hasPendingScreenshot(): Boolean = false
+
+    /**
+     * The capture waiting to ride along with the next utterance (server voice
+     * path — protocol §3 `audio.image`), or null. Does NOT consume it: the
+     * controller clears it via [clearPendingScreenshot] once the utterance
+     * actually ships.
+     */
+    fun pendingCapture(): PendingCapture? = null
 }
+
+/** A capture (screenshot/camera JPEG) waiting to be voiced over. */
+data class PendingCapture(val base64Jpeg: String, val kind: String)
