@@ -54,8 +54,11 @@ class ServerVoicePipeline(
     /** Outbound seam — [com.starfarer.companionoverlay.gateway.GatewayClient.sendAudio] shaped. */
     interface Transport {
         /** @return the sent message's id, or null when offline. */
-        fun sendAudio(format: String, base64Data: String, durationMs: Long): String?
+        fun sendAudio(format: String, base64Data: String, durationMs: Long, image: ImagePayload?): String?
     }
+
+    /** A capture riding along with the utterance (protocol §3 `audio.image`). */
+    data class ImagePayload(val format: String, val base64Data: String, val kind: String)
 
     interface Listener {
         /** The server heard [text] — render it where the user's own words go. A turn follows. */
@@ -94,7 +97,7 @@ class ServerVoicePipeline(
      * it as an `audio` message. Synchronous; the transcript/error/timeout
      * outcome arrives via [Listener].
      */
-    fun submitUtterance(pcm16kMono: ByteArray): SubmitResult {
+    fun submitUtterance(pcm16kMono: ByteArray, image: ImagePayload? = null): SubmitResult {
         val durationMs = pcm16kMono.size.toLong() / PCM_BYTES_PER_MS
         if (durationMs < MIN_UTTERANCE_MS) {
             DebugLog.log(TAG, "Dropping ${durationMs}ms blip")
@@ -105,13 +108,13 @@ class ServerVoicePipeline(
             DebugLog.log(TAG, "Utterance over the 10MB base64 cap (${base64.length} bytes) — dropped")
             return SubmitResult.TOO_LARGE
         }
-        val id = transport.sendAudio("wav", base64, durationMs) ?: return SubmitResult.OFFLINE
+        val id = transport.sendAudio("wav", base64, durationMs, image) ?: return SubmitResult.OFFLINE
         synchronized(lock) {
             clearPendingLocked()
             pendingId = id
             timeoutTask = scheduler.schedule({ onTimeout(id) }, transcriptTimeoutMs, TimeUnit.MILLISECONDS)
         }
-        DebugLog.log(TAG, "Sent ${durationMs}ms utterance as $id (${base64.length} b64 bytes)")
+        DebugLog.log(TAG, "Sent ${durationMs}ms utterance as $id (${base64.length} b64 bytes${if (image != null) ", +${image.kind}" else ""})")
         return SubmitResult.SENT
     }
 

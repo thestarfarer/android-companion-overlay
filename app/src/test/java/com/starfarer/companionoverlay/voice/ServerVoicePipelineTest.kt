@@ -3,6 +3,7 @@ package com.starfarer.companionoverlay.voice
 import com.starfarer.companionoverlay.AudioUtils
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.Base64
@@ -19,15 +20,25 @@ class ServerVoicePipelineTest {
 
     /** Fake gateway seam — records what would go on the wire. */
     private class FakeTransport : ServerVoicePipeline.Transport {
-        data class Sent(val format: String, val data: String, val durationMs: Long)
+        data class Sent(
+            val format: String,
+            val data: String,
+            val durationMs: Long,
+            val image: ServerVoicePipeline.ImagePayload? = null,
+        )
 
         val sent = mutableListOf<Sent>()
         var connected = true
         private var nextId = 0
 
-        override fun sendAudio(format: String, base64Data: String, durationMs: Long): String? {
+        override fun sendAudio(
+            format: String,
+            base64Data: String,
+            durationMs: Long,
+            image: ServerVoicePipeline.ImagePayload?,
+        ): String? {
             if (!connected) return null
-            sent += Sent(format, base64Data, durationMs)
+            sent += Sent(format, base64Data, durationMs, image)
             return "m-${++nextId}"
         }
     }
@@ -85,6 +96,22 @@ class ServerVoicePipelineTest {
         assertEquals(raw.size, readIntLE(wav, 40))                       // data chunk size
         assertEquals(44 + raw.size, wav.size)
         assertTrue(wav.copyOfRange(44, wav.size).contentEquals(raw))
+    }
+
+    @Test
+    fun `a riding capture goes up with the utterance, untouched`() {
+        val image = ServerVoicePipeline.ImagePayload("image/jpeg", "QUJD", "screenshot")
+        assertEquals(
+            ServerVoicePipeline.SubmitResult.SENT,
+            pipeline().submitUtterance(pcm(1000), image)
+        )
+        assertEquals(image, transport.sent.single().image)
+    }
+
+    @Test
+    fun `no capture means a null image on the wire`() {
+        assertEquals(ServerVoicePipeline.SubmitResult.SENT, pipeline().submitUtterance(pcm(1000)))
+        assertNull(transport.sent.single().image)
     }
 
     @Test
