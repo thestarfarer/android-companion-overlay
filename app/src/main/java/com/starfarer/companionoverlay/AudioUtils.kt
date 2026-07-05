@@ -63,6 +63,21 @@ object AudioUtils {
         return shorts
     }
 
+    /**
+     * Convert a ShortArray of PCM samples to little-endian 16-bit bytes.
+     * Inverse of [bytesToShorts]; used to accumulate VAD windows into an
+     * utterance buffer.
+     */
+    fun shortsToBytes(shorts: ShortArray): ByteArray {
+        val bytes = ByteArray(shorts.size * 2)
+        for (i in shorts.indices) {
+            val s = shorts[i].toInt()
+            bytes[i * 2] = (s and 0xFF).toByte()
+            bytes[i * 2 + 1] = ((s shr 8) and 0xFF).toByte()
+        }
+        return bytes
+    }
+
     private fun DataOutputStream.writeIntLE(value: Int) {
         write(value and 0xFF)
         write((value shr 8) and 0xFF)

@@ -39,7 +39,8 @@ import kotlin.random.Random
  *   as [start]ed. Reconnection is invisible above this layer except for the
  *   edge-triggered [Listener.onDisconnected]/[Listener.onConnected] pair.
  * - Queues outbound `text`/`event` while disconnected (bounded, drop-oldest)
- *   and flushes after `welcome`. `image` and `cap_result` are never queued.
+ *   and flushes after `welcome`. `image`, `audio` and `cap_result` are never
+ *   queued.
  *
  * Pure JVM (no Android classes) so it can be integration-tested against a
  * real Nexus server in plain unit tests. Listener callbacks are delivered on
@@ -104,6 +105,13 @@ class GatewayClient(
 
         /** What to say aloud. When [audioBase64] is null, use local TTS. */
         fun onSpeak(text: String, audioFormat: String?, audioBase64: String?) {}
+
+        /**
+         * Server-side transcription of an `audio` message this device sent
+         * ([re] = that message's id). Empty [text] means the server heard
+         * nothing — no turn follows.
+         */
+        fun onTranscript(re: String?, text: String) {}
 
         /** Presence directive: idle|walk|escape|talk|think|alert. Advisory. */
         fun onAnimate(state: String, params: JsonObject?) {}
@@ -227,6 +235,24 @@ class GatewayClient(
             if (!caption.isNullOrBlank()) put("caption", caption)
         }
         return sendIfReady(msg)
+    }
+
+    /**
+     * One VAD-cut voice utterance (§3 `audio`) — the primary voice path. The
+     * server transcribes it and answers with `transcript`, then the normal
+     * turn replies. Never queued offline (protocol §1: a stale utterance is
+     * worse than a dropped one — same rule as images).
+     *
+     * @return the message id (for `transcript`/`error` correlation via `re`),
+     *   or null when offline / the socket rejected the frame.
+     */
+    fun sendAudio(format: String, base64Data: String, durationMs: Long): String? {
+        val msg = envelope("audio") {
+            put("format", format)
+            put("data", base64Data)
+            put("duration_ms", durationMs)
+        }
+        return if (sendIfReady(msg)) msg.str("id") else null
     }
 
     /** Device state snapshot. Not queued. */
@@ -385,6 +411,7 @@ class GatewayClient(
                 val audio = msg["audio"] as? JsonObject
                 dispatch { it.onSpeak(msg.str("text") ?: "", audio?.str("format"), audio?.str("data")) }
             }
+            "transcript" -> dispatch { it.onTranscript(msg.str("re"), msg.str("text") ?: "") }
             "animate" -> dispatch {
                 it.onAnimate(msg.str("state") ?: "idle", msg["params"] as? JsonObject)
             }
