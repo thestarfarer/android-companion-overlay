@@ -38,6 +38,9 @@ import kotlin.random.Random
  * - Reconnects with jittered exponential backoff, 1s → 60s cap, for as long
  *   as [start]ed. Reconnection is invisible above this layer except for the
  *   edge-triggered [Listener.onDisconnected]/[Listener.onConnected] pair.
+ *   Exception: an `error` with code `version` is terminal — reconnecting
+ *   would replay the same rejection, so the client stays offline until the
+ *   next [start] (settings change or app restart).
  * - Queues outbound `text`/`event` while disconnected (bounded, drop-oldest)
  *   and flushes after `welcome`. `image`, `audio` and `cap_result` are never
  *   queued.
@@ -54,6 +57,13 @@ class GatewayClient(
 ) {
     companion object {
         const val PROTOCOL_VERSION = 1
+
+        /**
+         * Server cap on base64 image payloads — anything larger is rejected
+         * with `bad_message`, so don't put it on the wire at all.
+         */
+        const val MAX_IMAGE_BASE64_BYTES = 8_000_000
+
         private const val TAG = "Gateway"
         private const val PING_INTERVAL_MS = 30_000L
         private const val RECONNECT_MIN_MS = 1_000L
@@ -145,6 +155,11 @@ class GatewayClient(
     private var started = false
     private var webSocket: WebSocket? = null
     private var ready = false            // welcome received on the current socket
+    // The server rejected our protocol version (`error` code `version`) — a
+    // hard, permanent failure (§10): retrying the same hello can only be
+    // rejected again. No reconnects until the next start() (settings change
+    // or app restart).
+    private var versionRejected = false
     private var reconnectAttempt = 0
     private var reconnectTask: ScheduledFuture<*>? = null
     private var pingTask: ScheduledFuture<*>? = null
@@ -158,6 +173,9 @@ class GatewayClient(
 
     val isConnected: Boolean get() = synchronized(lock) { ready }
 
+    /** True after a protocol-version rejection — permanently offline until restarted. */
+    val isVersionRejected: Boolean get() = synchronized(lock) { versionRejected }
+
     // ══════════════════════════════════════════════════════════════════════
     // Lifecycle
     // ══════════════════════════════════════════════════════════════════════
@@ -168,6 +186,9 @@ class GatewayClient(
             if (started) return
             started = true
             reconnectAttempt = 0
+            // A fresh start (settings change / app restart) gets a fresh
+            // chance — maybe the server or the app got updated.
+            versionRejected = false
         }
         scheduler.execute { connect() }
     }
@@ -222,19 +243,29 @@ class GatewayClient(
         })
     }
 
+    /** Outcome of [sendImage] — mirrors ServerVoicePipeline.SubmitResult. */
+    enum class ImageSendResult { SENT, TOO_LARGE, OFFLINE }
+
     /**
      * User-initiated image share (enters the conversation as a user turn).
-     * Never queued — returns false when offline so the caller can tell the
-     * user instead of silently holding megabytes.
+     * Never queued — returns [ImageSendResult.OFFLINE] when disconnected so
+     * the caller can tell the user instead of silently holding megabytes.
+     * Payloads over [MAX_IMAGE_BASE64_BYTES] are dropped pre-send
+     * ([ImageSendResult.TOO_LARGE]) — the server rejects them with
+     * `bad_message` anyway.
      */
-    fun sendImage(format: String, base64Data: String, kind: String, caption: String?): Boolean {
+    fun sendImage(format: String, base64Data: String, kind: String, caption: String?): ImageSendResult {
+        if (base64Data.length > MAX_IMAGE_BASE64_BYTES) {
+            DebugLog.log(TAG, "Image over the 8MB base64 cap (${base64Data.length} bytes) — dropped")
+            return ImageSendResult.TOO_LARGE
+        }
         val msg = envelope("image") {
             put("kind", kind)
             put("format", format)
             put("data", base64Data)
             if (!caption.isNullOrBlank()) put("caption", caption)
         }
-        return sendIfReady(msg)
+        return if (sendIfReady(msg)) ImageSendResult.SENT else ImageSendResult.OFFLINE
     }
 
     /**
@@ -289,7 +320,7 @@ class GatewayClient(
         val url = normalizeBaseUrl(base) + "/ws"
 
         synchronized(lock) {
-            if (!started || webSocket != null) return
+            if (!started || versionRejected || webSocket != null) return
         }
 
         val request = try {
@@ -347,7 +378,7 @@ class GatewayClient(
             webSocket = null
             pingTask?.cancel(false)
             pingTask = null
-            if (started) scheduleReconnectLocked()
+            if (started && !versionRejected) scheduleReconnectLocked()
         }
         if (wasReady) dispatch { it.onDisconnected() }
     }
@@ -422,8 +453,25 @@ class GatewayClient(
                 it.onSession(msg.str("event") ?: "", msg["data"] as? JsonObject)
             }
             "error" -> {
-                DebugLog.log(TAG, "Server error ${msg.str("code")}: ${msg.str("message")}")
-                dispatch { it.onServerError(msg.str("code") ?: "internal", msg.str("message"), msg.str("re")) }
+                val code = msg.str("code") ?: "internal"
+                if (code == "version") {
+                    // Terminal (§10): the server refuses protocol v$PROTOCOL_VERSION.
+                    // Reconnecting would just replay the same rejection forever —
+                    // stop until settings change or the app restarts.
+                    DebugLog.log(
+                        TAG,
+                        "PROTOCOL VERSION REJECTED by server (we speak v$PROTOCOL_VERSION): " +
+                            "${msg.str("message")} — staying offline until settings change or app restart"
+                    )
+                    synchronized(lock) {
+                        versionRejected = true
+                        reconnectTask?.cancel(false)
+                        reconnectTask = null
+                    }
+                } else {
+                    DebugLog.log(TAG, "Server error $code: ${msg.str("message")}")
+                }
+                dispatch { it.onServerError(code, msg.str("message"), msg.str("re")) }
             }
             "cap_request" -> {
                 val id = msg.str("id") ?: return

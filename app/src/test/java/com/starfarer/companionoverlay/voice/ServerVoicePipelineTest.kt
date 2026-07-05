@@ -89,10 +89,18 @@ class ServerVoicePipelineTest {
 
     @Test
     fun `utterances over the 10MB base64 cap are dropped, not sent`() {
-        // 8MB of PCM → ~10.7MB of base64 — over the protocol cap.
+        // 8MiB of PCM → ~11.2MB of base64 — over the protocol cap.
         val p = pipeline()
         assertEquals(ServerVoicePipeline.SubmitResult.TOO_LARGE, p.submitUtterance(ByteArray(8 * 1024 * 1024)))
         assertTrue(transport.sent.isEmpty())
+    }
+
+    @Test
+    fun `audio cap matches the server's exact limit`() {
+        // The server caps base64 audio at 10_000_000 bytes — not 10 MiB.
+        // A payload between the two would be sent client-side but rejected
+        // server-side if this constant drifted.
+        assertEquals(10_000_000, ServerVoicePipeline.MAX_BASE64_BYTES)
     }
 
     @Test
