@@ -25,8 +25,8 @@ class SettingsRepositoryTest {
     private val mockPreset = CharacterPreset(
         id = "test",
         name = "Test",
-        systemPrompt = "Test system prompt",
-        userMessage = "Test user message"
+        idleSpriteUri = "content://sprites/test-idle",
+        idleFrameCount = 8
     )
 
     @Before
@@ -129,13 +129,9 @@ class SettingsRepositoryTest {
     }
 
     @Test
-    fun `system prompt delegates to preset provider`() {
-        assertEquals("Test system prompt", repository.systemPrompt)
-    }
-
-    @Test
-    fun `user message delegates to preset provider`() {
-        assertEquals("Test user message", repository.userMessage)
+    fun `sprite appearance fields delegate to preset provider`() {
+        assertEquals("content://sprites/test-idle", repository.idleSpriteUri)
+        assertEquals(8, repository.idleFrameCount)
     }
 
     @Test

@@ -25,7 +25,6 @@ import com.starfarer.companionoverlay.ui.PresetDialogHelper
 import com.starfarer.companionoverlay.ui.PresetPagerAdapter
 import com.starfarer.companionoverlay.ui.SpritePickerHelper
 import com.starfarer.companionoverlay.ui.SpritePreviewAnimator
-import com.starfarer.companionoverlay.ui.TextEditorBottomSheet
 import com.starfarer.companionoverlay.viewmodel.MainViewModel
 import kotlinx.coroutines.launch
 import org.koin.android.ext.android.inject
@@ -35,7 +34,8 @@ import org.koin.androidx.viewmodel.ext.android.viewModel
  * Main launcher activity.
  *
  * Provides:
- * - Character preset carousel with swipe navigation
+ * - Character appearance preset carousel with swipe navigation (sprites and
+ *   frame counts only — persona lives server-side in Nexus)
  * - Nexus gateway status (server configured or not)
  * - Overlay service control
  * - Navigation to settings
@@ -72,8 +72,6 @@ class MainActivity : AppCompatActivity() {
     private val presetName get() = binding.presetName
     private val presetPager get() = binding.presetPager
     private val pageIndicatorContainer get() = binding.pageIndicatorContainer
-    private val systemPromptPreview get() = binding.systemPromptPreview
-    private val userMessagePreview get() = binding.userMessagePreview
     private val statusText get() = binding.statusText
     private val toggleButton get() = binding.toggleButton
 
@@ -88,7 +86,6 @@ class MainActivity : AppCompatActivity() {
     // it before the picker left the preset re-sliced for a sprite the user then
     // cancelled. Survives process death via instance state.
     private var pendingFrameCount: Int = 0
-    private var lastDisplayedPresetId: String? = null
 
     private val spritePickerLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocument()
@@ -101,8 +98,6 @@ class MainActivity : AppCompatActivity() {
     ) { settings.tutorialSeen = true }
 
     companion object {
-        private const val RK_SYSTEM_PROMPT = "edit_system_prompt"
-        private const val RK_USER_MESSAGE = "edit_user_message"
         private const val KEY_PENDING_SPRITE_TYPE = "pending_sprite_type"
         private const val KEY_PENDING_FRAME_COUNT = "pending_frame_count"
     }
@@ -147,7 +142,6 @@ class MainActivity : AppCompatActivity() {
         presetDialogHelper = PresetDialogHelper(this)
         spritePickerHelper = SpritePickerHelper(this)
 
-        registerTextEditorListeners()
         setupPagerAdapter()
         setupClickListeners()
         observeState()
@@ -163,22 +157,6 @@ class MainActivity : AppCompatActivity() {
         super.onSaveInstanceState(outState)
         outState.putString(KEY_PENDING_SPRITE_TYPE, pendingSpriteType)
         outState.putInt(KEY_PENDING_FRAME_COUNT, pendingFrameCount)
-    }
-
-    /**
-     * Registered once here (not per-dialog) with the Activity as the result
-     * lifecycle owner, and one key per field. A rotation no longer drops the
-     * save or delivers a buffered edit into the wrong field.
-     */
-    private fun registerTextEditorListeners() {
-        supportFragmentManager.setFragmentResultListener(RK_SYSTEM_PROMPT, this) { _, bundle ->
-            val text = bundle.getString(TextEditorBottomSheet.RESULT_TEXT) ?: return@setFragmentResultListener
-            viewModel.updateActivePreset { it.copy(systemPrompt = text) }
-        }
-        supportFragmentManager.setFragmentResultListener(RK_USER_MESSAGE, this) { _, bundle ->
-            val text = bundle.getString(TextEditorBottomSheet.RESULT_TEXT) ?: return@setFragmentResultListener
-            viewModel.updateActivePreset { it.copy(userMessage = text) }
-        }
     }
 
     override fun onResume() {
@@ -247,26 +225,6 @@ class MainActivity : AppCompatActivity() {
 
         binding.presetHeader.setOnClickListener { showPresetList() }
 
-        binding.systemPromptCard.setOnClickListener {
-            val preset = viewModel.state.value.activePreset ?: return@setOnClickListener
-            SettingsDialogs.showTextEditor(this,
-                title = getString(R.string.main_system_prompt_title),
-                currentText = preset.systemPrompt,
-                defaultText = PromptSettings.DEFAULT_SYSTEM_PROMPT,
-                requestKey = RK_SYSTEM_PROMPT
-            )
-        }
-
-        binding.userMessageCard.setOnClickListener {
-            val preset = viewModel.state.value.activePreset ?: return@setOnClickListener
-            SettingsDialogs.showTextEditor(this,
-                title = getString(R.string.main_user_message_title),
-                currentText = preset.userMessage,
-                defaultText = PromptSettings.DEFAULT_USER_MESSAGE,
-                requestKey = RK_USER_MESSAGE
-            )
-        }
-
         authButton.setOnClickListener { openGatewaySettings() }
 
         toggleButton.setOnClickListener {
@@ -282,25 +240,7 @@ class MainActivity : AppCompatActivity() {
     private fun updatePresetDisplay(state: MainViewModel.UiState) {
         val preset = state.activePreset ?: return
 
-        val presetChanged = lastDisplayedPresetId != null && lastDisplayedPresetId != preset.id
-        lastDisplayedPresetId = preset.id
-
         presetName.text = preset.name
-
-        if (presetChanged) {
-            val duration = 200L
-            systemPromptPreview.animate().alpha(0f).setDuration(duration).withEndAction {
-                systemPromptPreview.text = preset.systemPrompt.take(200)
-                systemPromptPreview.animate().alpha(1f).setDuration(duration).start()
-            }.start()
-            userMessagePreview.animate().alpha(0f).setDuration(duration).withEndAction {
-                userMessagePreview.text = preset.userMessage.take(150)
-                userMessagePreview.animate().alpha(1f).setDuration(duration).start()
-            }.start()
-        } else {
-            systemPromptPreview.text = preset.systemPrompt.take(200)
-            userMessagePreview.text = preset.userMessage.take(150)
-        }
 
         if (pagerAdapter.itemCount != state.presets.size) {
             pagerAdapter.submitList(state.presets)
