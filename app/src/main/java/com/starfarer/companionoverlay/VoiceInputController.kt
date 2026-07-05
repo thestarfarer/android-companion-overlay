@@ -1,33 +1,55 @@
 package com.starfarer.companionoverlay
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.os.Handler
 import android.os.Looper
+import androidx.core.content.ContextCompat
+import com.starfarer.companionoverlay.gateway.GatewayClient
 import com.starfarer.companionoverlay.repository.SettingsRepository
+import com.starfarer.companionoverlay.voice.ServerVoicePipeline
+import com.starfarer.companionoverlay.voice.UtteranceSource
+import com.starfarer.companionoverlay.voice.VadUtteranceSource
+import java.util.concurrent.Executor
 
 /**
- * Orchestrates voice input: button press → listen → transcribe → gateway → done.
+ * Orchestrates voice input: button press → listen → utterance → gateway → done.
  *
  * The state machine:
  *   IDLE → LISTENING       (button press)
- *   LISTENING → PROCESSING (speech recognized, shipped to the gateway)
+ *   LISTENING → PROCESSING (utterance captured and shipped to the gateway)
  *   LISTENING → IDLE       (button press to cancel, silence timeout, or error)
  *   PROCESSING → IDLE      (assistant replied)
  *
  * Every recording starts with a deliberate button press. Nothing auto-restarts.
  * The mic is either on because you asked for it, or it's off.
  *
- * STT is the on-device [SpeechRecognitionManager]. Per the presence protocol
- * this is the fallback/primary-until-the-server-grows-an-audio-backend path:
- * the transcript is sent as `text` with `source: "voice"`. When Nexus gains
- * server-side transcription, VAD-cut utterances will ship as `audio` frames
- * instead and this controller swaps its engine without changing shape.
+ * Two engines behind one state machine (presence protocol §3):
+ *
+ * - **Server path (primary)**: mic → [VadUtteranceSource] (Silero VAD cuts
+ *   utterances) → [ServerVoicePipeline] encodes each as WAV and ships it as
+ *   an `audio` message; Nexus transcribes and replies. The transcript comes
+ *   back via [onServerTranscript].
+ * - **Local path (fallback)**: on-device [SpeechRecognitionManager] → `text`
+ *   with `source: "voice"`.
+ *
+ * Path choice per session via the voiceMode setting ("auto" | "server" |
+ * "local"): auto prefers the server while connected, and drops to local for
+ * the rest of the session when the server answers an audio message with
+ * `unsupported`/`internal` or goes silent for 30s ([ServerVoicePipeline]
+ * tracks that). The failed utterance's audio cannot be re-fed into Android's
+ * live SpeechRecognizer, so that one utterance is lost — accepted; the
+ * fallback applies from the next press. A fresh `welcome` re-arms the server
+ * path ([onGatewayConnected]).
  */
 class VoiceInputController(
     private val context: Context,
     private val host: VoiceInputHost,
     private val settings: SettingsRepository,
-    private val beepManager: BeepManager
+    private val beepManager: BeepManager,
+    private val gateway: GatewayClient,
+    utteranceSourceFactory: (Context) -> UtteranceSource = { VadUtteranceSource(it) },
 ) {
 
     companion object {
@@ -50,9 +72,64 @@ class VoiceInputController(
     private var speechManager: SpeechRecognitionManager? = null
     private val btRouter = BluetoothAudioRouter(context)
 
+    private val sourceFactory = utteranceSourceFactory
+    private var utteranceSource: UtteranceSource? = null
+
+    // One-time-per-connection hint when the server voice path breaks.
+    private var fallbackHintShown = false
+
     private var safetyTimeoutRunnable: Runnable? = null
 
     private val beepsEnabled: Boolean get() = settings.beepsEnabled
+
+    // ══════════════════════════════════════════════════════════════════════
+    // Server voice pipeline (pure-JVM logic; this class is the Android glue)
+    // ══════════════════════════════════════════════════════════════════════
+
+    private val serverPipeline = ServerVoicePipeline(
+        transport = object : ServerVoicePipeline.Transport {
+            override fun sendAudio(format: String, base64Data: String, durationMs: Long): String? =
+                gateway.sendAudio(format, base64Data, durationMs)
+        },
+        listener = object : ServerVoicePipeline.Listener {
+            override fun onTranscribed(text: String) {
+                if (state != State.PROCESSING) return
+                DebugLog.log(TAG, "Server heard: ${text.take(80)}")
+                // Render what was heard where the user's own words show up;
+                // the turn replies (status/message/speak) follow on their own.
+                host.showBriefBubble(context.getString(R.string.svc_bubble_heard, text), 5000L)
+            }
+
+            override fun onEmptyTranscript() {
+                if (state != State.PROCESSING) return
+                DebugLog.log(TAG, "Server heard nothing — no turn follows")
+                cancelSafetyTimeout()
+                state = State.IDLE
+                host.hideVoiceBubble()
+                host.clearPendingScreenshot()
+                host.showBriefBubble(context.getString(R.string.svc_bubble_didnt_catch))
+            }
+
+            override fun onServerPathFailed(reason: String) {
+                // The utterance's audio can't be replayed into Android's live
+                // SpeechRecognizer — it is lost. Local STT takes over from the
+                // next press; the next welcome re-arms the server path.
+                DebugLog.log(TAG, "Server voice path failed ($reason) — local STT from next utterance")
+                if (state == State.PROCESSING) {
+                    cancelSafetyTimeout()
+                    if (beepsEnabled) beepManager.play(BeepManager.Beep.ERROR)
+                    state = State.IDLE
+                    host.hideVoiceBubble()
+                    host.clearPendingScreenshot()
+                }
+                if (!fallbackHintShown) {
+                    fallbackHintShown = true
+                    host.showBriefBubble(context.getString(R.string.svc_bubble_voice_fallback), 4000L)
+                }
+            }
+        },
+        callbackExecutor = Executor { handler.post(it) },
+    )
 
     // ══════════════════════════════════════════════════════════════════════
     // Public API
@@ -91,10 +168,32 @@ class VoiceInputController(
         }
     }
 
+    /** Gateway `transcript` frame (main thread) — routed to the server pipeline. */
+    fun onServerTranscript(re: String?, text: String) {
+        serverPipeline.handleTranscript(re, text)
+    }
+
+    /**
+     * Gateway `error` frame. @return true when it was consumed by the voice
+     * pipeline (fallback engaged and rendered here) — the host should skip
+     * its generic error UI in that case.
+     */
+    fun onGatewayError(code: String, re: String?): Boolean =
+        serverPipeline.handleServerError(code, re)
+
+    /** Fresh `welcome` — retry the server voice path on this connection. */
+    fun onGatewayConnected() {
+        serverPipeline.resetFallback()
+        fallbackHintShown = false
+    }
+
     fun destroy() {
         cancelSafetyTimeout()
         speechManager?.destroy()
         speechManager = null
+        serverPipeline.shutdown()
+        utteranceSource?.release()
+        utteranceSource = null
         btRouter.clearRouting()
         state = State.IDLE
     }
@@ -110,6 +209,9 @@ class VoiceInputController(
         cancelSafetyTimeout()
         host.stopTtsAndCancel()
         speechManager?.cancel()
+        // A transcript for the interrupted utterance must not render into the
+        // new session.
+        serverPipeline.cancelPending()
         state = State.IDLE
         host.hideVoiceBubble()
         startListening()
@@ -123,13 +225,35 @@ class VoiceInputController(
         val routed = btRouter.routeToBluetoothHeadset()
         DebugLog.log(TAG, "BT audio routing: ${if (routed) "active" else "using built-in mic"}")
 
-        startOnDeviceListening()
-        DebugLog.log(TAG, "Listening started (on-device)")
+        if (useServerPath()) {
+            startServerListening()
+        } else {
+            startOnDeviceListening()
+            DebugLog.log(TAG, "Listening started (on-device)")
+        }
+    }
+
+    /**
+     * Which engine handles this session. A capture waiting to be captioned
+     * always uses local STT: the caption must be text client-side, and the
+     * protocol has no combined image+audio turn.
+     */
+    private fun useServerPath(): Boolean {
+        if (host.hasPendingScreenshot()) return false
+        return when (settings.voiceMode) {
+            SettingsRepository.VOICE_MODE_SERVER -> true
+            SettingsRepository.VOICE_MODE_LOCAL -> false
+            // auto: server while connected and not in session-fallback. While
+            // offline, local STT is the natural fallback — its `text` output
+            // queues for reconnect, whereas `audio` frames never queue.
+            else -> gateway.isConnected && !serverPipeline.fallbackActive
+        }
     }
 
     private fun cancelListening() {
         DebugLog.log(TAG, "Cancelling listening")
         speechManager?.cancel()
+        utteranceSource?.stop()
         state = State.IDLE
         btRouter.clearRouting()
         host.hideVoiceBubble()
@@ -137,7 +261,91 @@ class VoiceInputController(
     }
 
     // ══════════════════════════════════════════════════════════════════════
-    // Recognition Setup
+    // Server path (VAD → audio message)
+    // ══════════════════════════════════════════════════════════════════════
+
+    private fun startServerListening() {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            state = State.IDLE
+            btRouter.clearRouting()
+            host.showBriefBubble(context.getString(R.string.settings_voice_needs_mic))
+            return
+        }
+        val source = utteranceSource ?: sourceFactory(context).also { utteranceSource = it }
+        host.showVoiceBubble(context.getString(R.string.status_listening))
+        if (beepsEnabled) beepManager.play(BeepManager.Beep.READY)
+        source.start(utteranceCallback, settings.silenceTimeoutMs)
+        DebugLog.log(TAG, "Listening started (server VAD path)")
+    }
+
+    private val utteranceCallback = object : UtteranceSource.Callback {
+        // All handlers are gated on LISTENING — a capture-thread callback that
+        // lands after cancel/timeout must not touch the next session's state.
+
+        override fun onUtterance(pcm16k: ByteArray) {
+            handler.post {
+                if (state != State.LISTENING) return@post
+                when (serverPipeline.submitUtterance(pcm16k)) {
+                    ServerVoicePipeline.SubmitResult.SENT -> {
+                        // Push-to-talk parity with the local path: one utterance
+                        // per press, then wait for the reply.
+                        utteranceSource?.stop()
+                        state = State.PROCESSING
+                        host.hideVoiceBubble()
+                        startSafetyTimeout()
+                        host.onVoiceAudioSent()
+                        btRouter.clearRouting()
+                    }
+                    ServerVoicePipeline.SubmitResult.TOO_SHORT -> {
+                        // VAD blip — keep listening for real speech.
+                    }
+                    ServerVoicePipeline.SubmitResult.OFFLINE,
+                    ServerVoicePipeline.SubmitResult.TOO_LARGE -> {
+                        // Audio is never queued offline (protocol §1) — drop
+                        // with a hint, like images.
+                        utteranceSource?.stop()
+                        if (beepsEnabled) beepManager.play(BeepManager.Beep.ERROR)
+                        state = State.IDLE
+                        btRouter.clearRouting()
+                        host.hideVoiceBubble()
+                        host.clearPendingScreenshot()
+                        host.showBriefBubble(context.getString(R.string.svc_bubble_offline_audio), 4000L)
+                    }
+                }
+            }
+        }
+
+        override fun onNoSpeech() {
+            handler.post {
+                if (state != State.LISTENING) return@post
+                DebugLog.log(TAG, "No speech detected (VAD) → IDLE")
+                utteranceSource?.stop()
+                state = State.IDLE
+                btRouter.clearRouting()
+                host.hideVoiceBubble()
+                host.clearPendingScreenshot()
+            }
+        }
+
+        override fun onError(message: String) {
+            handler.post {
+                if (state != State.LISTENING) return@post
+                DebugLog.log(TAG, "VAD capture error: $message")
+                utteranceSource?.stop()
+                if (beepsEnabled) beepManager.play(BeepManager.Beep.ERROR)
+                state = State.IDLE
+                btRouter.clearRouting()
+                host.hideVoiceBubble()
+                host.clearPendingScreenshot()
+                host.showBriefBubble(context.getString(R.string.status_couldnt_hear, message))
+            }
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // Local path (on-device SpeechRecognizer → text source:"voice")
     // ══════════════════════════════════════════════════════════════════════
 
     private fun wireCallbacks(mgr: SpeechRecognitionManager) {
@@ -217,6 +425,8 @@ class VoiceInputController(
                 DebugLog.log(TAG, "Safety timeout! Stuck in $state, forcing IDLE")
                 host.stopTtsAndCancel()
                 speechManager?.cancel()
+                utteranceSource?.stop()
+                serverPipeline.cancelPending()
                 state = State.IDLE
                 btRouter.clearRouting()
                 host.hideVoiceBubble()

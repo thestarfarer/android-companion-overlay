@@ -46,6 +46,16 @@ interface VoiceInputHost {
     /** Ship transcribed voice input to the Nexus gateway. */
     fun sendVoiceInput(text: String)
 
+    /**
+     * A voice utterance was shipped to the server as an `audio` message
+     * (server voice path). The transcript and turn replies follow via the
+     * gateway — the host should treat this like voice input in flight.
+     */
+    fun onVoiceAudioSent() {}
+
     /** Clear any pending screenshot that was waiting for voice input. */
     fun clearPendingScreenshot()
+
+    /** True while a capture is waiting to be captioned by voice input. */
+    fun hasPendingScreenshot(): Boolean = false
 }

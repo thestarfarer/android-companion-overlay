@@ -104,6 +104,10 @@
     <string name="svc_bubble_offline">📡 Lost Nexus... I\'m still here~</string>
     <string name="svc_bubble_offline_queued">📡 Offline — I\'ll send that when we reconnect~</string>
     <string name="svc_bubble_offline_image">📡 Offline — can\'t send pictures right now...</string>
+    <string name="svc_bubble_offline_audio">📡 Offline — can\'t send voice right now...</string>
+    <string name="svc_bubble_heard">🎙 “%1$s”</string>
+    <string name="svc_bubble_didnt_catch">Hmm? I didn\'t catch that~</string>
+    <string name="svc_bubble_voice_fallback">Nexus can\'t transcribe right now — switching to on-device recognition~</string>
 
     <!-- Assist + accessibility services -->
     <string name="assist_toast_overlay_permission_needed">Grant \'Display over other apps\' to use the companion~</string>
@@ -174,6 +178,7 @@
     <string name="pref_overlay_mode_summary">Choose between 2D sprite or 3D avatar</string>
     <string name="pref_capture_mode_title">Long-press capture</string>
     <string name="pref_cat_voice_input">Voice Input</string>
+    <string name="pref_voice_mode_title">Voice transcription</string>
     <string name="pref_silence_timeout_title">Silence timeout</string>
     <string name="pref_silence_timeout_summary">How long to wait after you stop talking before sending</string>
     <string name="pref_voice_screenshot_title">Screenshot with voice</string>

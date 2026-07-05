@@ -53,6 +53,16 @@
     <!-- ════════ VOICE INPUT ════════ -->
     <PreferenceCategory app:iconSpaceReserved="false" app:title="@string/pref_cat_voice_input">
 
+        <ListPreference
+            app:iconSpaceReserved="false"
+            app:key="voice_mode"
+            app:title="@string/pref_voice_mode_title"
+            app:summary="%s"
+            app:entries="@array/voice_mode_entries"
+            app:entryValues="@array/voice_mode_values"
+            app:defaultValue="auto"
+            app:persistent="true"/>
+
         <SeekBarPreference
             app:iconSpaceReserved="false"
             app:key="silence_timeout_seek"

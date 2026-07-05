@@ -149,6 +149,15 @@ open class SettingsRepository(
         get() = settingsPrefs.getLong(KEY_SILENCE_TIMEOUT, PromptSettings.DEFAULT_SILENCE_TIMEOUT_MS)
         set(value) = settingsPrefs.edit().putLong(KEY_SILENCE_TIMEOUT, value).apply()
 
+    /**
+     * Which engine transcribes voice (presence protocol §3):
+     * [VOICE_MODE_AUTO] — server path while connected, local STT as fallback;
+     * [VOICE_MODE_SERVER] / [VOICE_MODE_LOCAL] force one path.
+     */
+    var voiceMode: String
+        get() = settingsPrefs.getString(KEY_VOICE_MODE, VOICE_MODE_AUTO) ?: VOICE_MODE_AUTO
+        set(value) = settingsPrefs.edit().putString(KEY_VOICE_MODE, value).apply()
+
     // ══════════════════════════════════════════════════════════════════════
     // Avatar
     // ══════════════════════════════════════════════════════════════════════
@@ -223,6 +232,10 @@ open class SettingsRepository(
         get() = overlayMode == "godot_3d"
 
     companion object {
+        const val VOICE_MODE_AUTO = "auto"
+        const val VOICE_MODE_SERVER = "server"
+        const val VOICE_MODE_LOCAL = "local"
+
         private const val KEY_GATEWAY_URL = "gateway_url"
         private const val KEY_GATEWAY_TOKEN = "gateway_token"
         private const val KEY_DEVICE_ID = "gateway_device_id"
@@ -233,6 +246,7 @@ open class SettingsRepository(
         private const val KEY_TTS_SPEECH_RATE = "tts_speech_rate"
         private const val KEY_TTS_PITCH = "tts_pitch"
         private const val KEY_SILENCE_TIMEOUT = "silence_timeout_ms"
+        private const val KEY_VOICE_MODE = "voice_mode"
         private const val KEY_AVATAR_X = "avatar_x"
         private const val KEY_AVATAR_POSITION = "avatar_position"
         private const val KEY_AUTO_COPY = "auto_copy"

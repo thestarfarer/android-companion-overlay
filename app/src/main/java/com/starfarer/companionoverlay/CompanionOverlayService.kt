@@ -35,6 +35,7 @@ import com.starfarer.companionoverlay.gateway.AvatarRepository
 import com.starfarer.companionoverlay.gateway.GatewayClient
 import com.starfarer.companionoverlay.repository.CaptureMode
 import com.starfarer.companionoverlay.repository.SettingsRepository
+import com.starfarer.companionoverlay.voice.SpeakRouter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -54,7 +55,8 @@ import java.util.concurrent.atomic.AtomicInteger
  * A thin presence endpoint: rendering, voice capture, and device
  * capabilities live here; the brain lives server-side in Nexus. All
  * conversation flows through [GatewayClient] (presence protocol v1):
- * - user text / transcribed voice → `text`
+ * - user text / locally transcribed voice → `text`
+ * - VAD-cut voice utterances → `audio` (server transcribes → `transcript`)
  * - long-press captures → `image`
  * - taps and keyboard visibility → `event`
  * - inbound `message` → [BubbleManager], `speak` → local TTS,
@@ -310,7 +312,7 @@ class CompanionOverlayService : Service(), VoiceInputHost, GatewayClient.Listene
         radialMenuManager = RadialMenuManager(this, windowManager, settings)
 
         audioCoordinator.warmUp()
-        voiceController = VoiceInputController(this, this, settings, beepManager)
+        voiceController = VoiceInputController(this, this, settings, beepManager, gateway)
 
         managersInitialized = true
     }
@@ -731,6 +733,8 @@ class CompanionOverlayService : Service(), VoiceInputHost, GatewayClient.Listene
     override fun onConnected(welcome: GatewayClient.Welcome) {
         DebugLog.log("Overlay", "Gateway connected: session=${welcome.sessionId} resumed=${welcome.resumed}")
         offlineHintShown = false
+        // A fresh welcome re-arms the server voice path after a fallback episode.
+        voiceController.onGatewayConnected()
         sendDeviceStatus()
 
         // Avatar sync: welcome carries the mandated sprite version — on
@@ -776,19 +780,35 @@ class CompanionOverlayService : Service(), VoiceInputHost, GatewayClient.Listene
     }
 
     override fun onSpeak(text: String, audioFormat: String?, audioBase64: String?) {
-        if (destroyed || text.isBlank()) return
-        // Server-side TTS audio isn't built yet; when it lands, decode and play
-        // it here. Until then: local TTS when enabled, or when the user spoke
-        // (voice in → voice out, matching the old companion behavior).
+        if (destroyed) return
+        // Local TTS when enabled, or when the user spoke (voice in → voice
+        // out, matching the old companion behavior). Server-synthesized audio
+        // rides the same gate — it replaces the local engine, not the policy.
         val shouldSpeak = settings.ttsEnabled || pendingVoiceReply
         pendingVoiceReply = false
         if (!shouldSpeak) return
+
+        // speak.audio present → play the server's synthesis (text is display-
+        // only); absent/corrupt → the local TTS path, unchanged.
+        val route = SpeakRouter.route(text, audioFormat, audioBase64)
+        if (route == SpeakRouter.Route.None) return
 
         audioCoordinator.onSpeechComplete = {
             audioCoordinator.playBeep(BeepManager.Beep.DONE)
             audioCoordinator.onSpeechComplete = null
         }
-        audioCoordinator.speak(text)
+        when (route) {
+            is SpeakRouter.Route.ServerAudio -> audioCoordinator.playSpeakAudio(route.audio, route.mimeType)
+            is SpeakRouter.Route.LocalTts -> audioCoordinator.speak(route.text)
+            SpeakRouter.Route.None -> { /* unreachable — handled above */ }
+        }
+    }
+
+    override fun onTranscript(re: String?, text: String) {
+        if (destroyed) return
+        // The voice pipeline owns correlation with the in-flight audio
+        // message; it renders what was heard (or the "didn't catch that" hint).
+        voiceController.onServerTranscript(re, text)
     }
 
     override fun onCompanionStatus(state: String, detail: String?) {
@@ -820,6 +840,13 @@ class CompanionOverlayService : Service(), VoiceInputHost, GatewayClient.Listene
 
     override fun onServerError(code: String, message: String?, re: String?) {
         if (destroyed) return
+        // unsupported/internal on an in-flight audio message → the voice
+        // pipeline engages local-STT fallback and shows its own subtle hint;
+        // skip the generic error bubble for those.
+        if (voiceController.onGatewayError(code, re)) {
+            pendingVoiceReply = false
+            return
+        }
         DebugLog.log("Overlay", "Gateway error $code: $message")
         audioCoordinator.playBeep(BeepManager.Beep.ERROR)
         pendingVoiceReply = false
@@ -972,9 +999,18 @@ class CompanionOverlayService : Service(), VoiceInputHost, GatewayClient.Listene
         }
     }
 
+    /** A voice utterance went up as `audio` — the transcript and reply follow. */
+    override fun onVoiceAudioSent() {
+        pendingVoiceReply = true
+        audioCoordinator.playBeep(BeepManager.Beep.STEP)
+        bubbleManager.showBrief(getString(R.string.svc_bubble_thinking), 30000L)
+    }
+
     override fun clearPendingScreenshot() {
         pendingScreenshotBase64 = null
     }
+
+    override fun hasPendingScreenshot(): Boolean = pendingScreenshotBase64 != null
 
     // ══════════════════════════════════════════════════════════════════════
     // Internal helpers
