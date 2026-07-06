@@ -24,11 +24,21 @@ val appModule = module {
 
     // Shared OkHttpClient with sensible timeouts. The gateway WebSocket and
     // avatar downloads share this instance's connection pool and dispatcher.
+    //
+    // pingInterval is the WebSocket's liveness heartbeat: readTimeout does NOT
+    // apply to a socket after the WS upgrade, so without this a server that
+    // restarts (or a half-open connection a proxy/radio never cleanly closes)
+    // goes UNDETECTED — the app keeps believing it's connected, never re-hellos,
+    // and never picks up the restarted server's state until the app itself is
+    // restarted. With it, OkHttp sends WS pings and tears the socket down when a
+    // pong doesn't return, which fires onFailure → reconnect → fresh welcome →
+    // full re-sync. Ignored for the plain-HTTP avatar downloads on this client.
     single {
         OkHttpClient.Builder()
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
             .writeTimeout(60, TimeUnit.SECONDS)
+            .pingInterval(20, TimeUnit.SECONDS)
             .build()
     }
 
