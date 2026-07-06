@@ -458,7 +458,8 @@ class TutorialActivity : AppCompatActivity() {
     }
 
     /** Voice round-trip mirroring the live server path: listening → utterance
-     *  ships (STEP beep + thinking) → 🎙 transcript bubble → reply aloud. */
+     *  ships (STEP beep + thinking) → reply aloud. The server transcript is
+     *  log-only in the live app now, so the demo shows no 🎙 bubble either. */
     private fun runVoiceDemo() {
         bubbleManager.showVoice(listeningLabel())
         beep(BeepManager.Beep.READY)
@@ -468,12 +469,6 @@ class TutorialActivity : AppCompatActivity() {
             bubbleManager.hideVoice()
             beep(BeepManager.Beep.STEP)
             bubbleManager.showBrief(getString(R.string.svc_bubble_thinking), 30000L)
-        }
-        schedule(2000L) {
-            // Nexus echoes what it heard as a `transcript` — the 🎙 bubble.
-            bubbleManager.showBrief(
-                getString(R.string.svc_bubble_heard, getString(R.string.tutorial_canned_heard)), 5000L
-            )
         }
         // Reply is spoken aloud with NO bubble (onResponseReceived → hideSpeechBubble + speak).
         // Completion belongs to the triple-press, not the demo's end.

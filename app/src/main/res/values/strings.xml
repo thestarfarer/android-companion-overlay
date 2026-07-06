@@ -104,7 +104,6 @@
     <string name="svc_bubble_image_too_large">That picture\'s too big to send...</string>
     <string name="svc_bubble_version_mismatch">⚠️ Nexus protocol mismatch — update the app to reconnect</string>
     <string name="svc_bubble_offline_audio">📡 Offline — can\'t send voice right now...</string>
-    <string name="svc_bubble_heard">🎙 “%1$s”</string>
     <string name="svc_bubble_didnt_catch">Hmm? I didn\'t catch that~</string>
     <string name="svc_bubble_voice_fallback">Nexus can\'t transcribe right now — switching to on-device recognition~</string>
 
@@ -152,7 +151,6 @@
     <string name="tutorial_recall_placeholder">This is where my last reply would appear!</string>
     <string name="tutorial_canned_response">Ooh, a code editor~ Looks like you\'re deep in a Kotlin file. Want me to explain what\'s on screen, or just keep you company?</string>
     <string name="tutorial_canned_followup">Got it! That\'s exactly how a real reply works — I\'d read it and answer. Try the next gesture when you\'re ready. ✨</string>
-    <string name="tutorial_canned_heard">Senni, can you hear me?</string>
     <string name="tutorial_canned_voice_reply">You said that out loud and I heard you~ This very reply is my on-device voice — no internet required. Handy when you\'d rather talk than type.</string>
     <string name="tutorial_canned_search_reply">It\'s sunny and 72 degrees~ That came from a weather tool. In the real app I can call tools and search the web for you.</string>
     <string name="tutorial_senni_label" translatable="false">SENNI</string>

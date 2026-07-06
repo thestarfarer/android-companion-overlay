@@ -98,10 +98,12 @@ class VoiceInputController(
         listener = object : ServerVoicePipeline.Listener {
             override fun onTranscribed(text: String) {
                 if (state != State.PROCESSING) return
+                // Log-only: echoing the server transcript into the brief bubble
+                // was noise during a voiced turn (speak → "Thinking…" → voice,
+                // nothing else). The on-device STT path still renders live
+                // partials in the voice bubble — that one is deliberate and
+                // stays. Empty transcripts keep their "didn't catch that" hint.
                 DebugLog.log(TAG, "Server heard: ${text.take(80)}")
-                // Render what was heard where the user's own words show up;
-                // the turn replies (status/message/speak) follow on their own.
-                host.showBriefBubble(context.getString(R.string.svc_bubble_heard, text), 5000L)
             }
 
             override fun onEmptyTranscript() {
