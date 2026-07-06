@@ -855,6 +855,17 @@ class CompanionOverlayService : Service(), VoiceInputHost, GatewayClient.Listene
         val route = SpeakRouter.route(text, audioFormat, audioBase64)
         if (route == SpeakRouter.Route.None) return
 
+        // Voice is now committed for this reply — this is the AUTHORITATIVE
+        // "voiced → no bubble" point. The `speak` frame always trails `message`
+        // (synthesis runs after the text is delivered), so onMessage decided
+        // bubble visibility ~seconds ago on a flag this handler consumes; if it
+        // guessed wrong (an un-mute in the gap, a reconnect refetch, a stale
+        // pendingVoiceReply), the bubble is still up. Tear it down now: a voiced
+        // reply is the audio, not text. onMessage's pre-emptive hide is a
+        // best-effort head start; this is the guarantee.
+        bubbleManager.cancelPendingDismiss()
+        bubbleManager.hideSpeechBubble()
+
         audioCoordinator.onSpeechComplete = {
             audioCoordinator.playBeep(BeepManager.Beep.DONE)
             audioCoordinator.onSpeechComplete = null
